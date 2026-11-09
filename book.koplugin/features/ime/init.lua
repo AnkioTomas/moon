@@ -16,6 +16,7 @@ local Settings = require("utils.settings")
 local Registry = require("features.ime.registry")
 local Platform = require("features.ime.platform")
 local Backend = require("features.ime.backend")
+local Field = require("features.ime.field")
 local _ = require("gettext")
 require("l10n").apply()
 
@@ -44,32 +45,41 @@ local function legacyBuiltin()
     return legacy.enabled == false or nil
 end
 
---- 读存储值并在必要时做一次性迁移；返回 nil 表示走平台默认。
----@return string|nil
-local function storedMode()
-    local settings = imeSettings()
-    if settings[MODE_KEY] ~= nil then
-        return settings[MODE_KEY]
-    end
-    if legacyBuiltin() then
-        settings[MODE_KEY] = "builtin"
-        Settings.save("features.ime", settings)
-        return "builtin"
-    end
-    return nil
+---@return "system"|"builtin"
+local function platformDefault()
+    return Platform.defaultMode(Platform.current())
 end
 
---- 有效输入方式：墨水屏无条件 builtin，否则显式选择优先，最后按平台默认。
+--- 首次迁移的解析值：旧开关显式关闭 → builtin；墨水屏强制 builtin；其余按平台默认。
 ---@return "system"|"builtin"
-function IME.inputMode()
-    local stored = storedMode()
-    if Platform.isEink() then
-        return "builtin"
-    end
+local function resolveMode()
+    if legacyBuiltin() then return "builtin" end
+    if Platform.isEinkCurrent() then return "builtin" end
+    return platformDefault()
+end
+
+--- 读存储值；nil / 无效值只在第一次解析并写回 `input_mode`，之后旧键不再参与。
+---@return "system"|"builtin"
+local function storedMode()
+    local settings = imeSettings()
+    local stored = settings[MODE_KEY]
     if MODES[stored] then
         return stored
     end
-    return Platform.defaultMode(Platform.current())
+    local resolved = resolveMode()
+    settings[MODE_KEY] = resolved
+    Settings.save("features.ime", settings)
+    return resolved
+end
+
+--- 有效输入方式：墨水屏无条件 builtin，否则用已迁移的显式选择。
+---@return "system"|"builtin"
+function IME.inputMode()
+    local stored = storedMode()
+    if Platform.isEinkCurrent() then
+        return "builtin"
+    end
+    return stored
 end
 
 --- 写用户选择并立即应用；墨水屏仍会被 inputMode() 强制为 builtin。
@@ -240,29 +250,27 @@ local routing_hooked = false
 local orig_show, orig_hide
 local shown_backend
 
---- system 模式仍要使用内置键盘的字段。
----@param inputbox table|nil
----@return boolean
-local function usesBuiltinForField(inputbox)
-    if not inputbox then return false end
-    if inputbox.input_type == "number" then return true end
-    if inputbox.text_type == "password" then return true end
-    if inputbox.is_password_type == true then return true end
-    return inputbox.readonly == true
-end
-
 --- 本次 showKeyboard 是否交给系统后端。
 ---@param vk table|nil
 ---@return boolean
 local function useSystemBackend(vk)
     if IME.inputMode() ~= "system" then return false end
-    if usesBuiltinForField(vk and vk.inputbox) then return false end
+    if Field.usesBuiltin(vk and vk.inputbox) then return false end
     return IME.backend().available()
 end
 
 --- 包装 VirtualKeyboard.showKeyboard：system 模式交给后端且不显示 VK，
 --- 其余情况（builtin / 字段例外 / 后端不可用）走原生 VK。
 local function wrappedShowKeyboard(self, ...)
+    local inputbox = self and self.inputbox
+    -- 只读字段本来就没有键盘：两个后端都不弹；顺手收起之前残留的 VK。
+    if Field.isReadonly(inputbox) then
+        shown_backend = nil
+        if type(self.isVisible) == "function" and self:isVisible() then
+            pcall(orig_hide, self)
+        end
+        return
+    end
     if useSystemBackend(self) then
         local backend = IME.backend()
         -- 从 builtin 切过来时旧 VK 可能还开着：先收掉，保证系统模式下不残留。

@@ -104,9 +104,9 @@ function Platform.backend(platform)
     return nil
 end
 
---- 读真实 Device；离线测试 / 无 device 模块时视为非墨水屏桌面。
+--- 读真实 Device；离线测试 / 无 device 模块时返回 nil。
 ---@return table|nil
-local function currentDevice()
+function Platform.currentDevice()
     local ok, device = pcall(require, "device")
     if ok and type(device) == "table" then
         return device
@@ -116,12 +116,12 @@ end
 
 ---@return string
 function Platform.current()
-    return Platform.detect(currentDevice(), os)
+    return Platform.detect(Platform.currentDevice(), os)
 end
 
 ---@return boolean
 function Platform.isEinkCurrent()
-    return Platform.isEink(currentDevice())
+    return Platform.isEink(Platform.currentDevice())
 end
 
 return Platform

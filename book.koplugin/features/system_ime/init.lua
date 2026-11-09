@@ -6,7 +6,8 @@
 
   available(), show(vk), hide(vk), status(), onCreate(plugin)
 
-- `show` 无法接管时返回 `false`（不抛错、不回 nil），让路由器当场回退原生 VK。
+- `show` 接管失败时自己排延迟回退内置键盘并返回 `true`（已处理），避免路由器
+  同步弹 VK 后与系统键盘同现；字段例外 / 非 Android 才返回 `false`。
 - 上屏文字直写 `inputbox:addChars/delChar/setText`，不走 `vk:addChar/delChar`，
   避免被内置拼音候选栏拦截。
 - 键盘高度文件 `0` 视为系统键盘已收起：清活动状态并调 `parent:onKeyboardClosed()`。
@@ -21,6 +22,7 @@
 
 local Settings = require("utils.settings")
 local Snapshot = require("features.system_ime.snapshot")
+local Field = require("features.ime.field")
 local UIManager = require("ui/uimanager")
 require("l10n").apply()
 local _ = require("gettext")
@@ -88,12 +90,7 @@ end
 ---@param inputbox table|nil
 ---@return boolean
 local function usesBuiltinForField(inputbox)
-    if type(inputbox) ~= "table" then return false end
-    if inputbox.input_type == "number" then return true end
-    if inputbox.text_type == "password" then return true end
-    if inputbox.is_password_type == true then return true end
-    if inputbox.readonly == true then return true end
-    return false
+    return Field.usesBuiltin(inputbox) or Field.isReadonly(inputbox)
 end
 
 --- 当前编辑器文本与 UTF-16 光标（Java 侧选区下标）。
@@ -184,8 +181,8 @@ function M.collapse(vk)
 end
 
 --- 回退序列：先隐藏系统键盘，再在 150–200ms 后补一次内置键盘。
---- 路由器在 show 返回 false 时会同步显示内置 VK；延迟回调发现已可见就跳过，
---- 因此只在后端被直连调用时承担「延迟显示」。
+--- `show()` 回 true 表示后端已经接管这次显示（路由不再同步弹 VK），延迟回调
+--- 就负责真正显示内置键盘；发现 VK 已被其它路径显示时跳过，避免重复。
 ---@param vk table|nil
 ---@param reason any
 ---@param show_builtin fun(vk: table|nil)|nil
@@ -279,7 +276,7 @@ function M.poll()
     local text, cursor = editorState(vk)
     if text ~= state.last_text or cursor ~= state.last_cursor then
         state.last_text, state.last_cursor = text, cursor
-        pcall(engine.sync, text, cursor, cursor)
+        pcall(engine.sync, text, cursor)
     end
 
     if state.kb_active then schedulePoll() end
@@ -301,7 +298,8 @@ function M.status()
     return "not_ready"
 end
 
---- 接管一次键盘显示；无法接管返回 false，由路由器回退原生 VK。
+--- 接管一次键盘显示。返回 true 表示已处理（含「延迟回退内置键盘」）；
+--- 只有字段例外 / 非 Android 等需要路由器当场走原生 VK 时才返回 false。
 ---@param vk table|nil
 ---@return boolean
 function M.show(vk)
@@ -315,14 +313,14 @@ function M.show(vk)
     local engine = ensureEngine()
     if not engine then
         M.fallback(vk, state.error or "not ready")
-        return false
+        return true
     end
 
     local text, cursor = editorState(vk)
     if state.kb_active and state.active_vk == vk then
         state.last_text, state.last_cursor = text, cursor
         vk.visible = true
-        pcall(engine.sync, text, cursor, cursor)
+        pcall(engine.sync, text, cursor)
         return true
     end
 
@@ -343,10 +341,10 @@ function M.show(vk)
     end
 
     pcall(engine.clear)
-    local ok, err = pcall(engine.show, text, cursor, cursor)
+    local ok, err = pcall(engine.show, text, cursor)
     if not ok then
         M.fallback(vk, err)
-        return false
+        return true
     end
     setStatus("ready")
     schedulePoll()
@@ -365,7 +363,7 @@ function M.reset()
     if type(vk) == "table" then
         local text, cursor = editorState(vk)
         state.last_text, state.last_cursor = text, cursor
-        pcall(engine.sync, text, cursor, cursor)
+        pcall(engine.sync, text, cursor)
     end
     return true
 end

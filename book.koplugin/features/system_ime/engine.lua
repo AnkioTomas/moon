@@ -120,7 +120,10 @@ local function makeEngine(android, dex_class, ext_dir)
 
     local function jstr(env, s) return env[0].NewStringUTF(env, s or "") end
 
-    local function show(text, sel_start, sel_end)
+    --- 打开系统键盘；JNI 构造器要 begin / end 两个下标，这里都用光标。
+    ---@param text string
+    ---@param cursor integer
+    local function show(text, cursor)
         android.jni:context(jvm, function(jni)
             local env = jni.env
             local svc = jstr(env, "input_method")
@@ -135,7 +138,7 @@ local function makeEngine(android, dex_class, ext_dir)
             local ctor = env[0].GetMethodID(env, dex_class, "<init>",
                 "(Landroid/view/inputmethod/InputMethodManager;Landroid/app/Activity;Ljava/io/File;Ljava/lang/String;II)V")
             local shower = env[0].NewObject(env, dex_class, ctor, imm, act, ext_file, editor_text,
-                ffi.cast("jint", sel_start or 0), ffi.cast("jint", sel_end or sel_start or 0))
+                ffi.cast("jint", cursor or 0), ffi.cast("jint", cursor or 0))
             local run_mid = env[0].GetMethodID(env, env[0].GetObjectClass(env, act),
                 "runOnUiThread", "(Ljava/lang/Runnable;)V")
             env[0].CallVoidMethod(env, act, run_mid, shower)
@@ -147,14 +150,17 @@ local function makeEngine(android, dex_class, ext_dir)
         end)
     end
 
-    local function sync(text, sel_start, sel_end)
+    --- 同步编辑器全文与光标（begin / end 都用同一光标）。
+    ---@param text string
+    ---@param cursor integer
+    local function sync(text, cursor)
         android.jni:context(jvm, function(jni)
             local env = jni.env
             local editor_text = jstr(env, text or "")
             local update = env[0].GetStaticMethodID(env, dex_class, "updateState",
                 "(Ljava/lang/String;II)V")
             env[0].CallStaticVoidMethod(env, dex_class, update, editor_text,
-                ffi.cast("jint", sel_start or 0), ffi.cast("jint", sel_end or sel_start or 0))
+                ffi.cast("jint", cursor or 0), ffi.cast("jint", cursor or 0))
             env[0].DeleteLocalRef(env, editor_text)
         end)
     end

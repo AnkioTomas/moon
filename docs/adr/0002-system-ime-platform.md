@@ -37,13 +37,14 @@ moon 仍然弹自绘键盘；旧的「输入法」和「系统输入法」还是
   记录在 `upstream.md` 和 `THIRD_PARTY.txt`；本地未改源码。
 - `classes.dex` 二进制**不进 git**（`.gitignore` 忽略），仓库只提交
   `classes.dex.sha256`：`6129e4f3acde998617224e9291690b151e1aeffdf4960087fb45210b35e5d1e2`。
-- `tools/build_android_ime_dex.sh` 从源码可复现构建：固定 JDK 21、Android
+- `tools/build_android_ime_dex.sh` 按固定工具链构建：JDK 21、Android
   build-tools 36.1.0、platform android-36，保留 `javac -source 8 -target 8` 与
-  `d8 --min-api 1`；哈希不符时退出 1 且不落盘。
+  `d8 --min-api 1`；哈希不符时退出 1 且不落盘。本仓库不声称已在本地跑通完整
+  复现构建，本地重建依赖同一套工具链。
 - CI 的 `android-ime` job 构建两次、`cmp` 比对、`sha256sum -c` 校验提交的哈希，
   再跑 `tools/audit_android_ime_dex.sh` 的 API 白名单 / 黑名单审计（禁 `java.net`、
-  `Runtime.exec`、反射、`System.load*`、动态类加载）；release 在打包前重复构建、
-  校验并审计。
+  `Runtime.exec`、反射、`System.load*`、动态类加载）；release 在打包前执行同一套
+  构建、校验与审计（composite action，见 `.github/actions/android-ime-dex`）。
 - 运行时 `features.system_ime.dex` 再次校验 sha256，只加载已知类
   `org.koreader.koboard.KOBoardShow`；dex 复制到应用私有 cache，临时文件 + rename
   原子替换并 `chmod 444`，不联网下载。

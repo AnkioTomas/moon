@@ -170,7 +170,7 @@ local function modeRow(desktop, platform)
             title = _("输入方式"),
             items = {
                 { value = "system", text = _("系统输入法"), subtitle = platformSubtitle(platform) },
-                { value = "builtin", text = _("KOReader 输入法"), subtitle = _("自带键盘，墨水屏推荐") },
+                { value = "builtin", text = _("KOReader 输入法") },
             },
             current = require("features.ime").inputMode(),
             on_select = function(mode)
@@ -353,14 +353,15 @@ local function builtinRows(desktop)
     return rows
 end
 
+--- system 模式分节：Android 一句说明；桌面 / WSL 测试入口；WSL 另给 fcitx5 指引。
 ---@param desktop BookDesktop
 ---@param platform string
----@param eink boolean
----@return table[]
-local function systemRows(desktop, platform, eink)
+---@return table
+local function systemSection(desktop, platform)
     local rows = {}
-    if not eink then rows[#rows + 1] = modeRow(desktop, platform) end
-    rows[#rows + 1] = noteRow(systemNote(platform))
+    if platform == "android" or platform == "wsl" then
+        rows[#rows + 1] = noteRow(systemNote(platform))
+    end
     if platform == "android" then
         if require("utils.settings").get("features.system_ime").last_status == "not_ready" then
             rows[#rows + 1] = noteRow(_("上次启动未就绪"))
@@ -369,33 +370,32 @@ local function systemRows(desktop, platform, eink)
             or platform == "wsl" then
         rows[#rows + 1] = testRow(desktop)
     end
-    return rows
+    return { title = _("系统输入法"), rows = rows }
 end
 
+--- builtin 模式分节：内置键盘的全部行。
 ---@param desktop BookDesktop
----@param platform string
----@param eink boolean
----@return table[]
-local function builtinSections(desktop, platform, eink)
-    local rows = {}
-    if not eink then rows[#rows + 1] = modeRow(desktop, platform) end
-    rows[#rows + 1] = noteRow(_("使用 KOReader 自带键盘，墨水屏推荐。"))
-    for _idx, row in ipairs(builtinRows(desktop)) do
-        rows[#rows + 1] = row
-    end
-    return rows
+---@return table
+local function builtinSection(desktop)
+    return { title = _("KOReader 输入法"), rows = builtinRows(desktop) }
 end
 
+--- 页面结构按 strategy §3.4：顶部「输入方式」，其下按当前模式只显示对应分节；
+--- 墨水屏没有「输入方式」，只保留内置键盘分节。
 ---@param desktop BookDesktop
 ---@return table[]
 local function sections(desktop)
     local platform = Platform.current()
     local eink = Platform.isEinkCurrent()
     local mode = require("features.ime").inputMode()
-    local rows = mode == "system"
-        and systemRows(desktop, platform, eink)
-        or builtinSections(desktop, platform, eink)
-    return { { title = _("输入法"), rows = rows } }
+    local out = {}
+    if not eink then
+        out[#out + 1] = { rows = { modeRow(desktop, platform) } }
+    end
+    out[#out + 1] = mode == "system"
+        and systemSection(desktop, platform)
+        or builtinSection(desktop)
+    return out
 end
 
 local Setting = {}

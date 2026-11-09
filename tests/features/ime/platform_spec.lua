@@ -56,6 +56,14 @@ Assert.is_true(Platform.isEink(device{ isAndroid = true, hasEinkScreen = true })
 Assert.is_false(Platform.isEink(device{ isAndroid = true }))
 Assert.is_false(Platform.isEink(nil))
 
+-- 真实路径：currentDevice 读 device 模块，isEinkCurrent 用同一个入口
+local fake_device = device{ isKindle = true, hasEinkScreen = true }
+package.preload["device"] = function() return fake_device end
+Assert.eq(Platform.currentDevice(), fake_device, "currentDevice 返回 device 模块")
+Assert.is_true(Platform.isEinkCurrent(), "isEinkCurrent 走真实 Device")
+package.loaded["device"] = nil
+package.preload["device"] = nil
+
 -- 平台默认：Android / Windows / macOS / Linux = system；其余 = builtin
 Assert.eq(Platform.defaultMode("android"), "system")
 Assert.eq(Platform.defaultMode("windows"), "system")

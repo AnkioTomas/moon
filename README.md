@@ -69,7 +69,7 @@
 - 桌面 / WSL 选择系统输入法后，设置页有「测试系统输入法」，可以先打一段字确认通路。
 - 内置中文键盘默认关闭，在同一个「输入法」页打开。
 
-Android 的系统键盘由 vendored [koboard](https://github.com/titandrive/koboard) dex 提供。平台矩阵、迁移规则和 dex 安全模型见 [ADR 0002](docs/adr/0002-system-ime-platform.md)，本次发版说明见 [输入法改造发布说明](docs/release-notes/ime-system-input.md)。
+Android 的系统键盘由 vendored [koboard](https://github.com/titandrive/koboard) dex 提供；CI 从源码构建两次并比对哈希，本地重建需要 JDK 21 + build-tools 36.1.0 + android-36。平台矩阵、迁移规则和 dex 安全模型见 [ADR 0002](docs/adr/0002-system-ime-platform.md)，本次发版说明见 [输入法改造发布说明](docs/release-notes/ime-system-input.md)。
 
 ## 安装
 
