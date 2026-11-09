@@ -6,6 +6,7 @@ sync_status=0 表示待上传，1 表示已同步。
 chapter_idx = 0 表示整本文件；正数表示章节文件。
 
 不变量：
+  - account_pending：0=普通同步，1=从旧书架迁移，2=原有非成员身份迁移；只对 1 按完整新书架下架停止上行。
   - upsertRemote 只覆盖已同步行，本地脏快照不被远端盖掉。
   - markSynced 必须把清脏与 payload 回填放在同一语句（WHERE 带 updated_at），
     否则会吃掉上传期间的新划线。
@@ -16,19 +17,26 @@ chapter_idx = 0 表示整本文件；正数表示章节文件。
 --]]
 
 local DB = require("utils.db")
-require("book.books_db")
+local BookDB = require("book.books_db")
+local Normalize = require("book.note.normalize")
 
 local NoteDB = {}
 
 DB.schema("notes", function()
-    return DB.exec([[
+    if not DB.exec([[
 CREATE TABLE IF NOT EXISTS notes (
   source_id TEXT NOT NULL, stable_id TEXT NOT NULL,
   chapter_idx INTEGER NOT NULL DEFAULT 0, payload TEXT NOT NULL,
   updated_at INTEGER NOT NULL, sync_status INTEGER NOT NULL DEFAULT 0,
+  account_pending INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (source_id, stable_id, chapter_idx)
 );
-]]) ~= nil
+]]) then return false end
+    local columns, count = DB.query("PRAGMA table_info(notes);")
+    for i = 1, count do
+        if columns[2][i] == "account_pending" then return true end
+    end
+    return DB.exec("ALTER TABLE notes ADD COLUMN account_pending INTEGER NOT NULL DEFAULT 0;") ~= nil
 end)
 
 --- 书改名 / 收编时由 books_db 调用。
@@ -58,6 +66,32 @@ function NoteDB.removeSource(source_id)
     return DB.removeSource("notes", source_id)
 end
 
+---@param source_id string
+---@param stable_prefix string|nil
+---@param source BookSource|nil
+---@return boolean
+function NoteDB.prepareAccountSync(source_id, stable_prefix, source)
+    local result, count = DB.query([[SELECT stable_id, chapter_idx, payload FROM notes
+        WHERE source_id=? AND instr(stable_id, ?)=1;]], source_id, stable_prefix or "")
+    for i = 1, count do
+        local annotations = Normalize.decode(result[3][i])
+        if not annotations then
+            require("utils.log").warn("book.note account transfer: invalid snapshot", source_id, result[1][i])
+            return false
+        end
+        if source and type(source.resetAccountAnnotations) == "function" then
+            annotations = source:resetAccountAnnotations(annotations)
+        end
+        local book = source and BookDB.shelfBook(source, result[1][i]) or BookDB.get(source_id, result[1][i])
+        local pending = #annotations > 0 and (book and book.deleted == 0 and 1 or 2) or 0
+        if not DB.exec([[UPDATE notes SET payload=?, sync_status=?, account_pending=?
+            WHERE source_id=? AND stable_id=? AND chapter_idx=?;]],
+            require("json").encode(annotations), pending > 0 and 0 or 1, pending,
+            source_id, result[1][i], result[2][i]) then return false end
+    end
+    return true
+end
+
 --- 覆盖指定书籍或章节的注解快照。
 ---@param source_id string
 ---@param stable_id string
@@ -74,7 +108,8 @@ function NoteDB.upsert(source_id, stable_id, chapter_idx, payload, updated_at, s
           ON CONFLICT(source_id, stable_id, chapter_idx) DO UPDATE SET
             payload=excluded.payload,
             updated_at=excluded.updated_at,
-            sync_status=excluded.sync_status;]],
+            sync_status=excluded.sync_status,
+            account_pending=CASE WHEN excluded.sync_status=1 THEN 0 ELSE notes.account_pending END;]],
         source_id,
         stable_id,
         chapter_idx,
@@ -103,7 +138,7 @@ function NoteDB.upsertRemote(source_id, stable_id, chapter_idx, payload, updated
     ) ~= nil
 end
 
-local COLUMNS = "source_id, stable_id, chapter_idx, payload, updated_at, sync_status"
+local COLUMNS = "source_id, stable_id, chapter_idx, payload, updated_at, sync_status, account_pending"
 
 ---@param result table|nil
 ---@param nrows integer|nil
@@ -118,6 +153,7 @@ local function rows(result, nrows)
             payload = result[4][i],
             updated_at = tonumber(result[5][i]) or 0,
             sync_status = tonumber(result[6][i]) or 0,
+            account_pending = tonumber(result[7][i]) or 0,
         }
     end
     return out
@@ -130,7 +166,7 @@ end
 ---@return table|nil
 function NoteDB.get(source_id, stable_id, chapter_idx)
     chapter_idx = tonumber(chapter_idx) or 0
-    local source, stable, chapter, payload, updated_at, sync_status = DB.rowexec(
+    local source, stable, chapter, payload, updated_at, sync_status, account_pending = DB.rowexec(
         "SELECT " .. COLUMNS .. " FROM notes WHERE source_id=? AND stable_id=? AND chapter_idx=? LIMIT 1;",
         source_id,
         stable_id,
@@ -146,6 +182,7 @@ function NoteDB.get(source_id, stable_id, chapter_idx)
         payload = payload,
         updated_at = tonumber(updated_at) or 0,
         sync_status = tonumber(sync_status) or 0,
+        account_pending = tonumber(account_pending) or 0,
     }
 end
 
@@ -244,13 +281,13 @@ function NoteDB.markSynced(source_id, stable_id, chapter_idx, updated_at, payloa
     local ts = tonumber(updated_at)
     if payload ~= nil then
         return DB.exec(
-            [[UPDATE notes SET sync_status=1, payload=?
+            [[UPDATE notes SET sync_status=1, payload=?, account_pending=0
               WHERE source_id=? AND stable_id=? AND chapter_idx=? AND updated_at=?;]],
             payload, source_id, stable_id, idx, ts
         ) ~= nil
     end
     return DB.exec(
-        [[UPDATE notes SET sync_status=1
+        [[UPDATE notes SET sync_status=1, account_pending=0
           WHERE source_id=? AND stable_id=? AND chapter_idx=? AND updated_at=?;]],
         source_id,
         stable_id,

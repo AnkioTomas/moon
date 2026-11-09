@@ -28,7 +28,7 @@ function QQReader.meta()
 end
 
 ---@class QQReaderSource : SourceBase
-local Source = setmetatable({}, { __index = SourceBase })
+local Source = setmetatable({ shelf_add = true }, { __index = SourceBase })
 Source.__index = Source
 
 ---@return QQReaderSource

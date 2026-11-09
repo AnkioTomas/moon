@@ -10,6 +10,8 @@ GET 脱敏密钥；POST 是部分更新：缺省的键不动，密钥字段的�
 @module koplugin.book.features.remote.settings
 --]]
 
+require("l10n").apply()
+local _ = require("gettext")
 local Text = require("utils.text")
 
 local SettingsApi = {}
@@ -247,7 +249,7 @@ local function applyForm(form, incoming)
         store(form, cfg)
     end
     local replaced = form.replace and form.replace(changed, save)
-    if replaced == false then return nil, "清除本地记录失败" end
+    if replaced == false then return nil, _("准备本地同步失败") end
     if not replaced then
         save()
         if form.invalidate then require("source.registry").invalidate() end

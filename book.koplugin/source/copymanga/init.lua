@@ -25,7 +25,7 @@ end
 
 ---@class CopymangaSource : SourceBase
 ---@field _client CopymangaClient
-local Source = setmetatable({}, { __index = SourceBase })
+local Source = setmetatable({ shelf_add = true }, { __index = SourceBase })
 Source.__index = Source
 
 ---@return CopymangaSource

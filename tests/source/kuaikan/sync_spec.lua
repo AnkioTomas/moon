@@ -14,7 +14,7 @@ package.loaded["utils.settings"] = {
     getSource = function() return cfg end, get = function() return {} end, saveSource = function() end,
 }
 package.loaded["ui/network/manager"] = { isConnected = function() return true end }
-package.loaded["source.auth"] = { ok = function() end }
+package.loaded["source.auth"] = { ok = function() end, currentAccount = require("source.auth").currentAccount }
 local requests = {}
 local function request(method, url, body, opts, cb)
     local r = { method = method, url = url, body = body, opts = opts, cb = cb }

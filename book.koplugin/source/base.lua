@@ -34,7 +34,7 @@ shelf_cache 是唯一不配 supports* 的：可选方法 shelfCache 自身声明
 ---@field abilities string[]|nil 能力清单（启用页展示；与运行时开关 capabilities() 无关）
 
 --- 能力是用户可用功能，不是「模块里有没有函数」。
---- 仅保留 UI 实际读取的开关；Source 基础契约和阅读形态不放在能力表中。
+--- 由 UI 与同步编排读取；Source 基础契约和阅读形态不放在能力表中。
 ---@class StoreChipGroup
 ---@field chips { id: string, title: string }[]
 ---@field active string|nil
@@ -46,6 +46,7 @@ shelf_cache 是唯一不配 supports* 的：可选方法 shelfCache 自身声明
 ---@field stats_pull boolean 是否从远端拉取阅读统计并写入本地 reading_stats（各源自决映射与替换策略）
 ---@field shelf_cache boolean 是否提供书架缓存投影（声明 true 且实现 shelfCache 才进离线书架，见 05 A2）
 ---@field shelf_push boolean 本地书架改动能否推到远端；只拉（Kavita）为 false，推脏时跳过书架域
+---@field shelf_add boolean|nil 支持实际加入远端书架；换账号时据此重新上传本地成员，未声明为不支持
 
 --- 书架缓存投影：源从自己的缓存索引投影出的三张表，同步、只读本地记忆（05 A2）。
 ---@class ShelfCacheProjection
@@ -141,6 +142,7 @@ shelf_cache 是唯一不配 supports* 的：可选方法 shelfCache 自身声明
 --- 删除经 deleteBookAsync。local 扫盘；moon 无 add API（list/delete）。
 ---@class BookSource
 ---@field probing boolean|nil 正在探测协议
+---@field shelf_add boolean|nil 加架能力默认值，由支持加架的源声明
 ---@field dropChapterCache fun(self: BookSource, identity: BookIdentity, chapter: BookChapter)|nil
 ---@field id SourceId|nil 源标识
 ---@field name string|nil 展示名
@@ -157,6 +159,7 @@ shelf_cache 是唯一不配 supports* 的：可选方法 shelfCache 自身声明
 ---@field cleanAnnotations fun(self: BookSource, items: table[], total_pages: integer|nil): table[]|nil 清洗并透传源私有注解字段
 ---@field prepareLocalAnnotations fun(self: BookSource, previous: table[], current: table[], deleted?: table): table[]|nil 根据源协议生成更新/删除状态（deleted 为本次被删条目）
 ---@field mergeAnnotations fun(self: BookSource, remote: table[], current: table[], paging: boolean|nil, authoritative: boolean): table[]|nil, integer|nil, integer|nil 按源身份语义合并注解（第二值 dropped = 远端已删条数；第三值 deduped = 远端同键重复被抑制的条数，都可为 nil）
+---@field resetAccountAnnotations? fun(self: BookSource, annotations: table[]): table[] 换号只撤销旧账号同步标识和删除意图，保留正文与坐标
 ---@field syncStatsAsync fun(self: BookSource, opts: { dirty_only?: boolean }|nil, cb: fun(result: SyncResult|nil, err: any)): table|nil 双向收敛统计
 ---@field deleteBookAsync fun(self: BookSource, identity: BookIdentity, cb: fun(ok: boolean, err: string|nil)): table|nil 本地优先删除（清缓存 + 墓碑），远端真删归 syncBooksAsync
 ---@field searchAsync fun(self: BookSource, keyword: string, cb: fun(res: { data: Book[] }|nil, err: string|nil)): table|nil 书城搜索（可选；有这个方法就是可搜索源，书城页按此列出）
@@ -244,7 +247,8 @@ end
 --- 返回默认全 false 能力集。书架缓存是可选项：默认 false，源自己置 true 并实现 shelfCache。
 ---@return SourceCapabilities
 function SourceBase:capabilities()
-    return { scrape = false, edit = false, stats_pull = false, shelf_cache = false, shelf_push = true }
+    return { scrape = false, edit = false, stats_pull = false, shelf_cache = false, shelf_push = true,
+        shelf_add = self.shelf_add == true }
 end
 
 --- 是否已配置。

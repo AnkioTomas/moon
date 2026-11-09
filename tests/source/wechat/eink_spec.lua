@@ -10,6 +10,13 @@ local JsonStub = require("support.json_stub")
 local sha256 = require("ffi/sha2").sha256
 
 local state = { cfg = {}, requests = {}, responder = nil }
+local switches = 0
+require("source.logout").replaceLibrary = function(id, commit)
+    Assert.eq(id, "wechat")
+    switches = switches + 1
+    commit()
+    return true
+end
 
 package.preload["utils.settings"] = function()
     return {
@@ -101,6 +108,7 @@ do
     Assert.eq(state.cfg.user_id, "1001")
     Assert.eq(state.cfg.eink.refresh_token, "rt")
     Assert.eq(state.cfg.eink.device_id, "99")
+    Assert.eq(switches, 1)
     Assert.eq(Eink.credentials().access_token, "at")
 end
 

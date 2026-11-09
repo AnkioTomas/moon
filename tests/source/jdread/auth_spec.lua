@@ -9,6 +9,11 @@ local Assert = require("support.assert")
 local Config = require("support.config")
 local Stubs = require("support.stubs")
 local JSONStub = require("support.json_stub")
+require("source.logout").replaceLibrary = function(id, commit)
+    Assert.eq(id, "jdread")
+    commit()
+    return true
+end
 
 package.preload["json"] = function()
     return { decode = JSONStub.decode, encode = JSONStub.encode }

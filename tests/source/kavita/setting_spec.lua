@@ -640,5 +640,5 @@ do
     Assert.eq(cfg.api_key, "old-key")
     Assert.eq(saved, saved_before)
     Assert.eq(#register_calls, mirrored_before)
-    Assert.eq(Themed.last("toast").text, "清除本地记录失败")
+    Assert.eq(Themed.last("toast").text, "准备本地同步失败")
 end

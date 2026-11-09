@@ -161,7 +161,7 @@ end
 
 --- 清除账号会话，保留设备 UUID。
 function Auth.clearSession()
-    saveCfg({ cookie = "", user_name = "" })
+    saveCfg({ cookie = "", user_name = "", account_id = "" })
 end
 
 --- 获取二维码 PNG 及轮询所需 Cookie。
@@ -324,6 +324,8 @@ local function saveSessionAsync(jar, cb)
         uuid = "h5" .. require("ffi/sha2").md5(require("utils.device_id").ensure())
     end
     local cookie = cookieHeader(jar)
+    local previous_cookie, previous_id = current.cookie, current.account_id
+    local account_id = jar.pin or jar.pt_pin
     local client = require("source.jdread.client"):new{ cookie = cookie, uuid = uuid }
     local cancelled = false
     local job = client:checkSessionAsync(function(wire, err)
@@ -333,10 +335,19 @@ local function saveSessionAsync(jar, cb)
             return
         end
         current = require("utils.settings").getSource("jdread")
-        current.cookie = cookie
-        current.uuid = uuid
-        current.user_name = Text.urlDecode(jar.unick or jar.pin or jar.pt_pin or "") or ""
-        require("utils.settings").saveSource("jdread", current)
+        local function commit()
+            current.cookie, current.uuid, current.account_id = cookie, uuid, account_id
+            current.user_name = Text.urlDecode(jar.unick or jar.pin or jar.pt_pin or "") or ""
+            require("utils.settings").saveSource("jdread", current)
+        end
+        if previous_id ~= account_id or not previous_id and previous_cookie ~= cookie then
+            if not require("source.logout").replaceLibrary("jdread", commit) then
+                cb(false, _("准备本地同步失败"))
+                return
+            end
+        else
+            commit()
+        end
         require("source.auth").ok("jdread")
         cb(true)
     end)

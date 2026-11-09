@@ -1,9 +1,10 @@
---[[-- 起点账号：续期保留本地；换号直接清旧源，不询问、不查询旧账号。 @module tests.source.qidian.setting_spec --]]
+--[[-- 起点账号：续期不动同步标记；换号保留记录，不询问、不查询旧账号。 @module tests.source.qidian.setting_spec --]]
 ---@diagnostic disable: undefined-field, missing-fields, param-type-mismatch
 local Assert = require("support.assert")
 local Theme = require("support.theme_stubs")
 Theme.install()
-local beginLogin = require("source.auth").beginLogin
+local Auth = require("source.auth")
+local beginLogin = Auth.beginLogin
 local cfg, checks, cleared, closed = {}, 0, 0, 0
 local clear_ok, delayed, late = true, false, nil
 package.preload["utils.settings"] = function()
@@ -26,14 +27,18 @@ package.preload["source.qidian.client"] = function()
 end
 package.loaded["source.auth"] = nil
 package.preload["source.auth"] = function()
-    return { beginLogin = beginLogin, ok = function() end, expired = function() return false end }
+    return { beginLogin = beginLogin, changeAccount = Auth.changeAccount,
+        ok = function() end, expired = function() return false end }
 end
-package.preload["source.registry"] = function() return { reload = function() end, invalidate = function() end } end
-package.preload["book.store"] = function()
-    return { forgetSource = function(id)
-        Assert.eq(id, "qidian", "只清当前源")
-        Assert.is_nil(cfg.cookie, "清书架前移除旧凭据")
-        Assert.is_nil(cfg.account_id)
+package.preload["source.registry"] = function()
+    return { reload = function() end, invalidate = function() end,
+        resolve = function() return { capabilities = function() return { shelf_add = true } end } end }
+end
+package.preload["book.books_db"] = function()
+    return { prepareAccountSync = function(id, shelf_add)
+        Assert.eq(id, "qidian", "只准备当前源")
+        Assert.is_true(shelf_add)
+        Assert.not_nil(cfg.cookie, "成功准备同步之后才替换凭据")
         cleared = cleared + 1
         return clear_ok
     end }
@@ -69,12 +74,12 @@ Assert.eq(checks, before + 1, "旧配置缺身份时不多查一次")
 Assert.eq(cleared, 2)
 cfg = { cookie = "new", account_id = "111" }
 Assert.is_true(apply("new"))
-Assert.eq(cleared, 3, "账号身份变了，即使 Cookie 字符串相同也清旧源")
+Assert.eq(cleared, 3, "账号身份变了，即使 Cookie 字符串相同也准备同步")
 cfg, clear_ok = { cookie = "old", account_id = "111" }, false
 local ok, err = apply("new")
 Assert.is_false(ok)
-Assert.eq(err, "清除本地记录失败")
-Assert.is_nil(cfg.cookie, "清理失败保持登出，不恢复旧凭据")
+Assert.eq(err, "准备本地同步失败")
+Assert.eq(cfg.cookie, "old", "准备失败仍保留旧凭据")
 clear_ok = true
 cfg = { cookie = "old", account_id = "111" }
 ok, err = apply("bad")

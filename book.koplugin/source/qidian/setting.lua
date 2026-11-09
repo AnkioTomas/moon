@@ -18,7 +18,7 @@ local function loggedIn()
     return require("source.qidian.client").cookie() ~= nil
 end
 
---- 同账号续期保留本地数据；换号直接清旧源记录。
+--- 同账号续期不动同步标记；换号保留本地记录并准备上行。
 local function commit(cookie, account, cb, current)
     if not account or type(account.id) ~= "string" or not account.id:match("^%d+$") then
         cb(false, _("起点账号标识缺失")); return

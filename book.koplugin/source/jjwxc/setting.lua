@@ -48,7 +48,7 @@ local SPEC = {
                 cfg.cookie, cfg.token, cfg.account, cfg.password, cfg.protocol = nil, nil, nil, nil, nil
                 Settings.saveSource(SOURCE_ID)
             end)
-            if not cleared then return cb(false, _("清除本地记录失败")) end
+            if not cleared then return cb(false, _("准备本地同步失败")) end
         end
         cfg.cookie, cfg.protocol = cookie, "web"
         Settings.saveSource(SOURCE_ID)
@@ -196,7 +196,7 @@ function showLogin(account, password, verify)
                     cfg.cookie, cfg.token, cfg.account, cfg.password, cfg.protocol = nil, nil, nil, nil, nil
                     require("utils.settings").saveSource(SOURCE_ID)
                 end)
-                if not cleared then Toast:new{ text = _("清除本地记录失败"), timeout = 3 }:show(); return end
+                if not cleared then Toast:new{ text = _("准备本地同步失败"), timeout = 3 }:show(); return end
             end
             saveToken(account, password, token)
             Toast:new{ text = _("登录成功"), timeout = 2 }:show()

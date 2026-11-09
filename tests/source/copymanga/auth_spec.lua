@@ -6,6 +6,13 @@
 
 local Assert = require("support.assert")
 package.loaded["json"] = require("support.json_stub")
+local switches = 0
+require("source.logout").replaceLibrary = function(id, commit)
+    Assert.eq(id, "copymanga")
+    switches = switches + 1
+    commit()
+    return true
+end
 local Auth = require("source.copymanga.auth")
 local Text = require("utils.text")
 
@@ -44,15 +51,16 @@ do
 
     job = Auth.loginAsync("other", "pass", function(result, e) ok, err = result, e end)
     pending({ body = '{"code":200,"results":{"token":"other","user_id":"2"}}' })
-    Assert.is_nil(ok)
-    Assert.eq(err, "请先退出当前账号")
-    Assert.eq(current.token, "first")
+    Assert.is_true(ok)
+    Assert.is_nil(err)
+    Assert.eq(current.token, "other")
+    Assert.eq(switches, 2, "换账号准备同步，不再要求先退出清数据")
 
     job = Auth.loginAsync("user", "pass", function(result, e) ok, err = result, e end)
     job.cancel()
     pending({ body = '{"code":200,"results":{"token":"cancelled","user_id":"1"}}' })
     Assert.is_true(cancelled)
-    Assert.eq(current.token, "first")
+    Assert.eq(current.token, "other")
     Auth.clearSession()
     current.base_url = original_base
     settings.saveSource("copymanga", current)

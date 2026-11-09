@@ -70,7 +70,7 @@ function Login:confirm(fields, cb)
                 Settings.getSource("zymk").account = nil
                 Settings.saveSource("zymk")
             end)
-            if not cleared then cb(nil, _("清除本地记录失败")); return end
+            if not cleared then cb(nil, _("准备本地同步失败")); return end
         end
         Settings.getSource("zymk").account = account
         Settings.saveSource("zymk")

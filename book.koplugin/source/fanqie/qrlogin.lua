@@ -379,8 +379,13 @@ function QRLogin:_finish_login_success(gen)
     for k in pairs(jar) do keys[#keys + 1] = k end
     table.sort(keys)
     logger.info("[FanQieQR] 登录成功，扫码获取到 " .. #keys .. " 个 cookie: " .. table.concat(keys, ", "))
-    self.settings:set("cookies", jar)
-    self.settings:flush()
+    if not require("source.logout").replaceLibrary("fanqie", function()
+        self.settings:set("cookies", jar)
+        self.settings:flush()
+    end) then
+        Toast:new{ text = _("准备本地同步失败") }:show()
+        return
+    end
     self.jar = jar
     Toast:new{ text = _("登录成功") }:show()
     if type(self.plugin.onLoginSuccess) == "function" then

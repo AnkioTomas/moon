@@ -1,12 +1,12 @@
 --[[--
-账号源退出登录；换服务器 / 换 WebDAV 根时清本地书架。
+账号源退出登录与连接切换。
 
 先停在飞同步、删掉本地凭证、丢掉还握着令牌的源实例，再清书架和阅读记录。
 凭证还在时不许动本地书架：清库一旦被看成删书，同步就会把远端书架删掉。
 清库本身不写墓碑、不上传。
 
-换库身份（`replaceLibrary` / `replaceWebdav`）时先清旧库投影，成功后才保存新凭证并重载。
-清理失败保留旧配置与源实例，不写墓碑，不把旧库记录送往新库。
+换账号 / 服务器保留本地书籍与阅读记录；可加架的成员重推，其余由新书架快照下架。
+旧账号墓碑不送往新账号，主动退出仍清除本地记录。
 
 @module koplugin.book.source.logout
 --]]
@@ -21,6 +21,10 @@ local TASK_PREFIXES = { "dirty\0", "books\0", "books-upload\0", "cache\0", "inst
 --- 停掉这个源还在跑的同步和缓存，免得清完之后回调又写回来。
 ---@param source_id string
 function Logout.abort(source_id)
+    for _idx, name in ipairs({ "book.progress", "book.note", "book.stats" }) do
+        local domain = package.loaded[name]
+        if domain then domain.abortSource(source_id) end
+    end
     local Tasks = require("workers.tasks")
     for _idx, prefix in ipairs(TASK_PREFIXES) do
         Tasks.cancelPrefixed(prefix .. source_id)
@@ -44,46 +48,57 @@ local function closeReader(source_id)
     end
 end
 
---- 退出与换号共用清理；不弹提示，不发远端删书请求。
+--- 换号前撤销旧凭证；保留数据并准备向新账号同步，不弹提示、不发网络请求。
 ---@param source_id string
 ---@param clear fun()
 ---@return boolean
 function Logout.clear(source_id, clear)
     closeReader(source_id)
-    require("source.auth").beginLogin(source_id)
+    local Registry = require("source.registry")
+    local source = Registry.resolve(source_id)
+    if not source then return false end
+    if not require("book.books_db").prepareAccountSync(source_id, source:capabilities().shelf_add == true, nil, source) then
+        return false
+    end
+    require("source.auth").changeAccount(source_id)
     Logout.abort(source_id)
     clear()
-    local Registry = require("source.registry")
     Registry.invalidate()
-    local forgotten = require("book.store").forgetSource(source_id)
-    if not forgotten then Registry.reload() end
-    return forgotten
+    return true
 end
 
---- 换服务器 / 换账号库：本地书架与旧库无关，整源撕掉再 reload 拉新库。
---- 新配置通过 commit 在清理成功后落盘；不写墓碑。
+--- 换服务器 / 换账号库：保留数据，准备成功后才提交新配置。
 ---@param source_id string
 ---@param commit fun()|nil
 ---@return boolean
 function Logout.replaceLibrary(source_id, commit)
     closeReader(source_id)
-    Logout.abort(source_id)
-    if not require("book.store").forgetSource(source_id) then return false end
     local Registry = require("source.registry")
+    local source = Registry.resolve(source_id)
+    if not source then return false end
+    if not require("book.books_db").prepareAccountSync(source_id, source:capabilities().shelf_add == true, nil, source) then
+        return false
+    end
+    require("source.auth").changeAccount(source_id)
+    Logout.abort(source_id)
     Registry.invalidate()
     if commit then commit() end
     Registry.reload()
     return true
 end
 
---- 换 WebDAV 地址 / 目录：只撕 local 源里 webdav:// 的书；纯本地绝对路径书不动。
+--- 换 WebDAV 地址 / 目录 / 账号：保留远端书身份与镜像，不动纯本地书。
 ---@param commit fun()|nil
 ---@return boolean
 function Logout.replaceWebdav(commit)
     closeReader("local")
-    Logout.abort("local")
-    if not require("book.store").forgetWebdav() then return false end
     local Registry = require("source.registry")
+    local cfg = require("utils.settings").getSource("local")
+    if not require("book.books_db").prepareAccountSync("local", cfg.webdav_upload_local ~= false, "webdav://") then
+        return false
+    end
+    require("source.auth").changeAccount("local")
+    Logout.abort("local")
     Registry.invalidate()
     if commit then commit() end
     Registry.reload()
@@ -95,8 +110,13 @@ end
 ---@param clear fun()
 ---@return boolean
 function Logout.perform(source_id, clear)
-    local forgotten = Logout.clear(source_id, clear)
-    if forgotten then require("source.registry").reload() end
+    closeReader(source_id)
+    require("source.auth").changeAccount(source_id)
+    Logout.abort(source_id)
+    clear()
+    require("source.registry").invalidate()
+    local forgotten = require("book.store").forgetSource(source_id)
+    require("source.registry").reload()
     require("ui.themes.widgets.toast"):new{
         text = forgotten and _("已退出登录") or _("清除本地记录失败"),
         timeout = forgotten and 2 or 3,

@@ -21,7 +21,7 @@ function Kuaikan.meta()
 end
 
 ---@class KuaikanSource : SourceBase
-local Source = setmetatable({}, { __index = SourceBase })
+local Source = setmetatable({ shelf_add = true }, { __index = SourceBase })
 Source.__index = Source
 local putProgressAsync
 

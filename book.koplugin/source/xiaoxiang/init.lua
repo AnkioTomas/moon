@@ -27,7 +27,7 @@ function Xiaoxiang.meta()
 end
 
 ---@class XiaoxiangSource : SourceBase
-local Source = setmetatable({}, { __index = SourceBase })
+local Source = setmetatable({ shelf_add = true }, { __index = SourceBase })
 Source.__index = Source
 
 ---@return XiaoxiangSource

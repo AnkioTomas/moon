@@ -67,7 +67,7 @@ function Client.commitLogin(cookie, user)
             cfg.read_cookie, cfg.read_cookie_for = nil, nil
             Settings.saveSource(SOURCE_ID)
         end)
-        if not cleared then return nil, _("清除本地记录失败") end
+        if not cleared then return nil, _("准备本地同步失败") end
     end
     cfg.cookie, cfg.logged_in, cfg.name = cookie, true, user.name
     Settings.saveSource(SOURCE_ID)

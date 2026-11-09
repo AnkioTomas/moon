@@ -24,6 +24,14 @@ local PUSH_BATCH = 200
 ---@type table<string, table>
 local pushing = {}
 
+---@param source_id string
+function Stats.abortSource(source_id)
+    local token = pushing[source_id]
+    if not token then return end
+    pushing[source_id] = nil
+    if token.job then token.job:cancel() end
+end
+
 --- 把本地待同步统计交给 Source，成功后只确认对应本地记录。
 --- 网络、节流、重试和上传时机全部由 Source 决定。
 --- 默认按本次读取的行 id 标记 sync_status=1；Source 若在结果里带 ``synced_ids``
@@ -50,6 +58,7 @@ function Stats.push(source, done)
     local ids = {}
     for _idx, row in ipairs(rows) do ids[#ids + 1] = row.id end
     local token = {}
+    local current = require("source.auth").currentAccount(source.id)
     local function release()
         if pushing[source.id] == token then pushing[source.id] = nil end
     end
@@ -59,6 +68,10 @@ function Stats.push(source, done)
     --- 剩下的行留到下一轮，不在这一轮里立刻重试把网络再拖死。
     local function onResult(result, err)
         release()
+        if not current() then
+            if done then done(false, "source account changed") end
+            return
+        end
         local listed = type(result) == "table" and type(result.synced_ids) == "table"
         local confirm_ids = listed and result.synced_ids or (result and ids)
         if confirm_ids and #confirm_ids > 0 and not StatsDB.markSynced(confirm_ids) then
@@ -74,6 +87,7 @@ function Stats.push(source, done)
     end
     pushing[source.id] = token
     local job = source:pushStatsAsync(rows, onResult)
+    token.job = job
     return { cancel = function()
         release()
         if job and job.cancel then job:cancel() end
@@ -128,7 +142,12 @@ function Stats.pull(source, done)
         if done then done(false, "unsupported") end
         return
     end
+    local current = require("source.auth").currentAccount(source.id)
     return source:pullStatsAsync(function(result, err)
+        if not current() then
+            if done then done(false, "source account changed") end
+            return
+        end
         local rows, replace, invalid = normalizePullResult(result)
         if not rows then
             if done then done(false, err) end
@@ -153,6 +172,7 @@ end
 ---@return { cancel: fun() }
 function Stats.syncAsync(source, opts, cb)
     opts = opts or {}
+    local current = require("source.auth").currentAccount(source.id)
     local can_pull = SourceCapabilities.supportsStatsPull(source)
         and type(source.pullStatsAsync) == "function"
     local can_push = type(source.pushStatsAsync) == "function"
@@ -181,6 +201,7 @@ function Stats.syncAsync(source, opts, cb)
     --- 拉取远端统计后终结同步；dirty_only 路径只推不拉。
     local function pull()
         if cancelled then return end
+        if not current() then finish(nil, "source account changed"); return end
         if not can_pull or opts.dirty_only then
             result.push_error = push_error
             finish(result)
@@ -205,6 +226,7 @@ function Stats.syncAsync(source, opts, cb)
     --- 分批上传本地未确认统计，单批确认后再取下一批，内存占用与请求体有上限。
     local function push()
         if cancelled then return end
+        if not current() then finish(nil, "source account changed"); return end
         if not can_push then pull(); return end
         current_job = Stats.push(source, function(ok, value, confirmed)
             current_job = nil

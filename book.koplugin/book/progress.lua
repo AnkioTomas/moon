@@ -146,6 +146,7 @@ end
 ---@return { cancel: fun() }
 local function syncOnce(source, opts, cb)
     opts = opts or {}
+    local current = require("source.auth").currentAccount(source.id)
     local target = opts.identity and opts.identity.stable_id or "all"
     local can_push = type(source.putProgressAsync) == "function"
     local cancelled, current_job = false, nil
@@ -200,6 +201,7 @@ local function syncOnce(source, opts, cb)
     --- 处理队列里的下一个身份：本地脏行先推；队列空即 finish。从不 pull。
     local function nextIdentity()
         if cancelled then return end
+        if not current() then finish(nil, "source account changed"); return end
         local identity = identities[index]
         index = index + 1
         if not identity then
@@ -213,6 +215,19 @@ local function syncOnce(source, opts, cb)
 
         local row = ProgressDB.get(source.id, identity.stable_id)
         if row and row.sync_status == 0 then
+            if row.account_pending then
+                local BookDB = require("book.books_db")
+                local book = BookDB.shelfBook(source, identity.stable_id)
+                local missing = book and book.deleted == 1 and book.sync_status == 1
+                if missing then
+                    logger.dbg("book.progress transfer kept locally: not on new shelf", source.id, identity.stable_id)
+                    if not ProgressDB.markSynced(source.id, identity.stable_id, row.updated_at, Progress.rowPosition(row)) then
+                        finish(nil, "failed to retain local progress")
+                        return
+                    end
+                    return nextIdentity()
+                end
+            end
             if not Progress.canPush(identity) then
                 result.deferred = (result.deferred or 0) + 1
                 logger.dbg("book.progress push deferred: decision pending", source.id, identity.stable_id)
@@ -223,6 +238,7 @@ local function syncOnce(source, opts, cb)
             current_job = source:putProgressAsync(identity, pos, function(ok, err, meta)
                 current_job = nil
                 if cancelled then return end
+                if not current() then finish(nil, "source account changed"); return end
                 if ok ~= true and type(meta) == "table" and meta.permanent then
                     -- 源判定这行永远推不上（缺章节 / 坐标对不上 / 服务端收下不记账）：标已同步丢弃。
                     logger.warn("book.progress push dropped", source.id, identity.stable_id, err)
@@ -257,6 +273,18 @@ local function syncOnce(source, opts, cb)
             cancelled = true
             if current_job and current_job.cancel then current_job:cancel() end
         end }
+end
+
+---@param source_id string
+function Progress.abortSource(source_id)
+    local prefix = source_id .. "\31"
+    for key, run in pairs(Progress.sync_runs) do
+        if key:sub(1, #prefix) == prefix then
+            Progress.sync_runs[key] = nil
+            for _idx, subscriber in ipairs(run.subscribers) do subscriber.active = false end
+            if run.job then run.job:cancel() end
+        end
+    end
 end
 
 --- 合并完全相同的重入同步；不同书籍/模式仍各自执行，不能混用结果。

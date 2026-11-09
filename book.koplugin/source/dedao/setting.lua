@@ -198,7 +198,7 @@ local SPEC = {
                 Settings.saveSource(SOURCE_ID)
                 require("source.dedao.client").reset()
             end)
-            if not cleared then return cb(false, _("清除本地记录失败")) end
+            if not cleared then return cb(false, _("准备本地同步失败")) end
         end
         cfg.cookie, cfg.logged_in, cfg.uid = cookie, true, user.uid_hazy
         Settings.saveSource(SOURCE_ID)

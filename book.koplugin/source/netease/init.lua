@@ -24,7 +24,7 @@ function Netease.meta()
 end
 
 ---@class NeteaseSource : SourceBase
-local Source = setmetatable({}, { __index = SourceBase })
+local Source = setmetatable({ shelf_add = true }, { __index = SourceBase })
 Source.__index = Source
 
 ---@return NeteaseSource

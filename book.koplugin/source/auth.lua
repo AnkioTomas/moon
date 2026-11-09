@@ -23,6 +23,7 @@ local handler
 ---@type table<string, boolean> 本次运行已提示过的源；只在重新登录（reset）时清掉，免得反复弹
 local prompted = {}
 local login_versions = {}
+local account_versions = {}
 
 --- 登录尝试拥有源级版本；新尝试或退出使旧回包失效，普通请求成功不改变它。
 ---@param id string
@@ -31,6 +32,21 @@ function Auth.beginLogin(id)
     local version = (login_versions[id] or 0) + 1
     login_versions[id] = version
     return function() return login_versions[id] == version end
+end
+
+--- 只有成功切换凭证 / 退出才失效同步；失败的登录尝试不能让已上传的统计重复上报。
+---@param id string
+function Auth.changeAccount(id)
+    account_versions[id] = (account_versions[id] or 0) + 1
+    Auth.beginLogin(id)
+end
+
+--- 换账号后的迟到回包不能确认新账号的脏行。
+---@param id string
+---@return fun(): boolean
+function Auth.currentAccount(id)
+    local version = account_versions[id] or 0
+    return function() return (account_versions[id] or 0) == version end
 end
 
 --- 接口原文 / 调试串：不能进弹窗。

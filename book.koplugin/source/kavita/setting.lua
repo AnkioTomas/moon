@@ -60,7 +60,7 @@ local function save(cfg, plugin, refresh_shelf, previous_fingerprint)
     local replaced = previous_fingerprint and previous_fingerprint ~= libraryFingerprint(cfg)
     if replaced then
         if not require("source.logout").replaceLibrary(ID, commit) then
-            toast(_("清除本地记录失败"))
+            toast(_("准备本地同步失败"))
             return false
         end
     else

@@ -42,7 +42,7 @@ function Setting.rows(plugin)
                 Setting.open(function() repaint() end, plugin and plugin.desktop)
             end })
     end
-    --- WebDAV 库身份：地址 / 目录 / 用户。任一项变了旧 webdav:// 书必须撕掉（会撞相对路径）。
+    --- 连接变化先停旧同步，再准备保留记录向新库收敛。
     local function webdavFingerprint(cfg)
         return table.concat({
             Text.trim(cfg.webdav_url or ""),
@@ -66,7 +66,7 @@ function Setting.rows(plugin)
                 end
                 if before ~= webdavFingerprint(next_cfg) then
                     if not require("source.logout").replaceWebdav(save) then
-                        require("ui.themes.widgets.toast"):new{ text = _("清除本地记录失败"), timeout = 3 }:show()
+                        require("ui.themes.widgets.toast"):new{ text = _("准备本地同步失败"), timeout = 3 }:show()
                         return
                     end
                 else

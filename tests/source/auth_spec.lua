@@ -7,6 +7,18 @@ local calls = {}
 Auth.onExpired(function(id, msg) calls[#calls + 1] = { id = id, msg = msg } end)
 
 do
+    local current = Auth.currentAccount("sync-account-test")
+    Auth.beginLogin("sync-account-test")
+    Auth.reset()
+    Assert.is_true(current(), "登录尝试和提示重置不能丢掉旧账号已上传的确认")
+    Auth.changeAccount("unrelated-account")
+    Assert.is_true(current())
+    Auth.changeAccount("sync-account-test")
+    Assert.is_false(current(), "成功换账号后旧同步确认失效")
+    Assert.is_true(Auth.currentAccount("sync-account-test")())
+end
+
+do
     local first = Auth.beginLogin("version-test")
     Auth.ok("version-test")
     Assert.is_true(first(), "普通接口成功不使登录尝试失效")

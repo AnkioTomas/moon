@@ -20,7 +20,7 @@ local function libraryFingerprint(cfg)
 end
 
 --- 弹出单字段输入框修改 Moon 配置项并落盘。
---- 换服务器 / 令牌：整源清本地书架；否则只 reload。
+--- 换服务器 / 令牌保留本地记录，先准备同步；否则只 reload。
 ---@param key string 配置字段名
 ---@param title string 对话框标题
 ---@param hint string 输入框提示
@@ -42,7 +42,7 @@ local function edit(key, title, hint, password, normalize)
             end
             if before ~= libraryFingerprint(next_cfg) then
                 if not require("source.logout").replaceLibrary(SOURCE_ID, save) then
-                    require("ui.themes.widgets.toast"):new{ text = _("清除本地记录失败"), timeout = 3 }:show()
+                    require("ui.themes.widgets.toast"):new{ text = _("准备本地同步失败"), timeout = 3 }:show()
                 end
             else
                 save()
@@ -124,7 +124,7 @@ function Setting.open()
             end
             if before ~= libraryFingerprint(next_cfg) then
                 if not require("source.logout").replaceLibrary(SOURCE_ID, save) then
-                    require("ui.themes.widgets.toast"):new{ text = _("清除本地记录失败"), timeout = 3 }:show()
+                    require("ui.themes.widgets.toast"):new{ text = _("准备本地同步失败"), timeout = 3 }:show()
                     return
                 end
             else

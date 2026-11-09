@@ -56,7 +56,7 @@ local function commitUser(user)
             cfg.usr, cfg.zysid, cfg.name, cfg.avatar = nil, nil, nil, nil
             settings.saveSource(SOURCE_ID)
         end)
-        if not cleared then return false, _("清除本地记录失败") end
+        if not cleared then return false, _("准备本地同步失败") end
     end
     cfg.usr = user.usr
     cfg.zysid = user.zysid

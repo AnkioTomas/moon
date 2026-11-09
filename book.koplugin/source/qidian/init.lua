@@ -30,7 +30,7 @@ end
 
 ---@class QidianSource : SourceBase
 ---@field category_info table[]|nil 官网男频分类目录
-local Source = setmetatable({}, { __index = SourceBase })
+local Source = setmetatable({ shelf_add = true }, { __index = SourceBase })
 Source.__index = Source
 
 ---@return QidianSource

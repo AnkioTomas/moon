@@ -342,7 +342,7 @@ function Client.confirmLoginAsync(login_jar, cb, current)
                 require("utils.settings").saveSource(SOURCE_ID)
                 Client.reset()
             end)
-            if not cleared then cb(nil, _("清除本地记录失败")); return end
+            if not cleared then cb(nil, _("准备本地同步失败")); return end
         end
         cfg.uid, cfg.logged_in = user.uid_hazy, true
         Client.persist(login_jar)

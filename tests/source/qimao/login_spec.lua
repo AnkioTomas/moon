@@ -7,6 +7,11 @@
 
 local Assert = require("support.assert")
 local Themed = require("support.theme_stubs")
+require("source.logout").replaceLibrary = function(id, commit)
+    Assert.eq(id, "qimao")
+    commit()
+    return true
+end
 Themed.install()
 package.preload["ui.themes.widgets.row"] = function()
     return { widget = function(spec) return spec end }

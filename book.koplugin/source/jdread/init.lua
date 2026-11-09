@@ -51,6 +51,7 @@ function Source:capabilities()
         scrape = false,
         edit = false,
         stats_pull = false,
+        shelf_add = true,
     }
 end
 

@@ -626,7 +626,7 @@ function Login:commit(user)
             require("utils.settings").saveSource(SOURCE_ID)
             Client.reset()
         end)
-        if not cleared then return nil, _("清除本地记录失败") end
+        if not cleared then return nil, _("准备本地同步失败") end
     end
     persist(user, self)
     return true

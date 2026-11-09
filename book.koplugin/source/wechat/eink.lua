@@ -65,15 +65,25 @@ end
 ---@param access_token string
 ---@param refresh_token string
 ---@param device_id string
+---@return boolean
 local function saveSession(vid, access_token, refresh_token, device_id)
-    local eink = Eink.config().eink or {}
-    eink.refresh_token, eink.device_id = refresh_token, device_id
-    Eink.save({
-        wr_vid = vid,
-        wr_skey = access_token,
-        user_id = vid,
-        eink = eink,
-    })
+    local current = Eink.config()
+    local function commit()
+        local eink = current.eink or {}
+        eink.refresh_token, eink.device_id = refresh_token, device_id
+        Eink.save({
+            wr_vid = vid,
+            wr_skey = access_token,
+            user_id = vid,
+            user_name = current.wr_vid ~= vid and "" or current.user_name,
+            eink = eink,
+        })
+    end
+    if current.wr_vid ~= vid then
+        return require("source.logout").replaceLibrary("wechat", commit)
+    end
+    commit()
+    return true
 end
 
 ---@param n integer
@@ -368,7 +378,10 @@ function Eink.completeQrLoginAsync(info, cb)
             return
         end
         local vid = tostring(data.vid)
-        saveSession(vid, data.accessToken, data.refreshToken, device_id)
+        if not saveSession(vid, data.accessToken, data.refreshToken, device_id) then
+            cb(nil, _("准备本地同步失败"))
+            return
+        end
         -- 可能换了账号：上一个账号的 entered 状态留着，新账号的时长会因缺「进入阅读」不计。
         require("source.wechat.context").clear()
         logger.info("weread eink login ok", vid)
@@ -471,8 +484,10 @@ function Eink.refreshAsync(cb, opts)
     }, function(res, err)
         local data, login_err = loginResult(res, err, creds.refresh_token)
         if data then
-            saveSession(data.vid ~= nil and tostring(data.vid) or creds.vid,
-                data.accessToken, data.refreshToken, creds.device_id)
+            if not saveSession(data.vid ~= nil and tostring(data.vid) or creds.vid,
+                data.accessToken, data.refreshToken, creds.device_id) then
+                data, login_err = nil, _("准备本地同步失败")
+            end
         else
             logger.warn("weread eink refresh failed", login_err)
         end

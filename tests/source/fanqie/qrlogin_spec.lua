@@ -5,6 +5,11 @@ source.fanqie.qrlogin：预热 → 取码 → 轮询 → 跟跳拿 sessionid →
 
 local Assert = require("support.assert")
 local Stubs = require("support.stubs")
+require("source.logout").replaceLibrary = function(id, commit)
+    Assert.eq(id, "fanqie")
+    commit()
+    return true
+end
 
 package.preload["json"] = function()
     return { decode = require("support.json_stub").decode, encode = function() return "{}" end }

@@ -85,6 +85,7 @@ function Source:capabilities()
         scrape = false,
         edit = true,
         stats_pull = true,
+        shelf_add = true,
     }
 end
 
@@ -1466,6 +1467,21 @@ end
 --- 上传当前章的划线与想法。
 --- 微信读书的划线坐标依赖章节 HTML，因此只能按章推送：identity 必须带 chapter_idx，
 --- 且该章正文已落盘（缺 HTML 时无法定位划线区间）。无可推送内容直接回调成功。
+---@param annotations table[] KOReader 注解数组，就地改写
+---@return table[]
+function Source:resetAccountAnnotations(annotations)
+    for index = #annotations, 1, -1 do
+        local item = annotations[index]
+        if item.wr_deleted then
+            table.remove(annotations, index)
+        else
+            item.wr_bookmark_id, item.wr_review_id = nil, nil
+            item.wr_delete_review, item.wr_update_review, item.wr_update_bookmark = nil, nil, nil
+        end
+    end
+    return annotations
+end
+
 ---@param identity BookIdentity
 ---@param annotations table[] KOReader 注解数组，就地改写
 ---@param cb fun(ok: boolean|nil, err: string|nil, meta: table|nil)

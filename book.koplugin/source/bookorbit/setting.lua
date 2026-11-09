@@ -33,7 +33,7 @@ local function toast(text)
     require("ui.themes.widgets.toast"):new{ text = text, timeout = 3 }:show()
 end
 
---- 落盘并重建源实例；换服务器 / 用户先清本地书架。
+--- 落盘并重建源实例；换服务器 / 用户保留记录，先准备同步。
 ---@param cfg table
 ---@param previous_fingerprint string|nil
 ---@return boolean
@@ -43,7 +43,7 @@ local function save(cfg, previous_fingerprint)
     end
     if previous_fingerprint and previous_fingerprint ~= libraryFingerprint(cfg) then
         if not require("source.logout").replaceLibrary(ID, commit) then
-            toast(_("清除本地记录失败"))
+            toast(_("准备本地同步失败"))
             return false
         end
     else

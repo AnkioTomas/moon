@@ -169,7 +169,7 @@ function Login:accept(account, cb)
             Client.login_revision = Client.login_revision + 1
             settings.saveSource("kuaikan")
         end)
-        if not cleared then cb(nil, _("清除本地记录失败")); return end
+        if not cleared then cb(nil, _("准备本地同步失败")); return end
     end
     cfg.cookie, cfg.user_id, cfg.logged_in = cookie, account.user_id, true
     settings.saveSource("kuaikan")

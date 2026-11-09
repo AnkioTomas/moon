@@ -43,8 +43,17 @@ local function saveToken(token, cb)
         if not user then return cb(false, err or _("登录失败")) end
         local settings = require("utils.settings")
         local cfg = settings.getSource(SOURCE_ID)
-        cfg.token = token
-        settings.saveSource(SOURCE_ID, cfg)
+        local function commit()
+            cfg.token = token
+            settings.saveSource(SOURCE_ID, cfg)
+        end
+        if cfg.token ~= token then
+            if not require("source.logout").replaceLibrary(SOURCE_ID, commit) then
+                return cb(false, _("准备本地同步失败"))
+            end
+        else
+            commit()
+        end
         require("source.auth").ok(SOURCE_ID)
         require("source.registry").reload()
         cb(true)
