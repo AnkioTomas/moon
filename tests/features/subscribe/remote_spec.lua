@@ -280,44 +280,59 @@ do
     Assert.eq(table.concat(store.groups, ","), "乙组")
 end
 
--- 在线订阅源：只认目录 id；内嵌精选不拉网；OPML 源带已订阅标记；勾选入库。
+-- 在线订阅源：只认奇睿 id（qi:lang:tag）；GET 拉标签，POST 拉源；勾选入库。
 do
     local S = package.loaded["features.subscribe"]
-    local Catalog = require("features.subscribe.catalog")
-    local _c, list = call("GET", "catalog", {})
-    Assert.eq(#list.sources, #Catalog.sources)
-    Assert.eq(call("POST", "catalog", { id = "nope" }), 404)
-
-    local curated = Catalog.find("fulltext-news-cn")
-    Assert.is_true(curated ~= nil and curated.feeds ~= nil)
-    local fetched
-    S.fetchText = function(url, cb) fetched = url; cb('<outline xmlUrl="https://cat.test/a" text="A"/>') end
-    local code, r = call("POST", "catalog", { id = curated.id })
-    Assert.eq(code, 200)
-    Assert.is_nil(fetched, "精选内嵌清单不得发 HTTP")
-    Assert.eq(#r.feeds, #curated.feeds)
-    Assert.eq(r.feeds[1].url, curated.feeds[1].url)
-
-    local src
-    for _idx, s in ipairs(Catalog.sources) do
-        if s.url then src = s; break end
+    package.loaded["json"] = nil
+    package.preload["json"] = function()
+        return { decode = require("support.json_stub").decode }
     end
-    Assert.is_true(src ~= nil)
-    fetched = nil
-    S.fetchText = function(url, cb) fetched = url; cb('<outline xmlUrl="https://cat.test/a" text="A"/><outline xmlUrl="https://cat.test/b" text="B"/>') end
-    code, r = call("POST", "catalog", { id = src.id })
+    package.loaded["features.subscribe.catalog"] = nil
+    local Catalog = require("features.subscribe.catalog")
+    local tags_body = '{"data":[{"tag":"Technology","label":"技术","count":2},{"tag":"News","label":"新闻","count":1}]}'
+    local feeds_body = '{"data":{"items":['
+        .. '{"title":"A","feedUrl":"https://cat.test/a","description":"desc-a"},'
+        .. '{"title":"B","feedUrl":"https://cat.test/b"}'
+        .. '],"total":2}}'
+    local fetched = {}
+    S.fetchText = function(url, cb)
+        fetched[#fetched + 1] = url
+        if url:find("/tags?", 1, true) then return cb(tags_body) end
+        if url:find("/feeds?", 1, true) then return cb(feeds_body) end
+        cb(nil, "HTTP 404")
+    end
+
+    local code, list = call("GET", "catalog", { lang = "zh" })
     Assert.eq(code, 200)
-    Assert.eq(fetched, src.url)
+    Assert.eq(list.lang, "zh")
+    Assert.eq(#list.languages, 3)
+    Assert.eq(#list.sources, 2)
+    Assert.eq(list.sources[1].id, Catalog.qiId("zh", "Technology"))
+    Assert.eq(list.sources[1].group, "奇睿发现")
+    Assert.matches(fetched[1], "api%.ankio%.net/qireader/tags")
+    Assert.eq(call("POST", "catalog", { id = "nope" }), 404)
+    Assert.eq(call("POST", "catalog", { id = "pick" }), 404, "已删除的精选 id")
+    Assert.is_nil(Catalog.find("fulltext-news-cn"))
+
+    fetched = {}
+    local qi = Catalog.qiId("zh", "Technology")
+    local r
+    code, r = call("POST", "catalog", { id = qi })
+    Assert.eq(code, 200)
+    Assert.matches(fetched[1], "api%.ankio%.net/qireader/feeds")
     Assert.eq(#r.feeds, 2)
+    Assert.eq(r.feeds[1].url, "https://cat.test/a")
+    Assert.eq(r.feeds[1].description, "desc-a")
+    Assert.is_nil(r.feeds[2].description)
     Assert.eq(call("POST", "pick", { feeds = {} }), 400)
     local pc, pr = call("POST", "pick", { group = "在线", feeds = { { url = "https://cat.test/a", title = "A" }, { url = "javascript:x" } } })
     Assert.eq(pc, 200)
     Assert.eq(pr.added, 1)
-    local _c2, r2 = call("POST", "catalog", { id = src.id })
+    local _c2, r2 = call("POST", "catalog", { id = qi })
     Assert.is_true(r2.feeds[1].subscribed)
     Assert.is_true(not r2.feeds[2].subscribed)
     S.fetchText = function(_url, cb) cb(nil, "HTTP 500") end
-    Assert.eq(call("POST", "catalog", { id = src.id }), 502)
+    Assert.eq(call("POST", "catalog", { id = qi }), 502)
 end
 
 -- 网页发起的抓取拒绝局域网 / 本机地址（preview / add / import / batch）。

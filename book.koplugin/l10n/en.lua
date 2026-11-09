@@ -9,7 +9,6 @@ return {
     ["等待选择阅读进度"] = "Waiting for a reading position choice",
     ["账号已变化，请重新登录"] = "The account has changed. Please sign in again",
     ["标签"] = "Tags",
-    ["生活"] = "Slice of life",
     ["阅读样式菜单兼容补丁安装失败：%1"] = "Could not install the reading style menu compatibility patch: %1",
     ["阅读样式菜单兼容修复已安装，需要重启 KOReader 后生效。"] = "The reading style menu fix is installed. Restart KOReader to apply it.",
     ["账号密码和短信验证码请在官网完成"] = "Use the official website for password and SMS sign-in.",
@@ -2142,4 +2141,10 @@ return {
     ["在线下载过慢时使用"] = "For when the online download is slow",
     ["手动安装词库"] = "Install dictionary manually",
     ["1. 打开 GitHub Release：\n%1\n\n2. 下载当前输入法对应的词库文件。\n\n3. 放入：\n%2"] = "1. Open GitHub Releases:\n%1\n\n2. Download the dictionary file for the current input method.\n\n3. Put it at:\n%2",
+    ["全部语言"] = "All languages",
+    ["奇睿发现"] = "QiReader",
+    ["已订阅「%1」"] = "Subscribed to “%1”",
+    ["无法解析订阅目录"] = "Could not parse the subscription catalog",
+    ["正在加载…"] = "Loading…",
+    ["没有可订阅的条目"] = "Nothing to subscribe to",
 }
