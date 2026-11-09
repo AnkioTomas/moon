@@ -472,7 +472,7 @@ end
 function Settings.groups(desktop)
     -- 更新已换盘、进程未重启时补登约定文件（壁纸等），避免外观页缺项要整机重启。
     local root = desktop.plugin and desktop.plugin.path
-    require("features").refreshIfStale(root)
+    require("utils.extension").emit("setting.before_groups", root)
     local entries = coreEntries(desktop)
     for _idx, entry in ipairs(Tree.features(desktop)) do entries[#entries + 1] = entry end
     local roots = {

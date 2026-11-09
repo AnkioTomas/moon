@@ -189,6 +189,9 @@ function Features.registerConventions()
     end
     if not conventions_ready then
         Ext.add("reader.ready", function(plugin) Features.emit("onReaderReady", plugin) end)
+        -- 下层通过扩展点触发，勿在 desktop/utils 里 require("features")。
+        Ext.add("setting.before_groups", function(root) Features.refreshIfStale(root) end)
+        Ext.add("desktop.plugin_installed", function(root) Features.refreshIfStale(root) end)
         conventions_ready = true
     end
 end
