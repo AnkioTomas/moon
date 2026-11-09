@@ -127,6 +127,7 @@ Features.list = {
     "bluetooth", -- 无 onCreate：onSuspend/onResume 睡醒恢复；events.NetworkDisconnected 关 Wi-Fi 带崩后拉起
     "passcode", -- 必须在 remote 之前：remote 的 onCreate / onResume 要看到已锁
     "ime",
+    "system_ime", -- Android 输入后端；紧跟 ime，路由装好后再准备 dex
     "remote",
     "update",
     "storage",
