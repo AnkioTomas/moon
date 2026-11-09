@@ -69,6 +69,7 @@ package.preload["device"] = function()
         screen = { getWidth = function() return 600 end, getHeight = function() return 800 end },
         hasKeys = function() return false end,
         hasFewKeys = function() return true end,
+        input = { group = { Back = { "Back" } } },
     }
 end
 local InputContainer = {}

@@ -33,8 +33,6 @@ return {
     ["左右滑动翻页，桌面优先执行自定义手势"] = "Swipe left or right; custom desktop gestures take priority",
     ["循环分页"] = "Wrap pages",
     ["首页与末页相连；未加载完整的列表不循环"] = "Wrap between first and last pages, except in partially loaded lists",
-    ["返回键关闭弹窗"] = "Back key dismisses dialogs",
-    ["使用物理或蓝牙返回键关闭最上层弹窗"] = "Dismiss the top dialog with a physical or Bluetooth Back key",
     ["月读：当前窗口上一页"] = "Moon: previous page in current window",
     ["月读：当前窗口下一页"] = "Moon: next page in current window",
     ["月读：关闭当前弹窗"] = "Moon: dismiss current dialog",

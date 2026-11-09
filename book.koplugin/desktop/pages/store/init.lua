@@ -172,6 +172,14 @@ function Store:onEvent(event, payload)
     end
 end
 
+--- 返回键：OPDS 等 trail 下钻退一层；根页返回 false。
+---@return boolean
+function Store:onBack()
+    if #self.trail == 0 then return false end
+    self:browse(function(trail) trail[#trail] = nil end)
+    return true
+end
+
 --- 从已加载结果中切出当前 UI 页。
 ---@return table
 function Store:pageBooks()

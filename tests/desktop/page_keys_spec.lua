@@ -37,6 +37,7 @@ package.preload["device"] = function()
         screen = { getWidth = function() return 600 end, getHeight = function() return 800 end },
         hasKeys = function() return keys end,
         hasFewKeys = function() return few end,
+        input = { group = { Back = { "Back" } } },
     }
 end
 local InputContainer = {}
@@ -61,6 +62,8 @@ Assert.eq(table.concat(d.key_events.DesktopPagePrev[1][1], ","), "RPgBack,LPgBac
 Assert.eq(d.key_events.DesktopPageNext.event, "DesktopTurn")
 Assert.eq(d.key_events.DesktopPageNext.args, 1)
 Assert.eq(d.key_events.DesktopPagePrev.args, -1)
+Assert.is_true(d.key_events.DesktopBack ~= nil, "登记返回键")
+Assert.eq(d.key_events.DesktopBack[1][1][1], "Back")
 
 -- 少键设备：不占用方向键。
 few = true

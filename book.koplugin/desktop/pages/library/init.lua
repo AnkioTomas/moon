@@ -217,6 +217,26 @@ function Library:closeGroup()
     self.desktop:updateView()
 end
 
+--- 返回键：分组下钻退回列表；文件夹非根退上级。根页返回 false 让桌面吞掉。
+---@return boolean
+function Library:onBack()
+    local g = self:currentGroup()
+    if g.key and not self:inGroupList() then
+        self:closeGroup()
+        return true
+    end
+    if g.id == "folder" then
+        local root = localRoot()
+        local dir = self:currentDir()
+        if dir ~= root then
+            local parent = dir:match("^(.*)/[^/]+$")
+            self:openDir(parent and #parent > #root and parent or nil)
+            return true
+        end
+    end
+    return false
+end
+
 --- 网格 / 列表互切，尽量停在原来第一本书所在页。
 function Library:toggleView()
     local first = (self.page - 1) * self.page_size

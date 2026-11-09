@@ -229,7 +229,7 @@ end
 
 function Modal:onModalBack()
     if self.show_parent then return false end
-    if MoonSettings.get("ui").modal_keys ~= false then self:onClose() end
+    self:onClose()
     return true
 end
 

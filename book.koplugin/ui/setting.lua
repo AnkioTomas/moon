@@ -17,7 +17,6 @@ return {
         pager_keys = true,
         pager_swipe = true,
         pager_cycle = false,
-        modal_keys = true,
         library_title = true,
         library_author = false,
         library_style = "kindle",

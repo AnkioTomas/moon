@@ -119,7 +119,6 @@ function DesktopSettings:inputRows(desktop)
         { key = "pager_keys", title = _("分页按键"), subtitle = _("使用物理按键或蓝牙翻页键翻动当前窗口") },
         { key = "pager_swipe", title = _("滑动分页"), subtitle = _("左右滑动翻页，桌面优先执行自定义手势") },
         { key = "pager_cycle", title = _("循环分页"), subtitle = _("首页与末页相连；未加载完整的列表不循环"), default = false },
-        { key = "modal_keys", title = _("返回键关闭弹窗"), subtitle = _("使用物理或蓝牙返回键关闭最上层弹窗") },
     }) do
         rows[#rows + 1] = function(iw)
             local conf = Settings.get("ui")

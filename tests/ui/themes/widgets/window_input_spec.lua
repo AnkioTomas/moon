@@ -78,13 +78,13 @@ upper:handleEvent(swipe("west"))
 Assert.eq(upper.page, page)
 Kit.display.pager_keys, Kit.display.pager_swipe = true, true
 
-Kit.display.modal_keys = false
-upper:handleEvent(Event:new("KeyPress", key("Back")))
-Assert.eq(UIManager._window_stack[#UIManager._window_stack].widget, upper)
-upper:handleEvent(Event:new("BookWindowClose"))
-Assert.eq(UIManager._window_stack[#UIManager._window_stack].widget, lower, "显式关闭只移除顶层")
 local closed = #Kit.closed
-Kit.display.modal_keys = true
+upper:handleEvent(Event:new("KeyPress", key("Back")))
+Assert.eq(UIManager._window_stack[#UIManager._window_stack].widget, lower, "返回键只关闭最上层")
+Assert.eq(#Kit.closed, closed + 1)
+upper:handleEvent(Event:new("BookWindowClose"))
+Assert.eq(UIManager._window_stack[#UIManager._window_stack].widget, lower, "已关闭窗口不影响下层")
+closed = #Kit.closed
 lower:handleEvent(Event:new("KeyRepeat", key("Back")))
 Assert.eq(#Kit.closed, closed, "长按返回键的重复事件不能连关多层")
 
