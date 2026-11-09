@@ -450,6 +450,8 @@ function Chapter.refreshToc(session)
     chapter.toc_refresh_dialog = waiting
     waiting:show()
     chapter.toc_job = refresh(source, identity, function(toc, err)
+        -- 取消 / 关书会清掉 toc_refresh_dialog；迟到回包不能再 toast 或改 toc。
+        if chapter.toc_refresh_dialog ~= waiting then return end
         chapter.toc_job = nil
         chapter.toc_refresh_dialog, chapter.refreshing_toc = nil, nil
         waiting:close()
