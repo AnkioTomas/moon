@@ -1,8 +1,9 @@
 # koboard（Android 系统输入法桥）
 
 `classes.dex` 从 [titandrive/koboard](https://github.com/titandrive/koboard) v0.6.5
-的 Java 源码可复现构建，用于在 Android 上提供一个带 `InputConnection` 的
-`View`，把系统输入法上屏的文本通过文件快照交给 Lua。
+的 Java 源码按固定工具链构建（JDK 21 + build-tools 36.1.0 + android-36；CI 构建两次
+并比对哈希），用于在 Android 上提供一个带 `InputConnection` 的 `View`，把系统输入法
+上屏的文本通过文件快照交给 Lua。
 
 - 上游仓库：<https://github.com/titandrive/koboard>
 - Tag：`v0.6.5`（annotated tag `a9bd96d7f2bd5d64ab7e553f804b8e9925028002`）

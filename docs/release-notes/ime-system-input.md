@@ -63,10 +63,12 @@ PocketBook 等墨水屏继续使用 KOReader 自带键盘。设置入口统一�
   文件哈希见 `upstream.md`、`THIRD_PARTY.txt`。
 - dex 二进制**不进 git**；仓库提交校验值
   `6129e4f3acde998617224e9291690b151e1aeffdf4960087fb45210b35e5d1e2`。
-- `tools/build_android_ime_dex.sh` 固定 JDK 21 + build-tools 36.1.0 + platform
-  android-36，从源码可复现构建；哈希不一致时拒绝落盘。
+- `tools/build_android_ime_dex.sh` 按固定工具链构建：JDK 21 + build-tools 36.1.0 +
+  platform android-36；哈希不一致时拒绝落盘。本轮未在本地跑通完整复现构建，本地
+  重建依赖同一套工具链。
 - CI 的 `android-ime` job 构建两次、逐字节比对、校验 sha256 并跑
-  `tools/audit_android_ime_dex.sh` 的 API 审计；release 在打包前重复构建、校验和审计。
+  `tools/audit_android_ime_dex.sh` 的 API 审计；release 在打包前执行同一套构建、
+  校验和审计（两处共用 `.github/actions/android-ime-dex`）。
 - 运行时再次校验 sha256，只加载已知类，dex 复制到应用私有 cache 并 `chmod 444`，
   临时文件 + rename 原子替换，不联网下载。
 
@@ -87,8 +89,9 @@ PocketBook 等墨水屏继续使用 KOReader 自带键盘。设置入口统一�
   候选窗显示，上屏后才进输入框。
 - **候选窗锚点是尽力而为**：`SDL_SetTextInputArea` 符号、窗口或输入框坐标缺失时
   只跳过锚点，文本输入仍然可用，但候选窗位置可能仍由系统决定。
-- **dex 可复现构建依赖固定工具链**：JDK / build-tools / platform 版本变化会导致
-  哈希漂移；本地重建需按 `tools/build_android_ime_dex.sh` 的环境变量准备工具链。
+- **dex 构建依赖固定工具链**：JDK / build-tools / platform 版本变化会导致哈希漂移；
+  本地重建需按 `tools/build_android_ime_dex.sh` 的环境变量准备工具链。仓库未声称
+  已在本地跑通完整复现构建，由 CI 构建两次并比对。
 
 ## 升级注意
 
