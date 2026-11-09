@@ -150,6 +150,75 @@ do
     file:close()
     Assert.eq(lfs.attributes(a, "mode"), "file")
     os.remove(a)
+    Assert.errors(function() Paths.tmpname({}) end, "suffix must be a string")
+end
+
+-- 同一秒的 fork 继承相同序号和 PRNG，两个子进程在写入前仍必须分配不同路径。
+do
+    local ffi = require("ffi")
+    ffi.cdef[[
+        int fork(void); int pipe(int *);
+        long read(int, void *, unsigned long);
+        long write(int, const void *, unsigned long);
+        int close(int); int waitpid(int, int *, int);
+        void _exit(int);
+    ]]
+    local real_time = os.time
+    os.time = function() return 1700000000 end
+    math.randomseed(2468)
+    local result, gate = ffi.new("int[2]"), ffi.new("int[2]")
+    assert(ffi.C.pipe(result) == 0)
+    assert(ffi.C.pipe(gate) == 0)
+    local pids = {}
+    for index = 1, 2 do
+        local pid = ffi.C.fork()
+        if pid < 0 then
+            ffi.C.close(gate[1])
+            for _idx, running in ipairs(pids) do ffi.C.waitpid(running, ffi.new("int[1]"), 0) end
+            error("fork failed")
+        elseif pid == 0 then
+            ffi.C.close(result[0])
+            ffi.C.close(gate[1])
+            local path = Paths.tmpname(".font") .. "\n"
+            ffi.C.write(result[1], path, #path)
+            ffi.C.read(gate[0], ffi.new("char[1]"), 1)
+            ffi.C._exit(0)
+        end
+        pids[index] = pid
+    end
+    ffi.C.close(result[1])
+    ffi.C.close(gate[0])
+    local text, buffer = "", ffi.new("char[1]")
+    while select(2, text:gsub("\n", "")) < 2 do
+        local count = ffi.C.read(result[0], buffer, 1)
+        if count <= 0 then break end
+        text = text .. ffi.string(buffer, count)
+    end
+    ffi.C.close(result[0])
+    ffi.C.write(gate[1], "xx", 2)
+    ffi.C.close(gate[1])
+    for _idx, pid in ipairs(pids) do
+        Assert.eq(ffi.C.waitpid(pid, ffi.new("int[1]"), 0), pid)
+    end
+    os.time = real_time
+    local paths = {}
+    for path in text:gmatch("[^\n]+") do paths[#paths + 1] = path end
+    Assert.len(paths, 2)
+    Assert.is_true(paths[1] ~= paths[2])
+    for index, path in ipairs(paths) do
+        local file = assert(io.open(path, "wb"))
+        assert(file:write("font-" .. index))
+        assert(file:close())
+    end
+    local contents = {}
+    for index, path in ipairs(paths) do
+        local file = assert(io.open(path, "rb"))
+        contents[index] = file:read("*a")
+        file:close()
+        os.remove(path)
+    end
+    Assert.eq(contents[1], "font-1")
+    Assert.eq(contents[2], "font-2")
 end
 
 -- userPath：给用户看的路径固定 koreader/ 前缀（USB 里认的文件夹名）

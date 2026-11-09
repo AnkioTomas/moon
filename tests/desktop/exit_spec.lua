@@ -59,7 +59,9 @@ for _, name in ipairs({
 end
 package.preload["ui/uimanager"] = function() return UIManager end
 package.preload["ui/geometry"] = ctorModule
-package.preload["desktop.gesture"] = function() return { range = function() return {} end } end
+package.preload["desktop.gesture"] = function()
+    return { range = function() return {} end, dispatcher = function(fm) return { fm = fm } end }
+end
 package.preload["gettext"] = function() return function(text) return text end end
 package.preload["utils.settings"] = function() return { get = function() return {} end } end
 package.preload["device"] = function()

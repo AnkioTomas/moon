@@ -29,6 +29,8 @@ ensure* 只负责建目录；路径函数只拼路径，没有副作用。
 local DataStorage = require("datastorage")
 local lfs = require("libs/libkoreader-lfs")
 local md5 = require("ffi/sha2").md5
+local ffi = require("ffi")
+ffi.cdef[[ int getpid(void); ]]
 
 local P = {}
 
@@ -116,15 +118,18 @@ local tmp_seq = 0
 ---@param suffix string|nil 可选后缀，如 ".ttf"
 ---@return string
 function P.tmpname(suffix)
+    assert(suffix == nil or type(suffix) == "string", "tmpname: suffix must be a string")
+    suffix = suffix or ""
     local dir = P.tmpDir()
     local ok, err = P.ensureDir(dir)
     if not ok then
         error("tmpname: " .. tostring(err or "cannot create tmp dir"), 2)
     end
-    if type(suffix) ~= "string" then suffix = "" end
     for _try = 1, 32 do
         tmp_seq = tmp_seq + 1
-        local path = string.format("%s/m%x_%x_%x%s", dir, os.time(), tmp_seq, math.random(0, 0xfffffff), suffix)
+        -- fork 会复制序号和随机数状态，PID 必须在调用时读取。
+        local path = string.format("%s/m%x_%x_%x_%x%s",
+            dir, os.time(), ffi.C.getpid(), tmp_seq, math.random(0, 0xfffffff), suffix)
         if not lfs.attributes(path) then
             return path
         end
