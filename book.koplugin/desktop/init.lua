@@ -17,6 +17,8 @@
   顶栏读数变化由 TopBar 自己经 updateTopbar 换第 2 层，只刷顶栏。
   手势：控件自己的点按优先（底栏格、顶栏项）；没被消费的底栏点按在这里吞掉，
   其余再交给文件管理器已配置的 gestures；内容区左右滑转给当前页；顶栏下滑开快捷面板。
+  Dispatcher 动作（短对角全刷、前光、Wi-Fi…）经 sendEvent 只到栈顶：active_widgets 挂
+  Gesture.dispatcher(FM)，把非输入事件转给下层 FM 模块（见 desktop.gesture）。
   active：activate 置真、deactivate 置假；为假时不刷屏（窗口在栈上但被盖住 / 休眠）。
 
 @module koplugin.book.desktop
@@ -313,6 +315,8 @@ function Desktop:init()
     end
     self.key_events.DesktopPageNext = { { fwd }, event = "DesktopTurn", args = 1 }
     self.key_events.DesktopPagePrev = { { back }, event = "DesktopTurn", args = -1 }
+    -- sendEvent 只打栈顶：手势插件 Dispatcher 动作要落到 FM 的 DeviceListener 等模块。
+    self.active_widgets = { Gesture.dispatcher(self.plugin.ui) }
     self:build()
 end
 
@@ -455,6 +459,7 @@ end
 ---@param ges_ev table|nil KOReader 手势数据，含方向和位置
 ---@return boolean
 function Desktop:onSwipeTopBar(_arg, ges_ev)
+    if Gesture.fm(self, ges_ev) then return true end
     if require("ui.input").isDiagonalSwipe(ges_ev.direction) then return false end
     if ges_ev.direction == "south" then
         Ext.call("quickpanel.show", "desktop")
