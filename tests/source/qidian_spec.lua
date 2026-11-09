@@ -37,6 +37,11 @@ package.preload["http.request"] = function()
             cb(reply.body, reply.err, reply.res)
             return { cancel = function() end }
         end,
+        headerAll = function(res, key)
+            if not res or not res.headers then return {} end
+            local value = res.headers[key]
+            return type(value) == "table" and value or (value and { value } or {})
+        end,
     }
 end
 
@@ -171,6 +176,46 @@ do
     Assert.is_nil(ok)
     Assert.matches(err, "QQ阅读或起点 App 扫码")
     Assert.eq(expired, err)
+end
+
+-- 扫码只有 ywguid/ywkey：书架页 Set-Cookie 合并成真 csrf 后再回传 account.cookie。
+do
+    requests, replies = {}, {
+        {
+            body = page({ user = { isLogin = true, guid = 12345 } }),
+            res = {
+                code = 200,
+                headers = {
+                    ["Set-Cookie"] = {
+                        "_csrfToken=real-csrf; Path=/",
+                        "newstatisticUUID=uuid-1; Path=/",
+                        "fu=1; Path=/",
+                    },
+                },
+            },
+        },
+    }
+    local ok, err, account
+    Client.loginCheckAsync("ywguid=12345; ywkey=site-key", function(v, e, a) ok, err, account = v, e, a end)
+    Assert.is_true(ok)
+    Assert.is_nil(err)
+    Assert.eq(account.id, "12345")
+    Assert.matches(account.cookie, "_csrfToken=real%-csrf")
+    Assert.matches(account.cookie, "ywguid=12345")
+    Assert.matches(account.cookie, "ywkey=site%-key")
+    Assert.matches(account.cookie, "newstatisticUUID=uuid%-1")
+end
+
+-- 登录态在，但书架页没给 csrf：拒绝落盘，免得 VIP 正文一直空。
+do
+    requests, replies = {}, {
+        { body = page({ user = { isLogin = true, guid = 9 } }), res = { code = 200, headers = {} } },
+    }
+    local ok, err, account
+    Client.loginCheckAsync("ywguid=9; ywkey=k", function(v, e, a) ok, err, account = v, e, a end)
+    Assert.is_nil(ok)
+    Assert.matches(err, "缺少登录凭证")
+    Assert.is_nil(account)
 end
 
 -- 加入书架走 POST，书号在表单里。

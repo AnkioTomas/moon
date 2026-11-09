@@ -76,6 +76,16 @@ do
     Assert.eq(Settings.getSource("cookietest").protocol, "web")
     Assert.eq(Settings.getSource("cookietest").cookie, "b=2")
 
+    -- checkAsync 回写 account.cookie：保存补全后的会话（起点书架 Set-Cookie）。
+    spec.store = nil
+    spec.checkAsync = function(cookie, cb)
+        checks[#checks + 1] = cookie
+        cb(true, nil, { id = "1", cookie = cookie .. "; _csrfToken=merged" })
+    end
+    CookieLogin.save(spec, "ywguid=1; ywkey=k", function(v) ok = v end)
+    Assert.is_true(ok)
+    Assert.eq(Settings.getSource("cookietest").cookie, "ywguid=1; ywkey=k; _csrfToken=merged")
+
     -- 退出：确认后清配置（默认只清 cookie，clear 可自定义）并重载
     local Themed = require("support.theme_stubs")
     Themed.install()
@@ -84,7 +94,7 @@ do
     Themed.last("confirm").ok_callback()
     Assert.is_nil(Settings.getSource("cookietest").cookie)
     Assert.eq(Settings.getSource("cookietest").protocol, "web", "默认只清 cookie")
-    Assert.eq(reloads, 3, "两次保存 + 一次退出都重载源")
+    Assert.eq(reloads, 4, "三次保存 + 一次退出都重载源")
     spec.clear = function(c) c.cookie, c.protocol = nil, nil end
     Settings.getSource("cookietest").cookie = "c=3"
     CookieLogin.logoutRow(spec)(300).callback()

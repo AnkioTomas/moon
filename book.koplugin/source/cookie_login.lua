@@ -97,23 +97,26 @@ function CookieLogin.save(spec, cookie, cb)
         if cancelled then return end
         if not unchanged() then return cb(false, _("账号已变化，请重新登录")) end
         if not ok then return cb(false, err or _("登录失败")) end
+        -- 源校验可回写补全后的 Cookie（如起点书架页 Set-Cookie 补上的 _csrfToken）。
+        local final_cookie = type(account) == "table" and type(account.cookie) == "string"
+            and account.cookie ~= "" and account.cookie or cookie
         if spec.commit then
             local committing = true
-            local inner = spec.commit(cookie, account, function(saved, reason)
+            local inner = spec.commit(final_cookie, account, function(saved, reason)
                 committing = false
                 if not cancelled then cb(saved, reason) end
             end, unchanged)
             if committing then job = inner end
             return
         end
-        if previous and previous ~= cookie then
+        if previous and previous ~= final_cookie then
             local cleared = require("source.logout").clear(spec.id, function()
                 if spec.clear then spec.clear(cfg) else cfg.cookie = nil end
                 settings.saveSource(spec.id, cfg)
             end)
             if not cleared then return cb(false, _("清除本地记录失败")) end
         end
-        if spec.store then spec.store(cfg, cookie) else cfg.cookie = cookie end
+        if spec.store then spec.store(cfg, final_cookie) else cfg.cookie = final_cookie end
         settings.saveSource(spec.id, cfg)
         require("source.auth").ok(spec.id)
         require("source.registry").reload()

@@ -183,7 +183,8 @@ function Login:_exchange(data, cb)
                 or not self.webjar.ywkey then
                 cb(nil, _("起点登录未获取到本站会话"))
             else
-                cb(cookies(self.webjar) .. "; _csrfToken=" .. require("utils.random").hex(16))
+                -- 真 _csrfToken 由 loginCheck 合并书架页 Set-Cookie 后再落盘，这里不要造假。
+                cb(cookies(self.webjar))
             end
         end)
     end

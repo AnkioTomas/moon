@@ -74,7 +74,8 @@ local function startQR()
             referer = "https://passport.qidian.com/mobile/login",
             title = _("起点扫码登录"), caption = _("用 QQ阅读或起点 App 扫一扫"),
         }, function(cookie)
-            CookieLogin.verify(SPEC, cookie .. "; _csrfToken=" .. require("utils.random").hex(16))
+            -- 不要造假 _csrfToken：loginCheck 会把书架页 Set-Cookie（真 csrf 等）合并后再保存。
+            CookieLogin.verify(SPEC, cookie)
         end):start()
     end)
 end

@@ -243,6 +243,40 @@ do -- 官网 ticket 路径必须兑换，本站回包替换扫码 JSON 中的身
     Assert.len(requested, 3)
 end
 
+do -- ticket=1 时忽略裸 302url，强制带 ticket 兑换；否则会吃到空壳首页却「登录成功」
+    reset()
+    respond(QR_PREFIX, qrcode("bare-home"))
+    respond(POLL_PREFIX, poll(
+        '{"code":0,"scanStatus":5,"data":{"ticket":"t1","ywGuid":"temporary","ywKey":"old",'
+            .. '"302url":"https://m.qidian.com/"}}'))
+    respond("https://m.qidian.com/?ticket=", {
+        code = 200, headers = { ["Set-Cookie"] = { "ywguid=789; Path=/", "ywkey=web; Path=/" } },
+    })
+    local spec = { app_id = "13", area_id = "31", return_url = "https://m.qidian.com/", ticket = "1" }
+    local got
+    QRLogin:new(spec, function(cookie) got = cookie end):start()
+    Stubs.flush()
+    Assert.eq(got, "ywguid=789; ywkey=web")
+    Assert.matches(requested[3].url, "ticket=t1")
+    Assert.is_nil(requested[3].url:match("^https://m%.qidian%.com/?$"))
+end
+
+do -- 本站常常不 Set-Cookie ywkey（只有 abPolicies）；ticket 落到本站且 JSON 身份齐全就算完成
+    reset()
+    respond(QR_PREFIX, qrcode("no-set-cookie"))
+    respond(POLL_PREFIX, poll(
+        '{"code":0,"scanStatus":5,"data":{"ticket":"t2","ywGuid":"temporary","ywKey":"old"}}'))
+    respond("https://m.qidian.com/?ticket=", {
+        code = 200, body = "<html>shell</html>",
+        headers = { ["Set-Cookie"] = "abPolicies=%7B%7D; Path=/" },
+    })
+    local spec = { app_id = "13", area_id = "31", return_url = "https://m.qidian.com/", ticket = "1" }
+    local got
+    QRLogin:new(spec, function(cookie) got = cookie end):start()
+    Stubs.flush()
+    Assert.eq(got, "ywguid=temporary; ywkey=old")
+end
+
 do -- 即使临时凭据完整，也不跟陌生 HTTPS 地址
     reset()
     respond(QR_PREFIX, qrcode("foreign"))

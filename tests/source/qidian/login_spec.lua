@@ -5,7 +5,6 @@ local Assert = require("support.assert")
 local JSON = require("support.json_stub")
 local Text = require("utils.text")
 package.preload["json"] = function() return JSON end
-package.preload["utils.random"] = function() return { hex = function() return "csrf" end } end
 local responses, requests, cancelled, late = {}, {}, {}, nil
 package.preload["http.request"] = function()
     return {
@@ -56,7 +55,7 @@ do
     Assert.eq(params(3).inputUserId, "13800000000", "官方短信提交不带国际区号")
     Assert.matches(cookie, "ywguid=321")
     Assert.matches(cookie, "ywkey=site%-key")
-    Assert.matches(cookie, "_csrfToken=csrf")
+    Assert.is_nil(cookie:find("_csrfToken", 1, true), "短信登录也不造假 csrf，交给 loginCheck 合并")
     Assert.is_nil(cookie:find("anonymous", 1, true), "匿名登录域 Cookie 不保存为书源凭据")
     Assert.is_nil(requests[1].headers.Cookie:find("ywkey", 1, true), "候选会话不读已保存账号")
     Assert.eq(requests[3].allow_redirects, false)

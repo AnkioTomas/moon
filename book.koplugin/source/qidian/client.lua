@@ -254,20 +254,53 @@ function Client.shelfAsync(cookie, cb)
     end }
 end
 
---- 校验 Cookie：书架页 200 且 pageData.user.isLogin。cookie 显式传入，登录入口先校验再保存。
+--- 把响应 Set-Cookie 合并进现有 Cookie 请求头（同名覆盖）。扫码只有 ywguid/ywkey，
+--- 书架页会补上真正的 _csrfToken / newstatisticUUID 等；丢掉它们 VIP 正文 content 就是空串。
 ---@param cookie string
----@param cb fun(ok: boolean|nil, err: string|nil, account: { id: string }|nil)
+---@param res table|nil
+---@return string
+local function mergeCookies(cookie, res)
+    local jar = {}
+    for pair in tostring(cookie):gmatch("[^;]+") do
+        local name, value = pair:match("^%s*([^=%s]+)%s*=%s*(.-)%s*$")
+        if name and value and value ~= "" then jar[name] = value end
+    end
+    for _idx, line in ipairs(Request.headerAll(res, "Set-Cookie")) do
+        local name, value = line:match("^%s*([^=%s;]+)=([^;]*)")
+        if name and value and value ~= "" then jar[name] = value end
+    end
+    local keys = {}
+    for key in pairs(jar) do keys[#keys + 1] = key end
+    table.sort(keys)
+    local parts = {}
+    for i, key in ipairs(keys) do parts[i] = key .. "=" .. jar[key] end
+    return table.concat(parts, "; ")
+end
+
+--- 校验 Cookie：书架页 200 且 pageData.user.isLogin。cookie 显式传入，登录入口先校验再保存。
+--- 扫码会话可以没有 _csrfToken；校验成功后把书架页 Set-Cookie 合并进 account.cookie 再落盘。
+---@param cookie string
+---@param cb fun(ok: boolean|nil, err: string|nil, account: { id: string, cookie?: string }|nil)
 ---@return { cancel: fun() }
 function Client.loginCheckAsync(cookie, cb)
     if type(cookie) ~= "string" or cookie == "" then
         return SourceBase.defer(cb, nil, _("没有读到 Cookie"))
     end
-    if not Client.csrf(cookie) then
-        return SourceBase.defer(cb, nil, _("起点 Cookie 缺少登录凭证"))
-    end
-    return webGet("/bookshelf/my/", cookie, function(html, err)
-        if not html then cb(nil, err); return end
-        local user = (Mapper.pageData(html) or {}).user
+    return Request.get(WEB .. "/bookshelf/my/", {
+        headers = headers(cookie),
+        timeout = require("http.timeout").net(1),
+        cache_ttl = 0,
+    }, function(raw, err, res)
+        if not raw then
+            local code = res and tonumber(res.code)
+            if code == 302 or code == 403 then
+                cb(nil, loginGone(cookie))
+            else
+                cb(nil, err and tostring(err) or _("请求失败"))
+            end
+            return
+        end
+        local user = (Mapper.pageData(raw) or {}).user
         if not (type(user) == "table" and (user.isLogin == true or user.login == true)) then
             cb(nil, loginGone(cookie))
             return
@@ -278,8 +311,14 @@ function Client.loginCheckAsync(cookie, cb)
         end
         local id = type(guid) == "number" and string.format("%.0f", guid) or guid
         if not id:match("^%d+$") then cb(nil, _("起点账号标识缺失")); return end
-        if cookie == Client.cookie() then require("source.auth").ok(SOURCE_ID) end
-        cb(true, nil, { id = id })
+        local refreshed = mergeCookies(cookie, res)
+        if not Client.csrf(refreshed) then
+            cb(nil, _("起点 Cookie 缺少登录凭证")); return
+        end
+        if cookie == Client.cookie() or refreshed == Client.cookie() then
+            require("source.auth").ok(SOURCE_ID)
+        end
+        cb(true, nil, { id = id, cookie = refreshed })
     end)
 end
 
@@ -495,9 +534,13 @@ function Client.contentAsync(book_id, chapter_id, cb)
             -- fkp 是 base64 的 `window.onkeyfocus("<密钥池>", <版本>)`，只取参数，不执行
             keypool, version = Text.base64Decode(tostring(info.fkp or ""))
                 :match('onkeyfocus%("([^"]+)",%s*(%d+)%)')
-            if not (uid and uid:match("^%d+$") and keypool and version and type(content) == "string") then
+            if type(content) ~= "string" or content == "" then
+                logger.warn("qidian encrypted chapter content empty")
+                cb(nil, _("起点 VIP 章节正文为空，请退出后重新扫码或改用 Cookie 登录")); return
+            end
+            if not (uid and uid:match("^%d+$") and keypool and version) then
                 logger.warn("qidian decrypt inputs missing: uid", uid ~= nil, "keypool", keypool ~= nil,
-                    "version", version ~= nil, "content", type(content))
+                    "version", version ~= nil)
                 cb(nil, require("source.cookie_login").relogin(
                     _("起点中文网"), "https://m.qidian.com/", _("起点中文网 → 起点账号"))); return
             end

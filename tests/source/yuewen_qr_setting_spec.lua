@@ -1,5 +1,6 @@
 --[[--
-阅文三源的设备扫码入口：各用自己的应用参数，先校验再保存；起点补双提交 CSRF。
+阅文三源的设备扫码入口：各用自己的应用参数，先校验再保存。
+起点真 csrf 由 loginCheck 合并书架 Set-Cookie，扫码回调不再造假。
 
 @module tests.source.yuewen_qr_setting_spec
 --]]
@@ -31,9 +32,6 @@ package.preload["source.auth"] = function()
 end
 package.preload["source.registry"] = function()
     return { reload = function() reloads = reloads + 1 end }
-end
-package.preload["utils.random"] = function()
-    return { hex = function(size) Assert.eq(size, 16); return string.rep("a", size * 2) end }
 end
 local options, on_cookie, started, checked, reject
 package.preload["source.yuewen_qr"] = function()
@@ -82,11 +80,7 @@ for _idx, source in ipairs({
     Assert.eq(saved_id, source.id)
     Assert.eq(authorized, source.id)
     Assert.eq(configs[source.id].cookie, checked)
-    if source.id == "qidian" then
-        Assert.matches(checked, "; _csrfToken=" .. string.rep("a", 32))
-    else
-        Assert.eq(checked, "ywguid=guid; ywkey=key")
-    end
+    Assert.eq(checked, "ywguid=guid; ywkey=key")
     Assert.eq(Themed.last("toast").text, "登录成功")
     started = nil
     Setting.login()

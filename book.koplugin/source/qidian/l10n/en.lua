@@ -100,6 +100,7 @@ return {
     ["起点书籍信息为空"] = "Qidian book info is empty",
     ["起点章节内容为空"] = "Qidian chapter is empty",
     ["起点 VIP 章节未购买"] = "This Qidian VIP chapter is not purchased",
+    ["起点 VIP 章节正文为空，请退出后重新扫码或改用 Cookie 登录"] = "Qidian VIP chapter body is empty. Sign out, scan again, or paste Cookie instead",
     ["起点 VIP 章节解密失败"] = "Failed to decrypt this Qidian VIP chapter",
     ["起点 VIP 章节加密方式不受支持"] = "This Qidian VIP chapter uses an unsupported encryption mode",
     ["起点 VIP 章节字体下载失败"] = "Failed to download the Qidian VIP chapter font",

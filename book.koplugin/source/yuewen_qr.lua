@@ -342,10 +342,14 @@ function QRLogin:_follow(gen, url, hop)
         for _idx, value in ipairs(Request.headerAll(res, "Set-Cookie")) do takeCookies(self.jar, value) end
         local location = Text.absoluteUrl(url, Request.header(res, "Location"))
         if tonumber(res.code) >= 300 then
-            if not location then self:_error(gen, _("登录失败：未获取到登录态")); return end
+            if not location then
+                self:show_retry(_("登录失败：未获取到登录态")); return
+            end
             self:_follow(gen, location, hop + 1)
             return
         end
+        -- ticket=1 仍要求落到本站 host；本站实际上常常不 Set-Cookie ywkey（只有 abPolicies），
+        -- 不能把「见到 ywkey Set-Cookie」当成兑换成功条件，否则扫码永远失败。
         if ready(self.jar) and (self.spec.ticket ~= "1" or host == target) then
             self:_done(gen, self.jar)
             return
@@ -374,17 +378,33 @@ function QRLogin:_on_poll(gen, session, wire, res)
         return
     end
     if status == 5 and code == 0 then
+        local ticket = text(data.ticket) or text(wire.ticket)
         local jump = text(data["302url"]) or text(wire["302url"])
-        if not jump and self.spec.ticket == "1" and text(data.ticket) then
-            jump = self.spec.return_url .. (self.spec.return_url:find("?", 1, true) and "&" or "?")
-                .. Text.formEncode({ ticket = data.ticket, ywguid = self.jar.ywguid,
-                    ywOpenId = self.jar.ywopenid or "" })
+        -- 起点 ticket=1：裸 302url（https://m.qidian.com/ 无 ticket）没用，改成本站 ticket 兑换。
+        -- 若 302url 走 ptlogin 中转，照跟——那才是会带上完整跳转链的路径。
+        if self.spec.ticket == "1" then
+            local target = self.spec.return_url:match("^https://([^/?#]+)")
+            local jump_host = jump and jump:match("^https://([^/?#]+)")
+            local bare_home = jump_host == target and not tostring(jump):find("ticket=", 1, true)
+            if ticket and (not jump or bare_home) then
+                jump = self.spec.return_url .. (self.spec.return_url:find("?", 1, true) and "&" or "?")
+                    .. Text.formEncode({
+                        ticket = ticket,
+                        ywguid = self.jar.ywguid or "",
+                        ywOpenId = self.jar.ywopenid or "",
+                    })
+            elseif not jump then
+                self:show_retry(_("登录失败：未获取到登录态"))
+                return
+            end
+            self:_follow(gen, jump, 1)
+            return
         end
         if jump then
             self:_follow(gen, jump, 1)
             return
         end
-        if ready(self.jar) and self.spec.ticket ~= "1" then
+        if ready(self.jar) then
             self:_done(gen, self.jar)
             return
         end
