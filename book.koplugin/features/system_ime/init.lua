@@ -10,7 +10,7 @@
 - 上屏文字直写 `inputbox:addChars/delChar/setText`，不走 `vk:addChar/delChar`，
   避免被内置拼音候选栏拦截。
 - 键盘高度文件 `0` 视为系统键盘已收起：清活动状态并调 `parent:onKeyboardClosed()`。
-- decimal / 密码 / 只读字段即使被误调也不接管。
+- number / 密码 / 只读字段即使被误调也不接管。
 - dex 缺失 / sha256 不符 / `DexClassLoader` 失败：先收系统键盘，延迟 150–200ms
   再补一次内置键盘（路由器已同步显示时不重复），Toast 提示，`last_status=not_ready`，
   用户选择 `input_mode` 保持不变。
