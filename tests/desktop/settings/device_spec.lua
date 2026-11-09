@@ -177,12 +177,11 @@ for _, item in ipairs(sections[3].rows) do
 end
 Assert.eq(sections[3].rows[2].title, "书友交流群")
 Assert.eq(sections[3].rows[3].title, "Bug 反馈群")
-Assert.eq(sections[3].rows[4].title, "使用指南")
-Assert.eq(sections[3].rows[5].title, "关于")
+Assert.eq(sections[3].rows[4].title, "关于")
+Assert.eq(#sections[3].rows, 4, "指南改由叠层 docs 页底追加，月读组不再重复")
+Assert.is_nil(find("使用指南"), "避免与页底「查看指南」重复")
 Assert.is_nil(find("作者"))
 Assert.is_nil(find("打开 GitHub"))
-find("使用指南").callback()
-Assert.eq(opened_url, "https://moon.ankio.net/manual")
 find("关于").callback()
 Assert.eq(sheet.title, "关于")
 local about_icons = {}

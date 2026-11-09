@@ -1,7 +1,7 @@
 return {
     ["准备本地同步失败"] = "Failed to prepare local data for syncing",
     ["使用指南"] = "User guide",
-    ["先在账号页登录要用的书源。要看看使用指南吗？\n之后也可以在「设置 → 设备 → 我的设备 → 使用指南」打开。"] = "Sign in to your book source on the Accounts page first. Would you like to view the user guide?\nYou can also open it later from Settings → Device → My device → User guide.",
+    ["先在账号页登录要用的书源。要看看使用指南吗？\n之后也可以在「设置 → 设备 → 我的设备」页底的「查看指南」打开。"] = "Sign in to your book source on the Accounts page first. Would you like to view the user guide?\nYou can also open it later from the View guide link at the bottom of Settings → Device → My device.",
     ["官网用户手册"] = "Official user manual",
     ["帮助"] = "Help",
     ["打开官网对应说明"] = "Open the relevant guide on the official website",
