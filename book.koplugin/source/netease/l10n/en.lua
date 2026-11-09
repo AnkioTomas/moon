@@ -45,5 +45,4 @@ return {
     ["手机号密码登录"] = "Sign in with phone and password",
     ["请填写密码"] = "Enter your password",
     ["刷新"] = "Refresh",
-    ["正在加载…"] = "Loading…",
 }

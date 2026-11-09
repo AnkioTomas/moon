@@ -63,7 +63,7 @@ function Catalog.parseQiId(id)
     local lang, tag = id:match("^qi:([%w]+):(.*)$")
     if not lang or not LANG_OK[lang] then return nil end
     tag = Text.trim(tag or "")
-    if tag == "" or tag:find("[\0-\31]") then return nil end
+    if tag == "" or tag:find("%c") then return nil end
     return lang, tag
 end
 

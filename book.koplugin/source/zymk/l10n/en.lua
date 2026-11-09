@@ -9,6 +9,7 @@ return {
     ["热血"] = "Hot-blooded",
     ["搞笑"] = "Comedy",
     ["恋爱"] = "Romance",
+    ["生活"] = "Slice of life",
     ["动作"] = "Action",
     ["战争"] = "War",
     ["穿越"] = "Time travel",

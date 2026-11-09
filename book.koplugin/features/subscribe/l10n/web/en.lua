@@ -184,7 +184,6 @@ return {
     ["创业"] = "Startups",
     ["理财"] = "Finance",
     ["随笔博客"] = "Essays & blogs",
-    ["生活"] = "Lifestyle",
     ["运维与数据"] = "DevOps & Data",
     ["邮件通讯"] = "Newsletters",
     ["播客"] = "Podcasts",
