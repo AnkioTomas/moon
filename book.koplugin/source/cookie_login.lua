@@ -47,16 +47,32 @@ local function header(jar)
     return table.concat(parts, "; ")
 end
 
---- 浏览器里复制的 Cookie 请求头（`a=1; b=2`，可带 `Cookie:` 前缀）→ 规范化请求头；格式不对的项丢弃，一项都没有返回空串。
+--- 响应 Cookie 合入现有 jar，同名空值删除。
+---@param jar table<string, string>
+---@param set_cookies string[]
+---@param names table<string, boolean>|nil 仅接收这些名字，并统一转小写
+function CookieLogin.absorb(jar, set_cookies, names)
+    for _idx, line in ipairs(set_cookies) do
+        local name, value = line:match("^%s*([^=%s;]+)=([^;]*)")
+        if name and (value == "" or validPair(name, value)) and (not names or names[name:lower()]) then
+            name = names and name:lower() or name
+            jar[name] = value ~= "" and value or nil
+        end
+    end
+end
+
+--- 浏览器复制的 Cookie 请求头 → 规范化请求头；可合并响应，格式不对的项丢弃。
 ---@param input string
+---@param set_cookies string[]|nil 合并响应，同名覆盖、空值删除
 ---@return string
-function CookieLogin.parse(input)
+function CookieLogin.parse(input, set_cookies)
     local text = tostring(input):gsub("^%s*[Cc]ookie%s*:", "")
     local jar = {}
     for pair in text:gmatch("[^;]+") do
         local name, value = pair:match("^%s*([^=%s]+)%s*=%s*(.-)%s*$")
         if validPair(name, value) then jar[name] = value end
     end
+    if set_cookies then CookieLogin.absorb(jar, set_cookies) end
     return header(jar)
 end
 

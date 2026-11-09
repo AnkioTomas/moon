@@ -385,7 +385,7 @@ function QRLogin:_on_poll(gen, session, wire, res)
         if self.spec.ticket == "1" then
             local target = self.spec.return_url:match("^https://([^/?#]+)")
             local jump_host = jump and jump:match("^https://([^/?#]+)")
-            local bare_home = jump_host == target and not tostring(jump):find("ticket=", 1, true)
+            local bare_home = jump_host == target and not jump:find("ticket=", 1, true)
             if ticket and (not jump or bare_home) then
                 jump = self.spec.return_url .. (self.spec.return_url:find("?", 1, true) and "&" or "?")
                     .. Text.formEncode({

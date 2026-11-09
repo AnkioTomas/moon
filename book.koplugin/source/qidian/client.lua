@@ -11,6 +11,7 @@ chapterUpdateTime 必须是章节更新时间的 unix 秒，空字符串会把 g
 --]]
 
 local Fock = require("source.qidian.fock")
+local CookieLogin = require("source.cookie_login")
 local JSON = require("json")
 local logger = require("utils.log")
 local Mapper = require("source.qidian.mapper")
@@ -254,29 +255,6 @@ function Client.shelfAsync(cookie, cb)
     end }
 end
 
---- 把响应 Set-Cookie 合并进现有 Cookie 请求头（同名覆盖）。扫码只有 ywguid/ywkey，
---- 书架页会补上真正的 _csrfToken / newstatisticUUID 等；丢掉它们 VIP 正文 content 就是空串。
----@param cookie string
----@param res table|nil
----@return string
-local function mergeCookies(cookie, res)
-    local jar = {}
-    for pair in tostring(cookie):gmatch("[^;]+") do
-        local name, value = pair:match("^%s*([^=%s]+)%s*=%s*(.-)%s*$")
-        if name and value and value ~= "" then jar[name] = value end
-    end
-    for _idx, line in ipairs(Request.headerAll(res, "Set-Cookie")) do
-        local name, value = line:match("^%s*([^=%s;]+)=([^;]*)")
-        if name and value and value ~= "" then jar[name] = value end
-    end
-    local keys = {}
-    for key in pairs(jar) do keys[#keys + 1] = key end
-    table.sort(keys)
-    local parts = {}
-    for i, key in ipairs(keys) do parts[i] = key .. "=" .. jar[key] end
-    return table.concat(parts, "; ")
-end
-
 --- 校验 Cookie：书架页 200 且 pageData.user.isLogin。cookie 显式传入，登录入口先校验再保存。
 --- 扫码会话可以没有 _csrfToken；校验成功后把书架页 Set-Cookie 合并进 account.cookie 再落盘。
 ---@param cookie string
@@ -311,7 +289,7 @@ function Client.loginCheckAsync(cookie, cb)
         end
         local id = type(guid) == "number" and string.format("%.0f", guid) or guid
         if not id:match("^%d+$") then cb(nil, _("起点账号标识缺失")); return end
-        local refreshed = mergeCookies(cookie, res)
+        local refreshed = CookieLogin.parse(cookie, Request.headerAll(res, "Set-Cookie"))
         if not Client.csrf(refreshed) then
             cb(nil, _("起点 Cookie 缺少登录凭证")); return
         end

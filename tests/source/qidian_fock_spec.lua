@@ -36,6 +36,66 @@ do
         seen_off = not jit.status()
         return decode(...)
     end
+
+    -- 字体路径由主进程持有：取消只清自己的文件，失败 / 成功也清理，退出前不抢删。
+    do
+        local Shared = require("source.yuewen_fock")
+        local lfs = require("libs/libkoreader-lfs")
+        local pending = {}
+        Job.run = function(worker, opts)
+            local job = { poll = 0.5 }
+            pending[#pending + 1] = { worker = worker, opts = opts, job = job }
+            return job
+        end
+        local files = {}
+        local function worker(paths)
+            files[#files + 1] = paths
+            for index, path in ipairs(paths) do
+                local file = assert(io.open(path, "wb"))
+                assert(file:write("font-" .. index))
+                assert(file:close())
+            end
+            return { text = "restored" }
+        end
+        local text, err
+        local function done(value, reason) text, err = value, reason end
+        Shared.jobAsync("font_cancel", worker, done)
+        Shared.jobAsync("font_failed", worker, done)
+        pending[1].worker()
+        pending[2].worker()
+        pending[1].opts.on_cancelled(pending[1].job)
+        Assert.is_nil(text)
+        for _idx, path in ipairs(files[1]) do Assert.is_nil(lfs.attributes(path)) end
+        for _idx, path in ipairs(files[2]) do Assert.eq(lfs.attributes(path, "mode"), "file") end
+        pending[2].opts.on_failed("timeout")
+        Assert.is_nil(text)
+        Assert.eq(err, "timeout")
+        for _idx, path in ipairs(files[2]) do Assert.is_nil(lfs.attributes(path)) end
+
+        Shared.jobAsync("font_done", worker, done)
+        pending[3].opts.on_done(pending[3].worker())
+        Assert.eq(text, "restored")
+        Assert.is_nil(err)
+        for _idx, path in ipairs(files[3]) do Assert.is_nil(lfs.attributes(path)) end
+
+        Shared.jobAsync("font_exiting", worker, done)
+        pending[4].worker()
+        pending[4].job.pid = 123
+        local ffiUtil = require("ffi/util")
+        local UIManager = require("ui/uimanager")
+        local real_done, real_schedule = ffiUtil.isSubProcessDone, UIManager.scheduleIn
+        local exited, tick = false, nil
+        ffiUtil.isSubProcessDone = function() return exited end
+        UIManager.scheduleIn = function(_self, _delay, fn) tick = fn end
+        pending[4].opts.on_cancelled(pending[4].job)
+        for _idx, path in ipairs(files[4]) do Assert.eq(lfs.attributes(path, "mode"), "file") end
+        Assert.eq(type(tick), "function")
+        exited = true
+        tick()
+        for _idx, path in ipairs(files[4]) do Assert.is_nil(lfs.attributes(path)) end
+        ffiUtil.isSubProcessDone, UIManager.scheduleIn = real_done, real_schedule
+        Job.run = real_run
+    end
     local text = Fock.decrypt(Sample.content, Sample.chapter_id, Sample.keypool, Sample.version, Sample.uid)
     Text.base64Decode = decode
     Assert.eq(#text, 13654)

@@ -49,11 +49,11 @@ end
 ---@param chapter_id string|number
 ---@return BookJob
 function Fock.chapterAsync(info, fixed_font, chapter_id, keypool, version, fuid, cb)
-    return Shared.jobAsync("qqreader_fock", function()
+    return Shared.jobAsync("qqreader_fock", function(temp_paths)
         local plain, err = Fock.decrypt(info.content, chapter_id, keypool, version, fuid)
         if not plain then return { err = err } end
         local font = type(info.fontResponse) == "table" and info.fontResponse or {}
-        return { text = FontRestore.restore(plain, font, fixed_font) }
+        return { text = FontRestore.restore(plain, font, fixed_font, { temp_paths = temp_paths }) }
     end, cb)
 end
 

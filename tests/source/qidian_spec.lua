@@ -218,6 +218,33 @@ do
     Assert.is_nil(account)
 end
 
+-- 书架响应明确删除 csrf：不能保留旧值继续判成功、回传过期凭据。
+do
+    requests, replies = {}, {
+        { body = page({ user = { isLogin = true, guid = 9 } }),
+            res = { code = 200, headers = { ["Set-Cookie"] = "_csrfToken=; Max-Age=0; Path=/" } } },
+    }
+    local ok, err, account
+    Client.loginCheckAsync("ywguid=9; ywkey=k; _csrfToken=old", function(v, e, a) ok, err, account = v, e, a end)
+    Assert.is_nil(ok)
+    Assert.matches(err, "缺少登录凭证")
+    Assert.is_nil(account)
+end
+
+-- 非 csrf Cookie 删除、覆盖仍保留可用登录态。
+do
+    requests, replies = {}, {
+        { body = page({ user = { isLogin = true, guid = 9 } }),
+            res = { code = 200, headers = { ["Set-Cookie"] = {
+                "old=; Max-Age=0", "_csrfToken=new; Path=/",
+            } } } },
+    }
+    local ok, account
+    Client.loginCheckAsync("ywguid=9; ywkey=k; _csrfToken=old; old=gone", function(v, _err, a) ok, account = v, a end)
+    Assert.is_true(ok)
+    Assert.eq(account.cookie, "_csrfToken=new; ywguid=9; ywkey=k")
+end
+
 -- 加入书架走 POST，书号在表单里。
 do
     requests, replies = {}, { { body = '{"code":0,"data":{"9":{"code":0,"message":"操作成功"}}}' } }

@@ -26,12 +26,12 @@ function FontRestore.looksLikeFont(bytes)
     return head == "\0\1\0\0" or head == "OTTO" or head == "true" or head == "ttcf" or head == "wOFF"
 end
 
-local function writeTemp(bytes)
-    local path = require("utils.paths").tmpname(".font")
+local function writeTemp(bytes, path)
     local file = assert(io.open(path, "wb"))
-    file:write(bytes)
-    file:close()
-    return path
+    local ok, err = file:write(bytes)
+    local closed, close_err = file:close()
+    assert(ok, err)
+    assert(closed, close_err)
 end
 
 local function randomFontBytes(font)
@@ -45,7 +45,7 @@ end
 ---@param fixed_font string fixedFontTtf/woff2 下载下来的字节
 ---@param rare integer[] 扩展 A 区码位
 ---@param han integer[] 常用汉字码位
----@param opts table|nil { threshold=number }
+---@param opts table { threshold=number, temp_paths=string[]|nil }
 ---@return table rare_map
 ---@return table han_map
 local function recognize(random_font, fixed_font, rare, han, opts)
@@ -55,14 +55,16 @@ local function recognize(random_font, fixed_font, rare, han, opts)
         for _idx, path in ipairs(paths) do os.remove(path) end
     end
     if #rare > 0 and #rare_bytes > 0 then
-        paths[#paths + 1] = writeTemp(rare_bytes)
+        paths[#paths + 1] = opts.temp_paths and opts.temp_paths[1] or require("utils.paths").tmpname(".font")
+        writeTemp(rare_bytes, paths[#paths])
         labels[#labels + 1] = "rare"
         tasks[#tasks + 1] = {
             font_path = paths[#paths], codes = rare, limit = RARE_LIMIT, threshold = opts and opts.threshold,
         }
     end
     if #han > 0 and fixed_font and #fixed_font > 0 then
-        paths[#paths + 1] = writeTemp(fixed_font)
+        paths[#paths + 1] = opts.temp_paths and opts.temp_paths[2] or require("utils.paths").tmpname(".font")
+        writeTemp(fixed_font, paths[#paths])
         labels[#labels + 1] = "han"
         tasks[#tasks + 1] = {
             font_path = paths[#paths], codes = han, limit = FIXED_LIMIT, threshold = opts and opts.threshold,
@@ -134,7 +136,7 @@ local fixConfusions
 ---@param plain string Fock 解出的正文
 ---@param font table { css=string, randomFont=table|nil }
 ---@param fixed_font string|nil fixedFont 下载下来的字节；没有字体加密的章为 nil
----@param opts table|nil { dedupe=boolean, threshold=number }
+---@param opts table|nil { dedupe=boolean, confusions=boolean, threshold=number, temp_paths=string[]|nil }
 ---@return string
 function FontRestore.restore(plain, font, fixed_font, opts)
     opts = opts or {}

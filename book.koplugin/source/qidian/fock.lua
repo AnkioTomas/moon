@@ -13,7 +13,6 @@ local Fock = {}
 
 -- 起点 font 层的字形与参考 Noto 偶有 0.65~0.75 的形近字（如 䵻→对），比 QQ阅读放宽一点。
 local FONT_THRESHOLD = 0.65
-local RESTORE_OPTS = { dedupe = true, confusions = true, threshold = FONT_THRESHOLD }
 
 ---@param info table chapterInfo
 ---@return table
@@ -29,8 +28,9 @@ end
 
 --- 还原字体层；抛错转成 `{ err }`，不让子进程崩在 on_failed 里丢上下文。
 ---@return { text: string|nil, err: string|nil }
-local function restore(html, info, fixed_font)
-    local ok, text = pcall(FontRestore.restore, html, fontData(info), fixed_font, RESTORE_OPTS)
+local function restore(html, info, fixed_font, temp_paths)
+    local ok, text = pcall(FontRestore.restore, html, fontData(info), fixed_font,
+        { dedupe = true, confusions = true, threshold = FONT_THRESHOLD, temp_paths = temp_paths })
     if not ok then return { err = "font: " .. tostring(text) } end
     return { text = text }
 end
@@ -88,10 +88,10 @@ end
 ---@param fixed_font string fixedFontTtf 下载下来的字节
 ---@return BookJob
 function Fock.chapterAsync(info, fixed_font, chapter_id, keypool, version, uid, cb)
-    return Shared.jobAsync("qidian_fock", function()
+    return Shared.jobAsync("qidian_fock", function(temp_paths)
         local plain, err = Fock.decrypt(info.content, chapter_id, keypool, version, uid)
         if not plain then return { err = "decrypt: " .. tostring(err) } end
-        return restore(plain, info, fixed_font)
+        return restore(plain, info, fixed_font, temp_paths)
     end, cb)
 end
 
@@ -101,8 +101,8 @@ end
 ---@param fixed_font string
 ---@return BookJob
 function Fock.restoreAsync(html, info, fixed_font, cb)
-    return Shared.jobAsync("qidian_font", function()
-        return restore(html, info, fixed_font)
+    return Shared.jobAsync("qidian_font", function(temp_paths)
+        return restore(html, info, fixed_font, temp_paths)
     end, cb)
 end
 

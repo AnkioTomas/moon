@@ -16,6 +16,18 @@ Assert.eq(CookieLogin.parse("  "), "")
 Assert.eq(CookieLogin.parse("乱七八糟"), "")
 Assert.eq(CookieLogin.parse("__Host-sid=1; a.b=2; c|d=3"), "__Host-sid=1; a.b=2; c|d=3", "RFC 6265 token 字符都算合法名")
 
+-- 请求头与短信 jar 共用响应更新语义：同名覆盖、空值删除、属性不入请求头。
+do
+    local updates = { "a=new=token; Path=/", "b=; Max-Age=0; Path=/", "c=3; HttpOnly", "bad name=x" }
+    Assert.eq(CookieLogin.parse("a=old; b=2", updates), "a=new=token; c=3")
+    local jar = { ywkey = "old", other = "keep" }
+    CookieLogin.absorb(jar, { "YWKEY=; Max-Age=0", "YWGUID=9; Path=/", "other=drop" },
+        { ywkey = true, ywguid = true })
+    Assert.is_nil(jar.ywkey)
+    Assert.eq(jar.ywguid, "9")
+    Assert.eq(jar.other, "keep")
+end
+
 -- fromPayload：只收本域及子域，去掉前导点，域名不区分大小写
 local payload = { cookies = {
     { domain = ".qidian.com", name = "ywkey", value = "k" },

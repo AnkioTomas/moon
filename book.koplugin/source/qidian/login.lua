@@ -51,16 +51,6 @@ local function cookies(jar)
     return CookieLogin.parse(table.concat(parts, "; "))
 end
 
-local function absorb(jar, res, only_login)
-    for _idx, line in ipairs(Request.headerAll(res, "Set-Cookie")) do
-        local name, value = line:match("^%s*([^=%s;]+)=([^;]*)")
-        if name and (not only_login or LOGIN_KEYS[name:lower()]) then
-            name = only_login and name:lower() or name
-            jar[name] = value ~= "" and value or nil
-        end
-    end
-end
-
 function Login:_get(url, cb)
     if self.cancelled then return end
     local host = url:match("^https://([^/?#]+)")
@@ -79,8 +69,9 @@ function Login:_get(url, cb)
         if not res or err then cb(nil, err and tostring(err) or _("请求失败")); return end
         local status = tonumber(res.code)
         if not status or status < 200 or status >= 400 then cb(nil, "HTTP " .. tostring(res.code)); return end
-        if host == "ptlogin.yuewen.com" then absorb(self.jar, res, false) end
-        absorb(self.webjar, res, true)
+        local set_cookies = Request.headerAll(res, "Set-Cookie")
+        if host == "ptlogin.yuewen.com" then CookieLogin.absorb(self.jar, set_cookies) end
+        CookieLogin.absorb(self.webjar, set_cookies, LOGIN_KEYS)
         cb(res)
     end)
     if pending then self.job = job end

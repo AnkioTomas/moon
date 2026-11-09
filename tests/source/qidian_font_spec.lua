@@ -52,3 +52,41 @@ Assert.eq(#FontRestore.dropDecoyHalf({ "春风来", "夏雨至", "秋叶落", "�
 
 -- 常见搭配里的“干”不能被改成“于”。
 Assert.eq(FontRestore.fixConfusions("在干什么，对干净的"), "在干什么，对干净的")
+
+-- 识别使用主进程交下来的两条路径，正常 / glyph 抛错都及时删除。
+do
+    local Paths = require("utils.paths")
+    local lfs = require("libs/libkoreader-lfs")
+    local dir = Paths.tmpDir() .. "/font_restore_spec"
+    assert(Paths.ensureDir(dir .. "/noto"))
+    local ref = dir .. "/noto/NotoSansCJKsc-Regular.otf"
+    local file = assert(io.open(ref, "wb"))
+    assert(file:write("reference"))
+    assert(file:close())
+    local old_fontlist, old_glyph = package.loaded["fontlist"], package.loaded["utils.glyph"]
+    package.loaded["fontlist"] = { fontdir = dir }
+    local paths = { Paths.tmpname(".font"), Paths.tmpname(".font") }
+    local fixed = "\0\1\0\0fixed"
+    package.loaded["utils.glyph"] = {
+        recognize = function(_ref, _cache, tasks)
+            Assert.eq(tasks[1].font_path, paths[1])
+            Assert.eq(tasks[2].font_path, paths[2])
+            local font = assert(io.open(tasks[2].font_path, "rb"))
+            Assert.eq(font:read("*a"), fixed)
+            font:close()
+            return { { [0x4909] = "乙" }, { [0x7532] = "丙" } }
+        end,
+    }
+    local font = { css = "", randomFont = { data = { 0, 1, 0, 0 } } }
+    Assert.eq(FontRestore.restore("<p>甲䤉</p>", font, fixed, { temp_paths = paths }), "丙乙")
+    for _idx, path in ipairs(paths) do Assert.is_nil(lfs.attributes(path)) end
+    package.loaded["utils.glyph"].recognize = function() error("glyph failed", 0) end
+    Assert.errors(function()
+        FontRestore.restore("<p>甲䤉</p>", font, fixed, { temp_paths = paths })
+    end, "glyph failed")
+    for _idx, path in ipairs(paths) do Assert.is_nil(lfs.attributes(path)) end
+    package.loaded["fontlist"], package.loaded["utils.glyph"] = old_fontlist, old_glyph
+    os.remove(ref)
+    lfs.rmdir(dir .. "/noto")
+    lfs.rmdir(dir)
+end

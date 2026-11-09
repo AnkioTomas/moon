@@ -48,11 +48,11 @@ end
 ---@param fixed_font string|nil fontResponse.fixedFontTtf 下载下来的字节；没有字体加密的章为 nil
 ---@return BookJob
 function Fock.chapterAsync(info, fixed_font, chapter_id, keypool, version, uid, cb)
-    return Shared.jobAsync("xiaoxiang_fock", function()
+    return Shared.jobAsync("xiaoxiang_fock", function(temp_paths)
         local plain, err = Fock.decrypt(info.chapterContent, chapter_id, keypool, version, uid)
         if not plain then return { err = err } end
         local font = type(info.fontResponse) == "table" and info.fontResponse or {}
-        return { text = require("source.yuewen_fonts").restore(plain, font, fixed_font) }
+        return { text = require("source.yuewen_fonts").restore(plain, font, fixed_font, { temp_paths = temp_paths }) }
     end, cb)
 end
 

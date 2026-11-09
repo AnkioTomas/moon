@@ -145,18 +145,30 @@ end
 
 --- 在子进程里跑 worker（解密 / 字体还原），结果 `{ text, err }` 经 cb(text, err) 交回主进程。
 ---@param name string 任务名（日志）
----@param worker fun(): { text: string|nil, err: string|nil }
+---@param worker fun(temp_paths: string[]): { text: string|nil, err: string|nil }
 ---@param cb fun(text: string|nil, err: string|nil)
 ---@return BookJob
 function Fock.jobAsync(name, worker, cb)
-    return Job.run(worker, {
+    local Paths = require("utils.paths")
+    local temp_paths = { Paths.tmpname(".font"), Paths.tmpname(".font") }
+    local job
+    local function cleanup()
+        -- SIGKILL 后仍可能在内核里完成创建文件，等子进程退出再收尾。
+        if job and job.pid and not require("ffi/util").isSubProcessDone(job.pid) then
+            require("ui/uimanager"):scheduleIn(job.poll, cleanup)
+            return
+        end
+        for _idx, path in ipairs(temp_paths) do os.remove(path) end
+    end
+    job = Job.run(function() return worker(temp_paths) end, {
         name = name,
         kind = "light",
         timeout = 600,
-        on_done = function(res) cb(res.text, res.err) end,
-        on_failed = function(err) cb(nil, tostring(err)) end,
-        on_cancelled = function() end,
+        on_done = function(res) cleanup(); cb(res.text, res.err) end,
+        on_failed = function(err) cleanup(); cb(nil, tostring(err)) end,
+        on_cancelled = cleanup,
     })
+    return job
 end
 
 return Fock

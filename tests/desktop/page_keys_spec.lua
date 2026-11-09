@@ -18,7 +18,9 @@ for _, name in ipairs({
 end
 package.preload["ui/geometry"] = ctorModule
 package.preload["ui/uimanager"] = function() return { _window_stack = {} } end
-package.preload["desktop.gesture"] = function() return { range = function() return {} end } end
+package.preload["desktop.gesture"] = function()
+    return { range = function() return {} end, dispatcher = function(fm) return { fm = fm } end }
+end
 package.preload["gettext"] = function() return function(text) return text end end
 local desktop_settings = {}
 local ui_settings = {}
@@ -46,7 +48,7 @@ local Desktop = require("desktop")
 Desktop.build = function() end
 
 local function make()
-    local d = setmetatable({ key_events = {} }, { __index = Desktop })
+    local d = setmetatable({ key_events = {}, plugin = { ui = {} } }, { __index = Desktop })
     d:init()
     return d
 end
