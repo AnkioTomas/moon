@@ -1,0 +1,36 @@
+# 第三方组件
+
+`classes.dex` 来自 [titandrive/koboard](https://github.com/titandrive/koboard) v0.6.5
+（commit `d49f0981cdafd8a3e387a7f9e6be5d45f88cea08`），用于在 Android 上提供一个带
+`InputConnection` 的 `View`，把系统输入法上屏的文本通过文件快照交给 Lua。
+
+- 上游源码：`java/`（见 `java/upstream.md` 的记录与文件哈希）
+- 构建脚本：`tools/build_android_ime_dex.sh`
+- 产物哈希：`classes.dex.sha256`（构建后校验）
+- 许可：MIT（上游 README 声明；`java/LICENSE` 保留原文）
+
+原项目以 MIT 许可发布：
+
+```
+MIT License
+
+Copyright (c) titandrive
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
