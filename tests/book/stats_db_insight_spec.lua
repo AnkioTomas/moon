@@ -61,7 +61,14 @@ book("manual", 1, 0.2)
 book("unread", 0, 0.995)
 book("half", 0, 0.5)
 book("none", 0, nil)
+-- 产品「软删除」= hidden=1；下架墓碑 = deleted=1。两类读完都该进统计。
+book("soft_done", 1, 0.3)
+book("soft_half", 0, 0.4)
+book("tomb_done", 1, 0.3)
+book("tomb_half", 0, 0.4)
 Assert.is_true(Base.exec("UPDATE books SET read_state=2 WHERE stable_id='unread';"))
+Assert.is_true(Base.exec("UPDATE books SET hidden=1 WHERE stable_id IN ('soft_done','soft_half');"))
+Assert.is_true(Base.exec("UPDATE books SET deleted=1 WHERE stable_id IN ('tomb_done','tomb_half');"))
 add("done", "page", 9000, 120)
 
 local finished = StatsDB.progressBooks("local", true)
@@ -69,14 +76,18 @@ local ids = {}
 for _idx, b in ipairs(finished) do ids[b.stable_id] = b end
 Assert.not_nil(ids.done)
 Assert.not_nil(ids.manual)
+Assert.not_nil(ids.soft_done, "软删除已读书仍计入读完")
+Assert.not_nil(ids.tomb_done, "下架墓碑已读书仍计入读完")
 Assert.is_nil(ids.unread, "标未读不算读完")
 Assert.is_nil(ids.half)
+Assert.is_nil(ids.soft_half, "软删除在读书不算读完")
+Assert.is_nil(ids.tomb_half, "下架在读书不算读完")
 Assert.eq(ids.done.last_time, 9000, "最后阅读时间取本机记录")
 Assert.eq(ids.done.seconds, 120)
 Assert.eq(ids.manual.last_time, 0, "没记录没进度时间时为 0")
 
 local reading = StatsDB.progressBooks("local", false, 5)
-Assert.len(reading, 1)
+Assert.len(reading, 1, "软删除/下架在读书不进在读列表")
 Assert.eq(reading[1].stable_id, "half")
 
 return true
