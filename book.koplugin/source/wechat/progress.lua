@@ -118,8 +118,14 @@ function Position.encode(identity, chapter, pos, source, format)
         if pos.chapter_fraction == 0 then return 0, "", 0 end
         return nil, nil, nil, _("无法定位阅读进度")
     end
-    return Annotations.toWirePosition(wire,
-        Annotations.flow(localHtml(identity, chapter, source, format)), pos.locator)
+    local flow = Annotations.flow(localHtml(identity, chapter, source, format))
+    local offset, summary, fraction, err = Annotations.toWirePosition(
+        wire, flow, pos.locator, format == "html" and source or nil)
+    -- 纯图章没有可见正文摘要；章内页比例比 HTML 字节比例更贴近实际翻页位置。
+    if offset ~= nil and flow.count == 0 and pos.chapter_fraction ~= nil then
+        return offset, summary or "", pos.chapter_fraction
+    end
+    return offset, summary, fraction, err
 end
 
 return Position

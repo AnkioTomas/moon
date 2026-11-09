@@ -70,3 +70,33 @@ io.open = open
 Assert.is_nil(ok)
 Assert.eq(err, "read-only cache")
 os.remove(path)
+
+do
+    local comic = '<html><body>'
+        .. '<div><img class="qqreader-fullimg" src="a.jpg"/></div>'
+        .. '<div><img class="qqreader-fullimg" src="b.jpg"/></div>'
+        .. '</body></html>'
+    local comic_id = { source_id = "wechat", stable_id = "progress-comic-spec" }
+    local comic_chapter = { idx = 4, uid = "29", title = "向日葵花园" }
+    local comic_local = Paths.chapterPath(comic_id.stable_id, 4, comic_id.source_id)
+    Paths.ensureDir(comic_local:match("(.+)/[^/]+$"))
+    local out = assert(io.open(comic_local, "wb"))
+    out:write(comic)
+    out:close()
+    local pos = {
+        locator = "/html/body/div[2]/img.0",
+        chapter_fraction = 0.5,
+        extra = {},
+    }
+    local offset, summary, fraction, err = Position.encode(comic_id, comic_chapter, pos, comic, "html")
+    Assert.is_nil(err)
+    Assert.not_nil(offset)
+    Assert.is_true(offset > 0, "第二张图不应落在文档开头")
+    Assert.eq(summary, "")
+    Assert.eq(fraction, 0.5, "纯图章沿用阅读器章内页比例")
+    -- 正文回归：原有文本章 encode 不被破坏
+    Assert.eq(Position.encode(identity, chapter, {
+        locator = "/html/body/p/text().1", fraction = 0.5, extra = { chapter_offset = 16 },
+    }, source, "html"), 16)
+    os.remove(comic_local)
+end
