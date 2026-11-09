@@ -239,6 +239,16 @@ test_row.callback()
 Assert.eq(toasts[1], "系统输入法不可用")
 Assert.eq(desktop.updates, 1)
 
+-- 测试结束（异步对话框关闭）后再刷新设置页，结果立即可见
+reset{
+    platform = "linux",
+    mode = "system",
+    backend = { test = function(done) done() end },
+}
+test_row = byTitle(rowsOf(Setting.entries(desktop)[1]), "测试系统输入法")
+test_row.callback()
+Assert.is_true(desktop.updates >= 2, "测试完成后刷新设置页")
+
 -- Windows / macOS 副标题
 reset{ platform = "windows", mode = "system" }
 Assert.eq(Setting.entries(desktop)[1].subtitle, "Windows 系统输入法（微软拼音等）")
@@ -252,6 +262,8 @@ Assert.eq(entry.subtitle, "WSL 不支持 Windows 输入法；需先装 fcitx5")
 rows = rowsOf(entry)
 Assert.len(rows, 3)
 Assert.is_true(rows[2].note:find("fcitx5", 1, true) ~= nil, "WSL 文案必须提到 fcitx5")
+Assert.is_true(rows[2].note:find("fcitx5 --disable=wayland", 1, true) ~= nil, "WSL 文案给出 fcitx5 启动参数")
+Assert.is_true(rows[2].note:find("XMODIFIERS=@im=fcitx", 1, true) ~= nil, "WSL 文案给出 XMODIFIERS")
 Assert.is_true(rows[2].note:find("Windows 输入法", 1, true) ~= nil, "WSL 文案说明 Windows 输入法不可用")
 Assert.not_nil(byTitle(rows, "测试系统输入法"))
 

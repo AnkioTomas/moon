@@ -45,6 +45,12 @@ Assert.eq(Platform.detect(device{ isSDL = true }, env{}, "Linux"), "linux")
 Assert.eq(Platform.detect(device{ isSDL = true }, env{ WSL_DISTRO_NAME = "Ubuntu" }, "Linux"), "wsl")
 Assert.eq(Platform.detect(device{ isSDL = true }, env{ WSL_INTEROP = "/run/WSL/1_interop" }, "Linux"), "wsl")
 
+-- 环境变量缺失时用 /proc/sys/kernel/osrelease 兜底
+Assert.eq(Platform.detect(device{ isSDL = true }, env{}, "Linux", "6.6.1-microsoft-standard-WSL2"), "wsl")
+Assert.eq(Platform.detect(device{ isSDL = true }, env{}, "Linux", "6.6.1-generic"), "linux")
+Assert.is_true(Platform.isWSL(env{}, "6.6.1-Microsoft-standard-WSL2"))
+Assert.is_false(Platform.isWSL(env{}, "6.6.1-generic"))
+
 -- 墨水屏判定独立于平台：Android 电纸书也要走内置键盘
 Assert.is_true(Platform.isEink(device{ isAndroid = true, hasEinkScreen = true }))
 Assert.is_false(Platform.isEink(device{ isAndroid = true }))

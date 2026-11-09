@@ -61,6 +61,8 @@ function Backend.load(name)
         -- show 抛错时返回 false，让路由回退到原生键盘，而不是静默留下空屏。
         show = safe(mod.show, false),
         hide = safe(mod.hide, nil),
+        -- 复位未提交的系统输入法组合串；后端不支持时保持 nil。
+        reset = type(mod.reset) == "function" and safe(mod.reset, nil) or nil,
         status = safe(mod.status, available() and "ready" or "unavailable"),
         test = type(mod.test) == "function" and function(...)
             local ok_test, value = pcall(mod.test, ...)
