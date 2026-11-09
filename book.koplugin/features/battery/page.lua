@@ -128,15 +128,14 @@ local function hardwareRows(row)
     return rows
 end
 
---- 一组用法：总时长 / 消耗或充电 / 每小时 / 预估。
----@param title string
+--- 一组用法：累计时长 / 消耗或充电 / 每小时 / 预估；调用方用 title 做分节标题。
 ---@param block table
 ---@param consumed_title string
 ---@param estimate_title string
 ---@return (fun(iw: number): table)[]
-local function usageRows(title, block, consumed_title, estimate_title)
+local function usageRows(block, consumed_title, estimate_title)
     return {
-        infoRow("schedule", title, Stats.formatDuration(block.time)),
+        infoRow("schedule", _("累计时长"), Stats.formatDuration(block.time)),
         infoRow("battery_android_full", consumed_title, block.consumed),
         infoRow("speed", _("每小时电量变化"), block.rate),
         infoRow("timelapse", estimate_title, block.remaining),
@@ -144,20 +143,9 @@ local function usageRows(title, block, consumed_title, estimate_title)
 end
 
 ---@param desktop BookDesktop|nil
----@return (fun(iw: number): table)[]
-local function statsRows(desktop)
-    local sum = Stats.summary()
-    local rows = {
-        infoRow("info", _("说明"), nil, _("按电量百分比变化估算，高电量段可能不准。")),
-    }
-    local function append(list)
-        for _idx, row in ipairs(list) do rows[#rows + 1] = row end
-    end
-    append(usageRows(_("上次充电以来的唤醒"), sum.awake, _("已消耗"), _("预计可用时长")))
-    append(usageRows(_("上次充电以来的休眠"), sum.sleeping, _("已消耗"), _("预计可用时长")))
-    append(usageRows(_("上次充电"), sum.charging_usage, _("已充电"), _("预计充满用时")))
-    append(usageRows(_("自从上次充电"), sum.discharging, _("已消耗"), _("预计可用时长")))
-    rows[#rows + 1] = function(iw)
+---@return fun(iw: number): table
+local function resetRow(desktop)
+    return function(iw)
         return Row.widget({
             width = iw, kind = "action", icon = "restart_alt",
             title = _("重置用法统计"),
@@ -176,7 +164,25 @@ local function statsRows(desktop)
             end,
         })
     end
-    return rows
+end
+
+---@param desktop BookDesktop|nil
+---@return BookThemeSection[]
+local function statsSections(desktop)
+    local sum = Stats.summary()
+    return {
+        {
+            title = _("用法统计"),
+            rows = {
+                infoRow("info", _("说明"), nil, _("按电量百分比变化估算，高电量段可能不准。")),
+            },
+        },
+        { title = _("上次充电以来的唤醒"), rows = usageRows(sum.awake, _("已消耗"), _("预计可用时长")) },
+        { title = _("上次充电以来的休眠"), rows = usageRows(sum.sleeping, _("已消耗"), _("预计可用时长")) },
+        { title = _("上次充电"), rows = usageRows(sum.charging_usage, _("已充电"), _("预计充满用时")) },
+        { title = _("自从上次充电"), rows = usageRows(sum.discharging, _("已消耗"), _("预计可用时长")) },
+        { rows = { resetRow(desktop) } },
+    }
 end
 
 ---@param desktop BookDesktop|nil
@@ -189,10 +195,9 @@ function Page.sections(desktop)
     else
         sections[#sections + 1] = { title = _("此设备不支持"), rows = unsupportedRows(result.report) }
     end
-    sections[#sections + 1] = {
-        title = _("用法统计"),
-        rows = statsRows(desktop),
-    }
+    for _idx, section in ipairs(statsSections(desktop)) do
+        sections[#sections + 1] = section
+    end
     return sections
 end
 
