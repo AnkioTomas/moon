@@ -169,6 +169,13 @@ package.preload["ffi/blitbuffer"] = function()
     }
 end
 package.preload["gettext"] = function() return function(s) return s end end
+local ui_conf = { library_cover_radius = "theme" }
+package.preload["utils.settings"] = function()
+    return {
+        get = function() return ui_conf end,
+        save = function(_, values) ui_conf = values end,
+    }
+end
 
 package.loaded["ui.widgets.book"] = nil
 local Book = require("ui.widgets.book")
@@ -277,6 +284,16 @@ Assert.eq(bare.style.shadow, 2)
 local flat = select(1, Book.cover(nil, nil, {}, 80, 120, { shadow = false }))
 Assert.eq(flat.style.radius, 12, "无阴影也保留 raised 圆角，不回落 image 的 0")
 Assert.eq(flat.style.shadow, 0)
+
+ui_conf.library_cover_radius = "square"
+local squared = select(1, Book.cover(nil, nil, {}, 80, 120, {}))
+Assert.eq(squared.style.radius, 0, "封面圆角=直角")
+Assert.eq(squared.style.shadow, 2, "只改半径，阴影仍跟主题")
+ui_conf.library_cover_radius = "round"
+local rounded = select(1, Book.cover(nil, nil, {}, 80, 120, { shadow = false }))
+Assert.eq(rounded.style.radius, 12, "封面圆角=圆角，无阴影也强制 12")
+ui_conf.library_cover_radius = "theme"
+Assert.eq(select(1, Book.cover(nil, nil, {}, 80, 120, {})).style.radius, 12, "跟随主题回到 raised")
 
 -- 混合模式：封面按书的 source_id 解析属主源，不用活跃源冒充。
 resolved = {}

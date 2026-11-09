@@ -13,6 +13,11 @@ local STYLES = {
     { value = "kindle", text = _("Kindle") },
     { value = "kobo", text = _("Kobo") },
 }
+local COVER_RADII = {
+    { value = "theme", text = _("跟随主题") },
+    { value = "round", text = _("圆角") },
+    { value = "square", text = _("直角") },
+}
 local RANDOM_SCOPES = {
     { value = "new", text = _("未读") },
     { value = "reading", text = _("未读 + 阅读中") },
@@ -136,6 +141,8 @@ function Library:sections(desktop)
             gridRow,
             choiceRow(desktop, "library_style", "style", _("封面风格"),
                 _("Kindle：状态叠在封面上；Kobo：封面干净，下载状态、进度和更多收在封面下方"), STYLES),
+            choiceRow(desktop, "library_cover_radius", "rounded_corner", _("封面圆角"),
+                _("只改书封四角；跟随主题时与界面风格一致"), COVER_RADII),
             toggleRow(desktop, "library_title", "title", _("显示名称"), _("封面下方显示书名")),
             toggleRow(desktop, "library_author", "person", _("显示作者"), _("书名下方显示作者")),
         } },

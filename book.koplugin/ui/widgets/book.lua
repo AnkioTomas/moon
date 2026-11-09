@@ -30,6 +30,7 @@ local Box = require("ui.themes.widgets.box")
 local PlainCover = require("ui.widgets.plain_cover")
 local Text = require("ui.themes.widgets.text")
 local Theme = require("ui.themes")
+local MoonSettings = require("utils.settings")
 local Paths = require("utils.paths")
 local lfs = require("libs/libkoreader-lfs")
 local _ = require("gettext")
@@ -541,6 +542,14 @@ function Book.cover(plugin, source, book, cw, ch, opts)
         }
     else
         style = t.raised
+    end
+    -- 图书馆「封面圆角」只动封面半径；theme 跟界面，round/square 覆盖主题值。
+    local radius_mode = MoonSettings.get("ui").library_cover_radius
+    if radius_mode == "round" or radius_mode == "square" then
+        local out = {}
+        for k, v in pairs(style) do out[k] = v end
+        out.radius = radius_mode == "square" and 0 or Theme.px(12)
+        style = out
     end
     -- 内边距只让出边框：Box 先画边框再画子件，图贴着边框内沿。
     local cover_pad = Theme.px(style.border or 0)
