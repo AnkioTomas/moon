@@ -152,6 +152,167 @@ do
         "无法连接 WebDAV 服务器：Could not connect: Network is unreachable")
 end
 
+-- 唤醒半联网：connection refused（大小写不敏感）后台不弹；手动刷新仍提示。
+do
+    Themed.made = {}
+    source.syncBooksAsync = function(_, _, cb)
+        cb(nil, "Could not connect: connection refused")
+        return { cancel = function() end }
+    end
+    Sync.open(desktop)
+    Assert.is_nil(Themed.last("toast"), "connection refused 后台不打扰")
+    Sync.refresh(desktop)
+    Assert.eq(Themed.last("toast").text, "Could not connect: connection refused")
+
+    Themed.made = {}
+    source.syncBooksAsync = function(_, _, cb)
+        cb(nil, "Could not connect: Connection refused")
+        return { cancel = function() end }
+    end
+    Sync.open(desktop)
+    Assert.is_nil(Themed.last("toast"), "Connection refused 后台不打扰")
+    Sync.refresh(desktop)
+    Assert.eq(Themed.last("toast").text, "Could not connect: Connection refused")
+end
+
+-- 半联网后台失败后延迟重试：成功不弹；仍失败保持静默；不叠加、不无限重试；关桌面取消。
+do
+    local UIManager = require("ui/uimanager")
+    local pending = {}
+    local orig_in, orig_un = UIManager.scheduleIn, UIManager.unschedule
+    function UIManager:scheduleIn(delay, fn)
+        pending[#pending + 1] = { delay = delay, fn = fn }
+    end
+    function UIManager:unschedule(fn)
+        for i = #pending, 1, -1 do
+            if pending[i].fn == fn then table.remove(pending, i) end
+        end
+    end
+    local function fire()
+        Assert.is_true(#pending > 0, "应已安排重试")
+        local item = table.remove(pending, 1)
+        item.fn()
+        return item.delay
+    end
+
+    local calls = 0
+    Themed.made = {}
+    source.syncBooksAsync = function(_, _, cb)
+        calls = calls + 1
+        if calls == 1 then
+            cb(nil, "Could not connect: Connection refused")
+        else
+            cb({ skipped = true })
+        end
+        return { cancel = function() end }
+    end
+    Sync.open(desktop)
+    Assert.eq(calls, 1)
+    Assert.is_nil(Themed.last("toast"), "首次半联网后台不打扰")
+    Assert.eq(#pending, 1)
+    Assert.eq(fire(), 3)
+    Assert.eq(calls, 2, "约 3s 后重试")
+    Assert.is_nil(Themed.last("toast"), "重试成功不提示")
+    Assert.eq(#pending, 0, "成功后不再预约")
+
+    calls = 0
+    Themed.made = {}
+    source.syncBooksAsync = function(_, _, cb)
+        calls = calls + 1
+        cb(nil, "Could not connect: connection refused")
+        return { cancel = function() end }
+    end
+    Sync.open(desktop)
+    Assert.eq(calls, 1)
+    Assert.is_nil(Themed.last("toast"))
+    Assert.eq(fire(), 3)
+    Assert.eq(calls, 2, "约 3s 再试")
+    Assert.is_nil(Themed.last("toast"), "重试仍半联网不打扰")
+    Assert.eq(fire(), 8)
+    Assert.eq(calls, 3, "约 8s 再试")
+    Assert.is_nil(Themed.last("toast"))
+    Assert.eq(#pending, 0, "不再无限重试")
+
+    Sync.open(desktop)
+    Assert.eq(calls, 4)
+    Assert.eq(#pending, 1)
+    Sync.open(desktop)
+    Assert.eq(calls, 5)
+    Assert.eq(#pending, 1, "再次打开桌面不叠加重试")
+    Assert.eq(pending[1].delay, 3, "新一轮从 3s 重计")
+
+    desktop.closed = true
+    fire()
+    Assert.eq(calls, 5, "桌面已关不再重试")
+    desktop.closed = nil
+    Assert.eq(#pending, 0)
+
+    Sync.open(desktop)
+    Assert.eq(#pending, 1)
+    Sync.onClose(desktop)
+    Assert.eq(#pending, 0, "关桌面取消待重试")
+
+    calls = 0
+    Themed.made = {}
+    source.syncBooksAsync = function(_, _, cb)
+        calls = calls + 1
+        if calls == 1 then
+            cb(nil, "Could not connect: connection refused")
+        else
+            cb({ skipped = true })
+        end
+        return { cancel = function() end }
+    end
+    Sync.open(desktop)
+    Assert.eq(calls, 1)
+    Assert.eq(#pending, 1)
+    Sync.onNetworkConnected(desktop)
+    Assert.eq(calls, 2, "NetworkConnected 立刻再同步")
+    Assert.eq(#pending, 0)
+    Assert.is_nil(Themed.last("toast"), "网络恢复后成功不提示")
+
+    -- 混合模式：半联网失败清掉节流，延迟重试才会再同步。
+    local Registry = require("source.registry")
+    local MoonSettings = require("utils.settings")
+    local saved = { listEnabled = Registry.listEnabled, resolve = Registry.resolve, isEnabled = Registry.isEnabled }
+    local was_mixed = MoonSettings.get("source").library_mixed
+    MoonSettings.get("source").library_mixed = true
+    local mixed_src = setmetatable({
+        id = "netdown", name = "netdown",
+        configured = function() return true end,
+        syncBooksAsync = function() end,
+    }, { __index = SourceBase })
+    local mixed_calls = 0
+    mixed_src.syncBooksAsync = function(_, _, cb)
+        mixed_calls = mixed_calls + 1
+        if mixed_calls == 1 then
+            cb(nil, "Could not connect: connection refused")
+        else
+            cb({ skipped = true })
+        end
+        return { cancel = function() end }
+    end
+    Registry.listEnabled = function() return { { id = "netdown" } } end
+    Registry.resolve = function(id) return id == "netdown" and mixed_src or nil end
+    Registry.isEnabled = function(id) return id == "netdown" end
+    local desk = {
+        source = mixed_src, tab = "home", _books_sync = {}, _stats_sync = {},
+        updateView = function() end, onEvent = function() end,
+    }
+    Themed.made = {}
+    Sync.open(desk)
+    Assert.eq(mixed_calls, 1)
+    Assert.is_nil(Themed.last("toast"))
+    -- 若未清节流，3s 后的 Sync.open 会被 5 分钟窗口跳过。
+    Assert.eq(fire(), 3)
+    Assert.eq(mixed_calls, 2, "半联网失败不清节流则重试发不出去")
+    Assert.is_nil(Themed.last("toast"), "混合模式重试成功不提示")
+    for k, fn in pairs(saved) do Registry[k] = fn end
+    MoonSettings.get("source").library_mixed = was_mixed
+
+    UIManager.scheduleIn, UIManager.unschedule = orig_in, orig_un
+end
+
 -- 对端超时 / 原因不明的连接失败不算本机断网：后台照常提示。
 do
     Themed.made = {}

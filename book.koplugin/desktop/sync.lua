@@ -66,20 +66,65 @@ local function inScope(desktop, source)
 end
 
 --- 本机网络栈还没就绪（唤醒后常见：isConnected 已真，TCP/路由还不通）。
---- 跟没联网一样，后台同步不弹；connection refused / 认证错误仍提示。
----@param err string
+--- 跟没联网一样，后台同步不弹，并延迟再试；认证错误仍提示。
+---@param err any
 ---@return boolean
 local function localNetDown(err)
+    err = tostring(err or "")
     if err:find("网络不可用", 1, true) or err:find("DNS resolv error", 1, true) then
         return true
     end
+    local lower = err:lower()
     for _idx, needle in ipairs({
-        "Network is unreachable", "No route to host", "Network is down",
-        "Host is unreachable",
+        "network is unreachable", "no route to host", "network is down",
+        "host is unreachable", "connection refused",
     }) do
-        if err:find(needle, 1, true) then return true end
+        if lower:find(needle, 1, true) then return true end
     end
     return false
+end
+
+-- 唤醒半联网时 isConnected 往往已经为真，不会再收到 NetworkConnected；失败后过几秒再试一两次。
+local RETRY_DELAYS = { 3, 8 }
+
+local retry_tick, retry_desktop
+local retry_step = 0
+local opening_from_retry = false
+
+local function cancelRetry()
+    if retry_tick then
+        require("ui/uimanager"):unschedule(retry_tick)
+        retry_tick = nil
+    end
+    retry_desktop = nil
+    retry_step = 0
+end
+
+local function runRetry()
+    local desktop = retry_desktop
+    retry_tick, retry_desktop = nil, nil
+    if not desktop or desktop.closed or desktop.active == false then
+        retry_step = 0
+        return
+    end
+    opening_from_retry = true
+    Sync.open(desktop)
+    opening_from_retry = false
+end
+
+---@param desktop table
+local function scheduleRetry(desktop)
+    if not desktop or desktop.closed or desktop.active == false then return end
+    if retry_tick then return end
+    local delay = RETRY_DELAYS[retry_step + 1]
+    if not delay then
+        retry_step = 0
+        return
+    end
+    retry_step = retry_step + 1
+    retry_desktop = desktop
+    retry_tick = runRetry
+    require("ui/uimanager"):scheduleIn(delay, retry_tick)
 end
 
 --- 书架同步出错的提示：手动刷新每次都提示；后台同步只在联网且是对端/配置问题时提示
@@ -120,9 +165,17 @@ local function onBooksSynced(desktop, source, flight, force, result, err)
     if not result then
         logger.warn("book shelf sync failed", source.id, err)
         report(source, force, err or _("同步失败"))
+        if not force and localNetDown(err) then
+            books_at[source.id] = nil
+            scheduleRetry(desktop)
+        end
         return
     end
     report(source, force, result.push_error)
+    if not force and result.push_error and localNetDown(result.push_error) then
+        books_at[source.id] = nil
+        scheduleRetry(desktop)
+    end
     -- 源自己的节流命中表示本地数据未变，不要无意义重建整页。
     if result.skipped then
         logger.dbg("book shelf refresh done", source.id, "skipped", result.reason or "")
@@ -242,6 +295,10 @@ local function syncStats(desktop, source, force)
         if not inScope(desktop, source) then return end
         if not result then
             logger.warn("book stats sync failed", source.id, err)
+            if not force and localNetDown(err) then
+                stats_at[source.id] = nil
+                scheduleRetry(desktop)
+            end
             return
         end
         if result.skipped or (result.pulled or 0) + (result.pushed or 0) == 0 then return end
@@ -267,6 +324,7 @@ end
 --- 桌面变为可见（新开 / 换源）：后台同步统计（5 分钟节流）与书架。首页先读本地数据，成功后由回调刷新。
 ---@param desktop table
 function Sync.open(desktop)
+    if not opening_from_retry then cancelRetry() end
     local is_mixed = mixed()
     for _idx, source in ipairs(targets(desktop, true)) do
         syncStats(desktop, source)
@@ -296,6 +354,7 @@ end
 --- 混合模式只刷已配置的源，多个源一起刷时不逐个弹进度窗，进度看顶栏任务。
 ---@param desktop table
 function Sync.refresh(desktop)
+    cancelRetry()
     local source = desktop.source
     if not source then return end
     if not mixed() and not source:configured() then
@@ -330,6 +389,21 @@ function Sync.refresh(desktop)
             text = T(_("正在同步 %1 个数据源，可在顶栏查看进度"), #list), timeout = 2,
         }:show()
     end
+end
+
+--- 桌面关闭：取消还在等的半联网重试。
+---@param desktop table
+function Sync.onClose(desktop)
+    if retry_desktop == desktop then cancelRetry() end
+end
+
+--- 网络恢复：若正等半联网重试，立刻再同步一次（不另开一轮无限重试）。
+---@param desktop table|nil
+function Sync.onNetworkConnected(desktop)
+    if not retry_tick then return end
+    if desktop and retry_desktop and desktop ~= retry_desktop then return end
+    require("ui/uimanager"):unschedule(retry_tick)
+    runRetry()
 end
 
 --- 源登录失效（静默续期失败）时引导重新登录。由 main 经 ``source.auth`` 注入；

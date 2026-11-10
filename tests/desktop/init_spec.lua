@@ -46,7 +46,10 @@ end
 package.preload["desktop.pages.setting"] = function() return page("settings") end
 local synced = {}
 package.preload["desktop.sync"] = function()
-    return { open = function(desk) synced[#synced + 1] = desk end }
+    return {
+        open = function(desk) synced[#synced + 1] = desk end,
+        onClose = function() end,
+    }
 end
 
 local top_builds = 0
