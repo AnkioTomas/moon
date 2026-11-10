@@ -369,6 +369,7 @@ function Desktop:destroy()
     } }
     if self.active then self:deactivate() end
     self.closed = true
+    Sync.onClose(self)
     local stats = self._stats_sync
     self._stats_sync = {}
     for _source_id, flight in pairs(stats) do
