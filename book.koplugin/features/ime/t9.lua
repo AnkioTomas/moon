@@ -137,27 +137,34 @@ function T9.lookup(dictionary, digits)
     return words
 end
 
---- 九宫格键位：4 列 × 4 行；每行宽度合计 10，与候选行的 10 个占位键等宽。
+--- 九宫格键位：5 列 × 4 行。左侧独立标点列，字母 1–9 与手机拨号盘对齐
+--- （， 1 ABC DEF ⌫ / 。 GHI JKL MNO / ？ PQRS TUV WXYZ 0 / ！ 地球 空格 回车）。
+--- 每行宽度合计 10，与候选行的 10 个占位键等宽。
+--- 左列略窄（1.5），三个字母列等宽（2.25），右列 1.75；均为二进制可精确分数，行宽合计正好 10。
 ---@param base table[] 原始 zh_CN 布局的行（取退格、地球、空格、回车键帽）
 ---@return table[]
 function T9.rows(base)
     local util = require("util")
+    local W_PUNCT, W_LETTER, W_RIGHT = 1.5, 2.25, 1.75
     local function key(width, entry)
         return { entry, entry, entry, entry, width = width }
     end
     local function digit(d)
-        return key(2.5, { label = GROUPS[d]:upper(), alt_label = d, d })
+        return key(W_LETTER, { label = GROUPS[d]:upper(), alt_label = d, d })
     end
     local function copy(piece, width)
         local out = util.tableDeepCopy(piece)
         out.width = width
         return out
     end
+    -- 1 键不参与拼音（mapKey 只认 2–9）；键帽与手机一致标 @.，输入句点。
+    -- 手机右列 6 旁是「重输」：插件没有现成的重输/清空拼写按键（clearCode 只是内部收口），
+    -- 不新做一套重输，改放顿号「、」占位，好让 0 与退格仍在同一右列。
     return {
-        { key(2.5, "，"), digit("2"), digit("3"), copy(base[4][9], 2.5) },
-        { key(2.5, "。"), digit("4"), digit("5"), digit("6") },
-        { key(2.5, "！"), digit("7"), digit("8"), digit("9") },
-        { copy(base[5][2], 2.5), copy(base[5][4], 5), copy(base[5][7], 2.5) },
+        { key(W_PUNCT, "，"), key(W_LETTER, { label = "@.", alt_label = "1", "." }), digit("2"), digit("3"), copy(base[4][9], W_RIGHT) },
+        { key(W_PUNCT, "。"), digit("4"), digit("5"), digit("6"), key(W_RIGHT, "、") },
+        { key(W_PUNCT, "？"), digit("7"), digit("8"), digit("9"), key(W_RIGHT, "0") },
+        { key(W_PUNCT, "！"), copy(base[5][2], W_RIGHT), copy(base[5][4], 10 - W_PUNCT - 2 * W_RIGHT), copy(base[5][7], W_RIGHT) },
     }
 end
 
