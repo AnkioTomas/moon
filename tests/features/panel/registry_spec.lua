@@ -15,7 +15,7 @@ local DESKTOP = {
 }
 local READER = {
     "toc", "refresh_toc", "font", "highlights", "bookmark", "bookorbit",
-    "push_progress", "pull_progress", "reload_chapter", "save_default", "settings",
+    "push_progress", "pull_progress", "cache", "reload_chapter", "save_default", "settings",
 }
 for _, id in ipairs(DESKTOP) do
     package.preload["features.panel.actions.desktop." .. id] = function()
