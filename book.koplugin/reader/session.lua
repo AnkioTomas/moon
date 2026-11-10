@@ -219,12 +219,14 @@ local function applyChapterBookTitle(doc_settings, document)
     end
 end
 
---- DocSettingsLoad：读 sidecar 前写入全书排版偏好与状态栏偏好，由原生模块加载。
+--- DocSettingsLoad：读 sidecar 前写入全书排版偏好、漫画 CBZ 对齐默认与状态栏偏好，由原生模块加载。
 ---@param _plugin table Book 插件实例
 ---@param doc_settings table
 ---@param document table
 function Session.onDocSettingsLoad(_plugin, doc_settings, document)
-    require("reader.prefs").inject(doc_settings, document)
+    local prefs = require("reader.prefs")
+    prefs.inject(doc_settings, document)
+    prefs.injectComic(doc_settings, document)
     require("utils.extension").emit("reader.doc_settings", doc_settings, document)
     applyChapterBookTitle(doc_settings, document)
 end

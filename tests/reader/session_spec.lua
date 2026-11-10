@@ -146,6 +146,7 @@ local injected = {}
 package.preload["reader.prefs"] = function()
     return {
         inject = function(doc_settings) injected[#injected + 1] = "prefs:" .. doc_settings.id end,
+        injectComic = function(doc_settings) injected[#injected + 1] = "comic:" .. doc_settings.id end,
         apply = function() end,
         captureAndSave = function() end,
     }
@@ -1232,7 +1233,7 @@ end
 
 -- DocSettingsLoad：读 sidecar 前先写全书排版，再写状态栏偏好
 Session.onDocSettingsLoad({}, { id = "doc" }, {})
-Assert.eq(table.concat(injected, ","), "prefs:doc,bars:doc")
+Assert.eq(table.concat(injected, ","), "prefs:doc,comic:doc,bars:doc")
 
 -- 按章文档把 sidecar / 文档属性改成书名，旧缓存 <title> 是章名也不影响认书
 do
