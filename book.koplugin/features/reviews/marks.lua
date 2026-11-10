@@ -159,7 +159,10 @@ local function chapterTarget(self, identity, source)
     -- 页码随排版（字号、边距、屏幕）变，指纹变了才重算。
     local place = function(spots)
         local document = self.ui.document
-        local hash = document:getDocumentRenderingHash()
+        if not PageMarks.canMapXPointers(document) then
+            return {}
+        end
+        local hash = PageMarks.renderingHash(document)
         if not self.spans or self.spans_hash ~= hash then
             self.spans, self.spans_hash = {}, hash
             for i, spot in ipairs(spots) do

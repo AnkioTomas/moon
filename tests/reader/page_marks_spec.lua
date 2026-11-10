@@ -130,6 +130,21 @@ do
 end
 
 do
+    -- 排版指纹：有方法时取值；没有或调用失败时返回 nil，不能当成崩溃点。
+    Assert.eq(PageMarks.renderingHash({ getDocumentRenderingHash = function() return 7 end }), 7)
+    Assert.is_nil(PageMarks.renderingHash({}))
+    Assert.is_nil(PageMarks.renderingHash(nil))
+    Assert.is_nil(PageMarks.renderingHash({ getDocumentRenderingHash = function() error("boom") end }))
+    Assert.is_true(PageMarks.canMapXPointers({
+        getPageFromXPointer = function() end,
+        getScreenBoxesFromPositions = function() end,
+    }))
+    Assert.is_false(PageMarks.canMapXPointers({ getPageFromXPointer = function() end }))
+    Assert.is_false(PageMarks.canMapXPointers({}))
+    Assert.is_false(PageMarks.canMapXPointers(nil))
+end
+
+do
     -- 图层可选 paint：画完下划线后自绘，不占位。
     local ui = newUi()
     local painted = 0
