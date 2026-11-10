@@ -114,12 +114,19 @@ end
 ---@param path string
 ---@return boolean
 function Fonts.finalizeWoff(woff, path)
+    logger.info("book.font woff convert start", woff, "dest=" .. path)
+    logger.flushSync()
     local ok, err = Woff.toSfnt(woff, path)
     if ok then
         os.remove(woff)
+        logger.info("book.font woff convert done", path)
+        logger.flushSync()
         return true
     end
     logger.warn("book.font woff convert failed", woff, err)
+    logger.flushSync()
+    -- 预检未开跑时不要把原 WOFF 改名成 .ttf；其它转换失败仍走原逻辑。
+    if require("utils.mem").isInsufficient(err) then return false end
     return os.rename(woff, path) == true
 end
 

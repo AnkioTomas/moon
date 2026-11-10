@@ -496,6 +496,7 @@ local function installBookLog()
         function log.error() end
         log.err = log.error
         function log.flush() end
+        function log.flushSync() end
         return log
     end
 end

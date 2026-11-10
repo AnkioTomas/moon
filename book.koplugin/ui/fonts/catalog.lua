@@ -17,6 +17,7 @@ local Paths = require("utils.paths")
 local Job = require("workers.job")
 local Text = require("utils.text")
 local Fonts = require("ui.fonts")
+local Mem = require("utils.mem")
 local Sfnt = require("ui.fonts.sfnt")
 local _ = require("gettext")
 
@@ -206,6 +207,8 @@ local function extractInstalledFont(zip_path, dest)
         arc:close()
         if not err then
             -- 新下载转换失败不能把原 WOFF 改名成 .ttf 冒充已安装：FreeType 读不出，且之后永远判为已下载。
+            logger.info("book.font woff convert start", dest)
+            logger.flushSync()
             local ok, convert_err = require("ui.fonts.woff").toSfnt(woff, dest)
             if not ok then err = "woff convert failed: " .. tostring(convert_err) end
             if not err then
@@ -218,6 +221,20 @@ local function extractInstalledFont(zip_path, dest)
     end
     os.remove(zip_path)
     return err
+end
+
+
+--- UI 线程：内存不够则记日志、弹窗（Kindle 可提供 no-framework 重启），再回调失败。
+local function refuseMemory(item, dest, what, detail, cb)
+    logger.warn("book.font skipped", what, item.id, dest,
+        "need=" .. tostring(Mem.mb(detail.needed) or "?") .. "MB",
+        "avail=" .. tostring(Mem.mb(detail.available) or "?") .. "MB")
+    logger.flushSync()
+    Mem.promptInsufficient({
+        what = what, needed = detail.needed, available = detail.available,
+        id = item.id, dest = dest,
+    })
+    cb(nil, _("内存不足"))
 end
 
 --- 确保字体可用：新下载在解包子进程里修复，已有下载在独立子进程里迁移/修复。
@@ -243,10 +260,22 @@ function Catalog.ensureInstalledAsync(item, on_progress, cb)
         local function done(err)
             if cancelled then return end
             if err then
-                logger.warn("book.font prepare failed", item.id, err)
+                logger.warn("book.font prepare failed", item.id, "src=" .. installed, "dest=" .. dest, err)
+                logger.flushSync()
                 cb(nil, _("应用字体失败"))
             else
                 cb(true)
+            end
+        end
+        logger.info("book.font prepare start", item.id, "src=" .. installed, "dest=" .. dest)
+        logger.flushSync()
+        if installed ~= dest then
+            local src = io.open(installed, "rb")
+            local src_size = src and src:seek("end")
+            if src then src:close() end
+            local affordable, _mem_err, detail = Mem.canAfford(Mem.estimateWoffToSfnt(src_size))
+            if not affordable then
+                return refuseMemory(item, dest, _("字体转换"), detail, cb)
             end
         end
         local job = Job.run(function()
@@ -268,17 +297,46 @@ function Catalog.ensureInstalledAsync(item, on_progress, cb)
     local cancelled = false
     local extract_job
     os.remove(zip_path)
+    -- 下载/转码可能把低内存设备直接杀掉：里程碑用 info（失败用 warn），并 flushSync 立刻落盘，
+    -- 不等攒满一批或下一个 UI tick。不记带签名的完整 URL，host + 字体 id 足够对照。
+    local host = type(item.url) == "string" and item.url:match("^https?://([^/]+)")
+    logger.info("book.font download start", item.id, item.name, "dest=" .. dest, "zip=" .. zip_path,
+        "zip_size=" .. tostring(item.zip_size or ""), host and ("host=" .. host) or "host=")
+    logger.flushSync()
     local download_job = Request.download({ url = item.url, timeout = require("http.timeout").net(10), resume = true, on_progress = on_progress },
         zip_path, function(ok, err)
             if cancelled then return end
-            if not ok then return cb(nil, err) end
+            if not ok then
+                logger.warn("book.font download failed", item.id, "zip=" .. zip_path, err)
+                logger.flushSync()
+                return cb(nil, err)
+            end
+            local zip_file = io.open(zip_path, "rb")
+            local zip_bytes = zip_file and zip_file:seek("end")
+            if zip_file then zip_file:close() end
+            logger.info("book.font download done", item.id, "zip=" .. zip_path, "bytes=" .. tostring(zip_bytes or ""))
+            local affordable, _mem_err, detail = Mem.canAfford(Mem.estimateWoffToSfnt(zip_bytes))
+            if not affordable then
+                os.remove(zip_path)
+                return refuseMemory(item, dest, _("字体解压"), detail, cb)
+            end
+            logger.info("book.font extract start", item.id, "zip=" .. zip_path, "dest=" .. dest,
+                "need=" .. tostring(Mem.mb(detail.needed) or "?") .. "MB",
+                "avail=" .. tostring(Mem.mb(detail.available) or "?") .. "MB")
+            logger.flushSync()
             local function done(extract_err)
                 if cancelled then return end
                 if extract_err or not Fonts.isFile(dest) then
-                    logger.warn("book.font extract failed", item.id, extract_err)
+                    logger.warn("book.font extract failed", item.id, dest, extract_err)
+                    logger.flushSync()
+                    if Mem.isInsufficient(extract_err) then
+                        local _ok, _err, failed = Mem.canAfford(Mem.estimateWoffToSfnt(zip_bytes))
+                        return refuseMemory(item, dest, _("字体转换"), failed, cb)
+                    end
                     return cb(nil, _("字体解压失败"))
                 end
                 logger.info("book.font installed", item.id, dest)
+                logger.flushSync()
                 cb(true)
             end
             extract_job = Job.run(function() return extractInstalledFont(zip_path, dest) end,
