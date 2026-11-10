@@ -179,3 +179,21 @@ do
     Assert.eq(calls[#calls].sql, "DELETE FROM http;")
     DbBase.close()
 end
+
+-- forget：按完整键删除，空键不动。
+do
+    local connection, calls = makeConn()
+    local DbBase, Cache = loadCache(connection)
+
+    Cache.forget("store\0search\0fanqie\0我能有什么")
+    local q = calls[#calls]
+    Assert.eq(q.sql, "DELETE FROM http WHERE key=?;")
+    Assert.eq(q.argc, 1)
+    Assert.eq(q.args[1], "store\0search\0fanqie\0我能有什么")
+
+    local before = #calls
+    Cache.forget("")
+    Cache.forget(nil)
+    Assert.eq(#calls, before, "空键不访问数据库")
+    DbBase.close()
+end

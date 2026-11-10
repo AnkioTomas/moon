@@ -40,7 +40,8 @@ local function encode(res)
     return JSON.encode({ ids = ids, groups = res.groups })
 end
 
---- 命中后按 id 顺序从书库拼回 Book[]；已删 / 不在库的跳过。
+--- 命中后按 id 顺序从书库拼回 Book[]。
+--- 未上架 / 墓碑（deleted=1）仍是书城结果，必须留下；缺任意 id（彻底删除撕行）则整表作废，由 through 现拉。
 ---@param source_id string
 ---@param raw string
 ---@return { data: Book[], groups: table[]|nil }|nil
@@ -51,7 +52,8 @@ local function decode(source_id, raw)
     local books = {}
     for _idx, id in ipairs(data.ids) do
         local book = rows[id]
-        if book then books[#books + 1] = book end
+        if not book then return nil end
+        books[#books + 1] = book
     end
     return { data = books, groups = data.groups }
 end
@@ -83,8 +85,17 @@ local function through(cache_key, source_id, load, cb)
             cb(res)
             return
         end
-        -- 缓存值解不开（跨版本形状变了）：当未命中现拉一遍，坏行等 TTL 自行过期。
-        fallback = load(cb)
+        -- 解不开，或有 id 已不在书库（彻底删除撕行）：作废这条并现拉。
+        -- 现拉结果直接回给调用方，并 rememberMany；下一轮未命中时再写入新缓存。
+        Cache.forget(cache_key)
+        fallback = load(function(fresh, err)
+            if not fresh then
+                cb(nil, err)
+                return
+            end
+            BookStore.rememberMany(fresh.data or {})
+            cb(fresh)
+        end)
     end)
     return { cancel = function()
         job.cancel()

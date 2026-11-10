@@ -17,6 +17,9 @@ package.preload["http.cache"] = function()
                 cb(value, err, ...)
             end)
         end,
+        forget = function(k)
+            entries[k] = nil
+        end,
     }
 end
 
@@ -105,12 +108,23 @@ Assert.eq(res, "网络断开")
 StoreCache.search("fake", source, "bad", function(_r, err) res = err end)
 Assert.eq(calls.search, 3, "失败结果不缓存")
 
--- 书被删后命中：拼不回的直接跳过，不报错。
+-- 未上架（deleted=1）仍是书城结果：命中不跳过、不重新拉源。
+db_rows.b2.deleted = 1
+db_rows.b1.deleted = 1
+StoreCache.browse("fake", source, {}, function(r) res = r end)
+Assert.eq(calls.browse, 2, "未上架行命中不调源")
+Assert.len(res.data, 2)
+Assert.eq(res.data[1].stable_id, "b2")
+Assert.eq(res.data[1].deleted, 1)
+Assert.eq(res.data[2].stable_id, "b1")
+
+-- 彻底删除撕行后命中：缺 id 则作废缓存并重新拉源，书城仍能找到。
 db_rows.b1 = nil
 StoreCache.browse("fake", source, {}, function(r) res = r end)
-Assert.eq(calls.browse, 2)
-Assert.len(res.data, 1)
+Assert.eq(calls.browse, 3, "缺 id 必须现拉")
+Assert.len(res.data, 2)
 Assert.eq(res.data[1].stable_id, "b2")
+Assert.eq(res.data[2].stable_id, "b1")
 
 -- 缓存值解不开：当未命中现拉，返回的句柄要能取消这次现拉。
 do
