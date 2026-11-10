@@ -72,6 +72,8 @@ end
 --- 官方目录 /api/reader/directory/detail 的 data → 平铺章节行。
 --- ID 一律是字符串（19 位，超出 double 精度，数字形态无法还原）。
 --- 优先 chapterListWithVolume（二维：卷 → 章），其次 chapterList，最后只有 allItemIds 时按序号起标题。
+--- 有卷名的卷给章写 depth=2 和 volume（卷名本身不占 idx，避免打乱章节文件序号）；无卷名时 depth=1。
+--- 章上的官方子节点收成 anchors，不另开一行。
 ---@param payload table|nil 完整回包
 ---@return table[]
 function Content.normalize_chapters(payload)
@@ -79,22 +81,87 @@ function Content.normalize_chapters(payload)
     if type(records) ~= "table" then
         return {}
     end
+
+    local function trim(value)
+        if type(value) ~= "string" then return nil end
+        value = value:match("^%s*(.-)%s*$")
+        if value == "" then return nil end
+        return value
+    end
+
+    local function volume_title(volume)
+        if type(volume) ~= "table" then return nil end
+        return trim(volume.volumeName or volume.volume_name or volume.volumeTitle
+            or volume.volume_title or volume.name or volume.title)
+    end
+
+    local function volume_chapters(volume)
+        if type(volume) ~= "table" then return nil end
+        if volume[1] ~= nil then return volume end
+        local list = volume.chapterList or volume.chapter_list or volume.itemList or volume.item_list
+        return type(list) == "table" and list or nil
+    end
+
+    ---@param ch table
+    ---@param depth integer
+    ---@return table[]
+    local function official_anchors(ch, depth)
+        local anchors = {}
+        for _idx, key in ipairs({
+            "children", "childList", "child_list", "catalogList", "catalog_list",
+            "subItemList", "sub_item_list", "anchorList", "anchor_list",
+            "tocList", "toc_list", "subChapterList", "sub_chapter_list",
+        }) do
+            local list = ch[key]
+            if type(list) == "table" then
+                for _row_idx, row in ipairs(list) do
+                    if type(row) == "table" then
+                        local title = trim(row.title or row.name or row.chapterName or row.chapter_name)
+                        local id = row.anchor or row.id or row.itemId or row.item_id
+                        if id ~= nil then id = tostring(id) end
+                        if title or (id and id ~= "") then
+                            anchors[#anchors + 1] = {
+                                title = title or ("#" .. #anchors + 1),
+                                depth = depth,
+                                id = id,
+                            }
+                        end
+                    end
+                end
+            end
+        end
+        return anchors
+    end
+
+    local function add_chapter(out, ch, depth, volume)
+        if type(ch) ~= "table" or ch.itemId == nil then return end
+        ch.depth = depth
+        if volume then ch.volume = volume end
+        local anchors = official_anchors(ch, depth + 1)
+        if #anchors > 0 then ch.anchors = anchors end
+        out[#out + 1] = ch
+    end
+
     local out = {}
     for _idx, volume in ipairs(records.chapterListWithVolume or {}) do
-        for _ch_idx, ch in ipairs(type(volume) == "table" and volume or {}) do
-            if type(ch) == "table" and ch.itemId then
-                out[#out + 1] = ch
-            end
+        local chapters = volume_chapters(volume)
+        local name = volume_title(volume)
+        local depth = name and 2 or 1
+        for _ch_idx, ch in ipairs(type(chapters) == "table" and chapters or {}) do
+            add_chapter(out, ch, depth, name)
         end
     end
     if #out > 0 then
         return out
     end
     if type(records.chapterList) == "table" then
-        return records.chapterList
+        for _idx, ch in ipairs(records.chapterList) do
+            add_chapter(out, ch, 1)
+        end
+        return out
     end
     for i, item_id in ipairs(records.allItemIds or {}) do
-        out[#out + 1] = { itemId = tostring(item_id), title = "第" .. i .. "章" }
+        out[#out + 1] = { itemId = tostring(item_id), title = "第" .. i .. "章", depth = 1 }
     end
     return out
 end
@@ -107,6 +174,79 @@ function Content.readable_chapters(chapters)
         end
     end
     return out
+end
+
+--- 从章节 HTML 收集 id="toc_N" 章内锚点，按文档顺序。
+--- 有可见标题用原标题；否则回退为 "#N"（与目录空标题章的 "#idx" 一致）。
+---@param html string|nil
+---@param depth integer|nil
+---@return BookChapterAnchor[]
+function Content.html_anchors(html, depth)
+    if type(html) ~= "string" or html == "" then return {} end
+    depth = math.max(1, math.floor(tonumber(depth) or 2))
+    local Text = require("utils.text")
+    local out, seen = {}, {}
+    local pos = 1
+    while true do
+        local start_at, end_at, _quote, number = html:find('id=(["\'])toc_(%d+)%1', pos)
+        if not start_at then break end
+        pos = end_at + 1
+        local id = "toc_" .. number
+        if not seen[id] then
+            seen[id] = true
+            local open = start_at
+            while open > 1 and html:sub(open, open) ~= "<" do
+                open = open - 1
+            end
+            local title = ""
+            if html:sub(open, open) == "<" then
+                local gt = html:find(">", open, true)
+                if gt and html:sub(gt - 1, gt) ~= "/>" then
+                    local tag = html:match("^<%s*([%w:-]+)", open)
+                    if tag then
+                        local close = html:find("</" .. tag .. ">", gt + 1, true)
+                        if close then
+                            title = Text.stripHtml(html:sub(gt + 1, close - 1)) or ""
+                        end
+                    end
+                end
+            end
+            title = title:match("^%s*(.-)%s*$") or ""
+            if title == "" then title = "#" .. number end
+            out[#out + 1] = { title = title, depth = depth, id = id }
+        end
+    end
+    return out
+end
+
+--- 把incoming锚点并入 chapter.anchors：按 id 去重，已有真实标题不被回退标题覆盖。
+---@param chapter table
+---@param incoming BookChapterAnchor[]|nil
+---@return boolean changed
+function Content.merge_anchors(chapter, incoming)
+    if type(chapter) ~= "table" or type(incoming) ~= "table" or #incoming == 0 then
+        return false
+    end
+    local existing = chapter.anchors or {}
+    local by_id = {}
+    for _idx, anchor in ipairs(existing) do
+        if anchor.id then by_id[tostring(anchor.id)] = anchor end
+    end
+    local changed = false
+    for _idx, anchor in ipairs(incoming) do
+        local id = anchor.id and tostring(anchor.id) or nil
+        local prev = id and by_id[id]
+        if not prev then
+            existing[#existing + 1] = anchor
+            if id then by_id[id] = anchor end
+            changed = true
+        elseif (not prev.title or prev.title == "") and anchor.title and anchor.title ~= "" then
+            prev.title = anchor.title
+            changed = true
+        end
+    end
+    if changed then chapter.anchors = existing end
+    return changed
 end
 
 return Content

@@ -39,7 +39,7 @@ function ChapterToc.show(toc, current_idx, on_select)
     local Perf = require("utils.perf")
     local started_at = Perf.now()
     local ReaderToc = require("apps/reader/modules/readertoc")
-    local nodes, targets, chapter_pages = {}, {}, {}
+    local nodes, targets, chapter_pages, last_volume = {}, {}, {}, nil
     for _idx, chapter in ipairs(toc) do
         local function addNode(title, depth, anchor)
             local page = #nodes + 1
@@ -51,12 +51,23 @@ function ChapterToc.show(toc, current_idx, on_select)
             targets[page] = { idx = chapter.idx, anchor = anchor }
             return page
         end
+        local volume = chapter.volume
+        if type(volume) == "string" then
+            volume = volume:match("^%s*(.-)%s*$")
+            if volume == "" then volume = nil end
+        else
+            volume = nil
+        end
+        if volume and volume ~= last_volume then
+            addNode(volume, 1)
+            last_volume = volume
+        end
         local raw = chapter.title
         local title = (type(raw) == "string" and raw ~= "" and raw) or ("#" .. tostring(chapter.idx))
         if chapter.vip and chapter.paid ~= nil then
             title = title .. (chapter.paid and _("（已购）") or _("（未购）"))
         end
-        chapter_pages[tonumber(chapter.idx)] = addNode(title, chapter.depth)
+        chapter_pages[tonumber(chapter.idx)] = addNode(title, chapter.depth or (volume and 2 or 1))
         for _idx, anchor in ipairs(chapter.anchors or {}) do
             addNode(anchor.title, anchor.depth, anchor)
         end

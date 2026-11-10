@@ -24,16 +24,20 @@ local by_volume = Content.normalize_chapters({ data = {
 } })
 Assert.len(by_volume, 3)
 Assert.eq(by_volume[3].itemId, "3")
+Assert.eq(by_volume[1].depth, 1, "无卷名时不编造卷标题，章仍为第 1 层")
+Assert.eq(by_volume[3].depth, 1)
 Assert.len(Content.readable_chapters(by_volume), 2)
 
 -- 没有分卷时用 chapterList
 local flat = Content.normalize_chapters({ data = { chapterListWithVolume = {}, chapterList = { { itemId = "9" } } } })
 Assert.eq(flat[1].itemId, "9")
+Assert.eq(flat[1].depth, 1)
 
 -- 只有 allItemIds：按序号起标题
 local ids = Content.normalize_chapters({ data = { allItemIds = { "7", "8" } } })
 Assert.eq(ids[2].itemId, "8")
 Assert.eq(ids[2].title, "第2章")
+Assert.eq(ids[2].depth, 1)
 
 -- 回包缺 data：空目录
 Assert.len(Content.normalize_chapters({ code = 0 }), 0)
@@ -47,4 +51,71 @@ do
     } } })
     Assert.eq(tonumber(rows[1].wordCount), 1200)
     Assert.eq(tonumber(rows[2].word_count), 800)
+end
+
+
+-- 有卷名：章 depth=2 并带 volume，不额外占 idx
+do
+    local rows = Content.normalize_chapters({ data = {
+        chapterListWithVolume = {
+            { volumeName = "第一卷", chapterList = { { itemId = "1", title = "第1章" }, { itemId = "2", title = "第2章" } } },
+            { volume_name = "第二卷", { itemId = "3", title = "第3章" } },
+        },
+    } })
+    Assert.len(rows, 3)
+    Assert.eq(rows[1].depth, 2)
+    Assert.eq(rows[1].volume, "第一卷")
+    Assert.eq(rows[2].volume, "第一卷")
+    Assert.eq(rows[3].itemId, "3")
+    Assert.eq(rows[3].depth, 2)
+    Assert.eq(rows[3].volume, "第二卷")
+end
+
+-- 官方子节点收成 anchors，不另开一章
+do
+    local rows = Content.normalize_chapters({ data = { chapterList = {
+        { itemId = "10", title = "正文", children = {
+            { title = "第一节", anchor = "toc_1" },
+            { title = "第二节", id = "toc_2" },
+        } },
+    } } })
+    Assert.len(rows, 1)
+    Assert.len(rows[1].anchors, 2)
+    Assert.eq(rows[1].anchors[1].title, "第一节")
+    Assert.eq(rows[1].anchors[1].id, "toc_1")
+    Assert.eq(rows[1].anchors[1].depth, 2)
+    Assert.eq(rows[1].anchors[2].id, "toc_2")
+end
+
+-- HTML toc_*：有可见标题用原文，纯图片锚点回退 #N
+do
+    local html = [[<h1>正文</h1>
+    <h2 id="toc_1">第一节 相遇</h2><p>文字</p>
+    <p class="picture" id="toc_2"><img src="a.jpg"/></p>
+    <p id="toc_11"><img src="b.jpg"/></p>
+    <p id="toc_2">重复 id 忽略</p>]]
+    local anchors = Content.html_anchors(html, 2)
+    Assert.len(anchors, 3)
+    Assert.eq(anchors[1].id, "toc_1")
+    Assert.eq(anchors[1].title, "第一节 相遇")
+    Assert.eq(anchors[1].depth, 2)
+    Assert.eq(anchors[2].id, "toc_2")
+    Assert.eq(anchors[2].title, "#2")
+    Assert.eq(anchors[3].id, "toc_11")
+    Assert.eq(anchors[3].title, "#11")
+    Assert.len(Content.html_anchors(""), 0)
+    Assert.len(Content.html_anchors(nil), 0)
+end
+
+-- merge_anchors：按 id 去重，已有标题不被回退覆盖
+do
+    local chapter = { idx = 3, title = "正文", anchors = { { title = "官方第一节", depth = 2, id = "toc_1" } } }
+    Assert.is_true(Content.merge_anchors(chapter, {
+        { title = "#1", depth = 2, id = "toc_1" },
+        { title = "#2", depth = 2, id = "toc_2" },
+    }))
+    Assert.len(chapter.anchors, 2)
+    Assert.eq(chapter.anchors[1].title, "官方第一节")
+    Assert.eq(chapter.anchors[2].id, "toc_2")
+    Assert.is_false(Content.merge_anchors(chapter, { { title = "#2", depth = 2, id = "toc_2" } }))
 end

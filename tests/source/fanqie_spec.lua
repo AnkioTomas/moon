@@ -340,6 +340,7 @@ do
     src:loadTocAsync(ref, function(value) chapters = value end)
     drain()
     Assert.eq(chapters[1].uid, "9876543210987654321")
+    Assert.eq(chapters[1].depth, 1)
     local called = false
     local cached = src:loadTocAsync(ref, function() called = true end)
     cached:cancel()

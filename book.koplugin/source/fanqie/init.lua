@@ -238,6 +238,51 @@ function Source:getDetailAsync(identity, cb)
     return h
 end
 
+--- 已落盘章节 HTML 里的 toc_* 并进目录；有改动才需要调用方写回。
+---@param identity BookIdentity
+---@param toc BookChapter[]
+---@return boolean changed
+local function attachHtmlAnchors(identity, toc)
+    local Content = require("source.fanqie.content")
+    local source_id = identity.source_id or "fanqie"
+    local changed = false
+    for _idx, chapter in ipairs(toc) do
+        local path = Paths.bookWorkDir(identity.stable_id, source_id) .. "/" .. tostring(chapter.idx) .. ".html"
+        local f = io.open(path, "r")
+        if f then
+            local html = f:read("*a")
+            f:close()
+            if Content.merge_anchors(chapter, Content.html_anchors(html, (chapter.depth or 1) + 1)) then
+                changed = true
+            end
+        end
+    end
+    return changed
+end
+
+--- 正文刚下完时，把章内锚点写进已缓存目录（失败不影响开章）。
+---@param identity BookIdentity
+---@param chapter BookChapter
+---@param html string
+local function persistAnchorsFromHtml(identity, chapter, html)
+    local Toc = require("source.toc")
+    local Content = require("source.fanqie.content")
+    local source_id = identity.source_id or "fanqie"
+    local list = Toc.read(source_id, identity.stable_id)
+    if not list then return end
+    local target
+    for _idx, item in ipairs(list) do
+        if item.uid == tostring(chapter.uid) or item.idx == chapter.idx then
+            target = item
+            break
+        end
+    end
+    if not target then return end
+    if Content.merge_anchors(target, Content.html_anchors(html, (target.depth or 1) + 1)) then
+        Toc.put(source_id, identity.stable_id, list)
+    end
+end
+
 --- 强制拉目录并写回；失败由调用方继续用旧缓存。
 ---@param identity BookIdentity
 ---@param cb fun(toc: BookChapter[]|nil, err: string|nil)
@@ -259,12 +304,16 @@ function Source:refreshTocAsync(identity, cb)
             toc[#toc + 1] = {
                 idx = #toc + 1, uid = tostring(row.itemId), title = row.title,
                 words = w and w > 0 and w or nil,
+                depth = row.depth,
+                volume = row.volume,
+                anchors = row.anchors,
             }
         end
         if #toc == 0 then
             cb(nil, _("番茄目录为空"))
             return
         end
+        attachHtmlAnchors(identity, toc)
         if not Toc.put(self.id, identity.stable_id, toc) then
             cb(nil, _("章节目录保存失败"))
             return
@@ -275,8 +324,12 @@ function Source:refreshTocAsync(identity, cb)
 end
 
 function Source:loadTocAsync(identity, cb)
-    local cached = require("source.toc").read(self.id, identity.stable_id)
+    local Toc = require("source.toc")
+    local cached = Toc.read(self.id, identity.stable_id)
     if cached and #cached > 0 then
+        if attachHtmlAnchors(identity, cached) then
+            Toc.put(self.id, identity.stable_id, cached)
+        end
         return Base.defer(cb, cached)
     end
     return self:refreshTocAsync(identity, cb)
@@ -323,6 +376,7 @@ local function fetch(self, identity, chapter, cb)
                 Paths.bookWorkDir(identity.stable_id, identity.source_id) .. "/images", downloadImage,
                 function(html)
                     if h.cancelled then return end
+                    persistAnchorsFromHtml(identity, chapter, html)
                     cb({ title = title, html = html })
                 end)
             return
