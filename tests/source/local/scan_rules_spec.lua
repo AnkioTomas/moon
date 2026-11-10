@@ -57,6 +57,17 @@ for _idx, name in ipairs({ "x.FB2.ZIP", "y.prc", "a.htm", "a.xhtml", "a.doc", "a
 end
 Assert.is_false(Common.isBookFile("z.zip"))
 
+Assert.eq(Common.bookExt("x.FB2.ZIP"), "fb2.zip")
+Assert.eq(Common.bookExt("webdav://Some Book.epub"), "epub")
+Assert.eq(Common.bookExt("webdav://dir/Some Book.mobi"), "mobi")
+Assert.eq(Common.bookExt("/books/长书.txt"), "txt")
+Assert.eq(Common.bookExt("a.azw3"), "azw3")
+Assert.is_nil(Common.bookExt("z.zip"))
+Assert.is_nil(Common.bookExt("notes.bin"))
+Assert.is_nil(Common.bookExt("webdav://NoExt"))
+Assert.is_nil(Common.bookExt(""))
+Assert.is_nil(Common.bookExt(nil))
+
 local function scan(flat)
     local by = {}
     for _idx, f in ipairs(Common.scanFiles("/root", flat)) do

@@ -51,8 +51,12 @@ end
 local function infoItems(book, owner)
     local sid = book.source_id
     local path = owner and owner.type == "book" and book.path or nil
-    local name = path and path:match("[^/]+$")
-    local format = book.format or (name and name:match("%.(%w+)$"))
+    -- 书城条目自带 format；整本书则从本地路径或 stable_id（含 webdav:// 相对路径）的已识别后缀推导。
+    local format = book.format
+    if (not format or format == "") and owner and owner.type == "book" then
+        local bookExt = require("source.local.common").bookExt
+        format = bookExt(path) or bookExt(book.stable_id)
+    end
     local size = tonumber(book.filesize) or (path and require("libs/libkoreader-lfs").attributes(path, "size"))
     local added = tonumber(book.inserted_at) or 0
     local m = book.meta or {}
