@@ -2,7 +2,8 @@
 字体目录：可选字体列表与微信读书字体下载。
 
 列表顺序：微信读书 → 用户（设置目录 fonts 根目录）→ 本地（fonts 子目录）→ 系统（FontList 其余路径，含 /mnt/us/fonts）。
-扫描走 Job 子进程；微信列表走 Request.get 的 http.Cache（持久化，TTL 内不联网）。
+扫描走 Job 子进程；微信列表经 http.Cache 持久化 30 天，TTL 内不联网；
+拉取失败且磁盘上还有旧列表时回落旧列表。设置里可关闭在线字体（默认开启）。
 
 @module koplugin.book.ui.fonts.catalog
 --]]
@@ -17,14 +18,15 @@ local Paths = require("utils.paths")
 local Job = require("workers.job")
 local Text = require("utils.text")
 local Fonts = require("ui.fonts")
+local MoonSettings = require("utils.settings")
 local Mem = require("utils.mem")
 local Sfnt = require("ui.fonts.sfnt")
 local _ = require("gettext")
 
 local Catalog = {}
 
-local LIST_URL = "https://weread.qq.com/feconfig/font/list?type=web_v2"
-local LIST_TTL = 7 * 24 * 3600 -- 7 天
+Catalog.LIST_URL = "https://weread.qq.com/feconfig/font/list?type=web_v2"
+Catalog.LIST_TTL = 30 * 24 * 3600 -- 30 天
 
 --- 本地可选扩展名（不含 woff：微信下载落在 .moon/fonts）
 local LOCAL_EXT = { ttf = true, ttc = true, cff = true, otf = true }
@@ -33,6 +35,12 @@ local LOCAL_EXT = { ttf = true, ttc = true, cff = true, otf = true }
 --- FontList 回不到主进程，每次重扫就是每次都卡。KOReader 的 FontList 本身也是会话级的，新放入的字体重启后出现。
 ---@type MoonFontItem[]|nil
 local scanned
+
+--- 在线字体默认开启；仅当设置显式为 false 时关闭（opt-out）。
+---@return boolean
+function Catalog.onlineEnabled()
+    return MoonSettings.get("ui").online_fonts ~= false
+end
 
 ---@class MoonFontItem
 ---@field id string 写入 ui_font
@@ -93,35 +101,74 @@ local function scanInstalledFonts()
     return out
 end
 
---- 微信读书字体列表。http.Cache 只存 HTTP 200：强制门户等返回的 200 非 JSON 也会被缓存，
---- 解析失败时必须清掉，否则整个 TTL 内都拿不到列表。
+--- 把微信列表回包或缓存值收成 MoonFontItem[]；解析失败返回 nil。
+--- 缓存里只写解析后的列表，避免强制门户的 200 非 JSON 占住 TTL。
+---@param items any
+---@return MoonFontItem[]|nil
+local function itemsFromApi(items)
+    if type(items) ~= "table" then return nil end
+    local out = {}
+    for _idx, it in ipairs(items) do
+        local id = type(it) == "table" and (it.id or it.font)
+        if id and it.url then
+            out[#out + 1] = {
+                id = tostring(id),
+                name = tostring(it.name or it.fontName or id),
+                kind = "weread",
+                url = it.url,
+                preview = it.preview or it.previewImageUrl or it.preview_image_url,
+                zip_size = it.zip_size or it.zipSize,
+            }
+        end
+    end
+    table.sort(out, byName)
+    return out
+end
+
+--- 缓存里是已解析的列表；HTTP 回包是 JSON 字符串或 { items = ... }。
+---@param value any
+---@return MoonFontItem[]|nil
+local function parseWereadList(value)
+    if type(value) == "string" then
+        local ok, data = pcall(JSON.decode, value)
+        if not ok then return nil end
+        value = data
+    end
+    if type(value) ~= "table" then return nil end
+    if type(value.items) == "table" then
+        return itemsFromApi(value.items)
+    end
+    local first = value[1]
+    if type(first) == "table" and first.id and first.kind == "weread" then
+        return value
+    end
+    if next(value) == nil then
+        return value
+    end
+end
+
+--- 微信读书字体列表。有效缓存直接返回，不联网；写入的是解析后的列表。
+--- 拉取或解析失败时回落磁盘上的过期列表，避免用户两手空空。
 ---@param cb fun(items: MoonFontItem[]|nil, err: string|nil)
 ---@return { cancel: fun() }
 local function fetchWereadAsync(cb)
-    return Request.get(LIST_URL, { cache_ttl = LIST_TTL, accept = "application/json" }, function(body, err)
-        if not body then return cb(nil, err or _("获取字体列表失败")) end
-        local ok, data = pcall(JSON.decode, body)
-        if not ok or type(data) ~= "table" or type(data.items) ~= "table" then
-            Cache.clear(LIST_URL)
+    local cache_key = Cache.key("GET", Catalog.LIST_URL)
+    return Cache.fetch(cache_key, Catalog.LIST_TTL, function(done)
+        return Request.get(Catalog.LIST_URL, { accept = "application/json" }, function(body, err)
+            if not body then return done(nil, err or _("获取字体列表失败")) end
+            local out = parseWereadList(body)
+            if not out then return done(nil, _("字体列表解析失败")) end
+            done(out)
+        end)
+    end, function(value, err)
+        local items = parseWereadList(value)
+        if items then return cb(items) end
+        if value ~= nil and err == nil then
+            Cache.forget(cache_key)
             return cb(nil, _("字体列表解析失败"))
         end
-        local out = {}
-        for _idx, it in ipairs(data.items) do
-            local id = type(it) == "table" and (it.id or it.font)
-            if id and it.url then
-                out[#out + 1] = {
-                    id = tostring(id),
-                    name = tostring(it.name or it.fontName or id),
-                    kind = "weread",
-                    url = it.url,
-                    preview = it.preview or it.previewImageUrl or it.preview_image_url,
-                    zip_size = it.zip_size or it.zipSize,
-                }
-            end
-        end
-        table.sort(out, byName)
-        cb(out)
-    end)
+        cb(nil, err or _("获取字体列表失败"))
+    end, { stale_on_error = true })
 end
 
 --- 异步列表：本地扫描（子进程，会话内只跑一次）与微信列表并发，都到齐后合并回调一次。
@@ -129,7 +176,8 @@ end
 ---@param cb fun(items: MoonFontItem[], err: string|nil)
 ---@return { cancel: fun() }
 function Catalog.listAsync(cb)
-    local cancelled, pending = false, scanned and 1 or 2
+    local need_scan, need_net = not scanned, Catalog.onlineEnabled()
+    local cancelled, pending = false, (need_scan and 1 or 0) + (need_net and 1 or 0)
     local weread, err
     local function finish(e)
         err = err or e
@@ -142,7 +190,12 @@ function Catalog.listAsync(cb)
         cb(out, err)
     end
 
-    local scan_job = not scanned and Job.run(scanInstalledFonts, {
+    if pending == 0 then
+        finish()
+        return { cancel = function() end }
+    end
+
+    local scan_job = need_scan and Job.run(scanInstalledFonts, {
         name = "font.scan",
         kind = "medium",
         on_done = function(data)
@@ -154,15 +207,15 @@ function Catalog.listAsync(cb)
             finish(e or _("字体扫描失败"))
         end,
     })
-    local net_job = fetchWereadAsync(function(items, e)
+    local net_job = need_net and fetchWereadAsync(function(items, e)
         weread = items
         finish(e)
-    end)
+    end) or nil
 
     return { cancel = function()
             cancelled = true
             if scan_job then scan_job:cancel() end
-            net_job.cancel()
+            if net_job then net_job.cancel() end
         end }
 end
 
@@ -255,6 +308,10 @@ function Catalog.ensureInstalledAsync(item, on_progress, cb)
         return noop
     end
     local installed = Fonts.downloadedPath(item.id)
+    if not installed and not Catalog.onlineEnabled() then
+        cb(nil, _("在线字体已关闭"))
+        return noop
+    end
     if installed then
         local cancelled = false
         local function done(err)

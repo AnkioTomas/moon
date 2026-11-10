@@ -14,7 +14,14 @@ local requested = 0
 package.preload["utils.db"] = function()
     return {
         schema = function() end,
-        rowexec = function(_sql, key) return rows[key] and rows[key].value end,
+        rowexec = function(sql, key, now)
+            local row = rows[key]
+            if not row then return nil end
+            if sql:find("expires >", 1, true) and row.expires and row.expires <= (now or 0) then
+                return nil
+            end
+            return row.value
+        end,
         exec = function(sql, key, value, expires)
             if sql:find("INSERT INTO http", 1, true) then
                 rows[key] = { value = value, expires = expires }
@@ -110,6 +117,39 @@ do -- 带账号：键按 auth_username 隔离，换账号不串缓存
     Assert.eq(body, "fresh")
     Assert.eq(requested, 1, "另一个账号必须重新请求")
     Assert.is_nil(rows["GET https://nas/opds"], "带账号时不得写无隔离的键")
+end
+
+do -- 过期：当未命中，重新请求并写入
+    rows["GET https://x/expired"] = { value = "old", expires = os.time() - 1 }
+    requested = 0
+    local before = os.time()
+    local body = get("https://x/expired", { cache_ttl = 60 })
+    Assert.eq(body, "fresh")
+    Assert.eq(requested, 1)
+    Assert.eq(rows["GET https://x/expired"].value, "fresh")
+    Assert.is_true(rows["GET https://x/expired"].expires >= before + 60)
+end
+
+do -- 请求失败且 stale_on_error：回落过期缓存
+    rows["GET https://x/stale"] = { value = "old", expires = os.time() - 1 }
+    status = 500
+    requested = 0
+    local body, err = get("https://x/stale", { cache_ttl = 60, stale_on_error = true })
+    status = 200
+    Assert.eq(body, "old")
+    Assert.is_nil(err)
+    Assert.eq(requested, 1)
+    Assert.eq(rows["GET https://x/stale"].value, "old", "失败回落不得覆盖旧值")
+    Assert.is_true(rows["GET https://x/stale"].expires <= os.time())
+end
+
+do -- 失败且无旧缓存：透传错误
+    status = 500
+    local body, err = get("https://x/none", { cache_ttl = 60, stale_on_error = true })
+    status = 200
+    Assert.is_nil(body)
+    Assert.eq(err, "HTTP 500")
+    Assert.is_nil(rows["GET https://x/none"])
 end
 
 return true

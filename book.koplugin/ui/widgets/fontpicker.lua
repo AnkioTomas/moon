@@ -1,10 +1,10 @@
 --[[--
 界面字体选择器：用户/本地/系统字库 + 微信读书（可下载）。
 
-底部分栏（在线/用户/本地/系统）走主题 List 的 tabs。
+底部分栏（在线/用户/本地/系统）走主题 List 的 tabs；关闭在线字体时不展示「在线」栏。
 列表行只留通栏预览：已装字体把字体名用该字体渲染，在线用远程预览图；当前项是选中的单选标记。
 预览按页懒构建（List 翻到该页才调 item.widget；禁止打开时全表 getFace / 拉图）。
-列表走 FontCatalog.listAsync（微信列表经 http.Cache，TTL 内不联网）。
+列表走 FontCatalog.listAsync（微信列表经 http.Cache 持久化 30 天，TTL 内不联网）。
 无「系统默认」项；空配置仍由 applyCurrent 回退 fontmap 备份。
 
 @module koplugin.book.ui.widgets.fontpicker
@@ -163,13 +163,17 @@ end
 ---@param items MoonFontItem[]|table|nil
 function FontPicker.show(opts, items)
     local cur = (opts.current_id and opts.current_id()) or Fonts.currentId()
+    local online = FontCatalog.onlineEnabled()
     local groups = {}
     for _idx, tab in ipairs(TABS) do groups[tab[1]] = {} end
-    local active = opts.initial_tab or "weread"
+    local active = opts.initial_tab or (online and "weread" or "user")
     for _idx, it in ipairs(items or {}) do
         local group = groups[it.kind] or groups.weread
         group[#group + 1] = it
         if it.id == cur and groups[it.kind] then active = it.kind end
+    end
+    if not online and active == "weread" then
+        active = "user"
     end
     -- 预览占满行内文字区：行宽扣两侧 md 边距、单选标记和它后面的 sm 间隔。
     local t = Theme.current()
@@ -193,8 +197,10 @@ function FontPicker.show(opts, items)
         return rows
     end
     local tabs = {}
-    for i, tab in ipairs(TABS) do
-        tabs[i] = { id = tab[1], text = _(tab[2]), icon = tab[3] }
+    for _idx, tab in ipairs(TABS) do
+        if tab[1] ~= "weread" or online then
+            tabs[#tabs + 1] = { id = tab[1], text = _(tab[2]), icon = tab[3] }
+        end
     end
     List:new{
         title = opts.title or _("界面字体"),

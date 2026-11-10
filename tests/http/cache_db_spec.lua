@@ -64,15 +64,15 @@ local function loadCache(connection)
     return DbBase, Cache
 end
 
-local function fetch(Cache, key, result)
-    local loads, got = 0, nil
+local function fetch(Cache, key, result, err, opts)
+    local loads, got, got_err = 0, nil, nil
     Cache.fetch(key, 60, function(done)
         loads = loads + 1
-        done(result)
+        done(result, err)
         return { cancel = function() end }
-    end, function(value) got = value end)
+    end, function(value, e) got, got_err = value, e end, opts)
     Stubs.flush()
-    return loads, got
+    return loads, got, got_err
 end
 
 -- ── 建表：open 时登记的 http 表与过期索引 ──
@@ -195,5 +195,68 @@ do
     Cache.forget("")
     Cache.forget(nil)
     Assert.eq(#calls, before, "空键不访问数据库")
+    DbBase.close()
+end
+
+-- 过期：带 expires > 的读未命中，走 load 并写入新的过期时间。
+do
+    local expired = false
+    local connection, calls = makeConn({
+        step = function(sql)
+            if sql:find("expires >", 1, true) then
+                expired = true
+                return nil
+            end
+        end,
+    })
+    local DbBase, Cache = loadCache(connection)
+    local before = os.time()
+    local loads, value = fetch(Cache, "expired-key", "fresh")
+    Assert.is_true(expired)
+    Assert.eq(loads, 1, "过期当未命中")
+    Assert.eq(value, "fresh")
+    local insert
+    for _idx, call in ipairs(calls) do
+        if call.sql and call.sql:find("INSERT INTO http", 1, true) then insert = call end
+    end
+    Assert.not_nil(insert)
+    Assert.is_true(insert.args[3] >= before + 60)
+    DbBase.close()
+end
+
+-- 拉取失败且 stale_on_error：用不带过期条件的 SELECT 回落旧值，不把错误传出，也不覆盖缓存。
+do
+    local selects = {}
+    local connection, calls = makeConn({
+        step = function(sql)
+            selects[#selects + 1] = sql
+            if sql:find("expires >", 1, true) then return nil end
+            if sql == "SELECT value FROM http WHERE key=? LIMIT 1;" then
+                return { "stale-list" }, { "value" }
+            end
+        end,
+    })
+    local DbBase, Cache = loadCache(connection)
+    local mark = #calls
+    local loads, value, err = fetch(Cache, "stale-key", nil, "network down", { stale_on_error = true })
+    Assert.eq(loads, 1)
+    Assert.eq(value, "stale-list")
+    Assert.is_nil(err, "有旧值时不透传错误")
+    Assert.eq(selects[1], "SELECT value FROM http WHERE key=? AND expires > ? LIMIT 1;")
+    Assert.eq(selects[2], "SELECT value FROM http WHERE key=? LIMIT 1;")
+    for i = mark + 1, #calls do
+        Assert.is_nil(calls[i].sql and calls[i].sql:find("INSERT INTO http", 1, true), "失败回落不得覆盖缓存")
+    end
+    DbBase.close()
+end
+
+-- 失败且没有旧条目：即使 stale_on_error 也透传错误。
+do
+    local connection, calls = makeConn()
+    local DbBase, Cache = loadCache(connection)
+    local loads, value, err = fetch(Cache, "missing-stale", nil, "network down", { stale_on_error = true })
+    Assert.eq(loads, 1)
+    Assert.is_nil(value)
+    Assert.eq(err, "network down")
     DbBase.close()
 end

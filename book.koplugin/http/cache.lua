@@ -48,12 +48,19 @@ function Cache.key(method, url, query, scope)
     return key
 end
 
---- 读缓存；过期行不返回（由 write 淘汰），JSON 损坏则删行当未命中。
+--- 读缓存；默认不返回过期行（由 write 淘汰），JSON 损坏则删行当未命中。
+--- allow_stale 时不过滤过期，供拉取失败时回落磁盘上的旧值。
 ---@param key string
+---@param allow_stale boolean|nil
 ---@return any|nil
-local function read(key)
-    local value_json = DB.rowexec([[SELECT value FROM http WHERE key=? AND expires > ? LIMIT 1;]],
-        key, os.time())
+local function read(key, allow_stale)
+    local value_json
+    if allow_stale then
+        value_json = DB.rowexec([[SELECT value FROM http WHERE key=? LIMIT 1;]], key)
+    else
+        value_json = DB.rowexec([[SELECT value FROM http WHERE key=? AND expires > ? LIMIT 1;]],
+            key, os.time())
+    end
     if not value_json then
         return nil
     end
@@ -95,12 +102,15 @@ end
 
 --- 先读缓存，未命中再 load；load 回调 value 非 nil 且无 err 才写入。
 --- key 为 nil 表示不走缓存，直接 load。读缓存推迟一拍，回调永远异步。
+--- opts.stale_on_error：load 失败时若磁盘上还有过期条目，回落该旧值，不把错误传给调用方。
 ---@param key string|nil
 ---@param ttl number 存活秒数
 ---@param load fun(done: fun(value: any, err: any, ...)): { cancel: fun() }|nil
 ---@param cb fun(value: any, err: any, ...)
+---@param opts { stale_on_error: boolean|nil }|nil
 ---@return { cancel: fun() }
-function Cache.fetch(key, ttl, load, cb)
+function Cache.fetch(key, ttl, load, cb, opts)
+    opts = opts or {}
     if not key then
         return load(cb) or { cancel = function() end }
     end
@@ -117,6 +127,15 @@ function Cache.fetch(key, ttl, load, cb)
         job = load(function(value, err, ...)
             if value ~= nil and err == nil then
                 write(key, value, ttl)
+                cb(value, err, ...)
+                return
+            end
+            if opts.stale_on_error then
+                local stale = read(key, true)
+                if stale ~= nil then
+                    cb(stale)
+                    return
+                end
             end
             cb(value, err, ...)
         end)
