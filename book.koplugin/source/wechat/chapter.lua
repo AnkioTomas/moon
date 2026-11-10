@@ -20,6 +20,7 @@ local Text = require("utils.text")
 local Paths = require("utils.paths")
 local Toc = require("source.wechat.toc")
 local Client = require("source.wechat.client")
+local Mem = require("utils.mem")
 local Context = require("source.wechat.context")
 local Mapper = require("source.wechat.mapper")
 local _ = require("l10n").get("source.wechat")
@@ -38,6 +39,25 @@ local Chapter = {}
 ---@param cb function
 ---@param opts { offline?: boolean, batch?: boolean }|nil
 ---@return { cancel: fun() }
+
+--- 解包前预检：不够则弹窗（Kindle 可改走 no-framework）并失败，不 fork。
+---@param need number
+---@param fail fun(err: string)
+---@return boolean ok
+local function affordPackage(need, fail)
+    local ok, err, detail = Mem.canAfford(need)
+    if ok then return true end
+    logger.warn("book.mem insufficient", "weread_chapter_package", err)
+    logger.flushSync()
+    Mem.promptInsufficient({
+        what = require("gettext")("章节解包"),
+        needed = detail.needed,
+        available = detail.available,
+    })
+    fail(err)
+    return false
+end
+
 local function downloadPackageAsync(bookId, chapters, book_type, pick, cb, opts)
     opts = opts or {}
     local offline = opts.offline and "1" or "0"
@@ -97,6 +117,8 @@ local function downloadPackageAsync(bookId, chapters, book_type, pick, cb, opts)
             end
             local body = res.body or ""
             if body:sub(258, 262) == "ustar" then
+                -- tar 通常一章；正文从已在内存的包里抽出，按 2× 包长估计额外峰值。
+                if not affordPackage(2 * #body, fail) then return end
                 job = Job.run(function()
                     -- tar 包通常一章；chapters 可能是 "12" 或批量串，取第一个数字 uid。
                     local uid = tostring(chapters):match("(%d+)") or chapters
@@ -123,6 +145,7 @@ local function downloadPackageAsync(bookId, chapters, book_type, pick, cb, opts)
             end
             -- 解密 + 解压是逐字节纯 Lua，放子进程；包里的图片在 pick 里就地落盘（JSON 帧装不下二进制）。
             -- 样式表是文本，随章包顺手带回，避免整书 Styles/ 缺失时正文失去 text-indent。
+            if not affordPackage(Package.unzipNeed(body), fail) then return end
             job = Job.run(function()
                 local files, zerr = Package.unzip(body, password)
                 if not files then return { err = zerr } end

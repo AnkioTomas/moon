@@ -88,6 +88,31 @@ end
 local function u16(s, p) local a, b = s:byte(p, p + 1) return a + b * 256 end
 local function u32(s, p) local a, b, c, d = s:byte(p, p + 3) return a + b * 256 + c * 65536 + d * 16777216 end
 
+--- 解压峰值增量（字节）：中央目录里各文件未压缩大小之和，再加上当前最大压缩块（边解边换）。
+--- `data` 已在内存里，MemAvailable 已包含它；预检只问额外还要多少。
+--- 解析失败时按 3× 包长估计（解密副本 + 膨胀）。此为根据 Package.unzip 分配行为的假设，已对照实现。
+---@param data string
+---@return number
+function Package.unzipNeed(data)
+    data = data or ""
+    local fallback = 3 * #data
+    local eocd
+    for p = #data - 21, math.max(1, #data - 65557), -1 do
+        if u32(data, p) == 0x06054b50 then eocd = p break end
+    end
+    if not eocd then return fallback end
+    local sum_un, max_c, p = 0, 0, u32(data, eocd + 16) + 1
+    for _entry = 1, u16(data, eocd + 10) do
+        if u32(data, p) ~= 0x02014b50 then return fallback end
+        local csize, usize = u32(data, p + 20), u32(data, p + 24)
+        local nlen, elen, clen = u16(data, p + 28), u16(data, p + 30), u16(data, p + 32)
+        sum_un = sum_un + usize
+        if csize > max_c then max_c = csize end
+        p = p + 46 + nlen + elen + clen
+    end
+    return sum_un + max_c
+end
+
 --- 解开整个 zip（走中央目录，数据描述符模式也能用）。
 ---@param data string
 ---@param password string|nil

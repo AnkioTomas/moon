@@ -95,6 +95,7 @@ end
 package.preload["source.wechat.package"] = function()
     return {
         password = function() return "pw" end,
+        unzipNeed = function() return 0 end,
         formatChaptersParam = function(uids)
             uids = uids or {}
             if #uids == 0 then return "0" end
