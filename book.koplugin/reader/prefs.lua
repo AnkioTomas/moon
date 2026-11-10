@@ -355,4 +355,50 @@ function M.saveDefaults(ui)
     return true
 end
 
+
+--- 漫画 CBZ 开书默认：整页按宽度缩放、不裁边、页间距为 0。
+---
+--- KOReader 默认 trim_page=auto，且 sidecar 没写 zoom 时 genus 回退为 content；
+--- 于是每页按内容框 fit width。条漫切片画布同宽、接缝本应对齐，空白更多的一页
+--- 会被放大并左右错开。连续滚动默认还有 kopt_page_gap_height=8 的灰条缝。
+--- 只写 CBZ/CBT，不动 PDF。对齐与去缝各记一次标记，之后尊重用户改动。
+local COMIC_FIT_KEY = "book_comic_cbz_fit"
+local COMIC_GAP_KEY = "book_comic_cbz_nogap"
+local COMIC_EXT = { cbz = true, cbt = true }
+
+---@param file string|nil
+---@return boolean
+local function isComicArchive(file)
+    local ext = type(file) == "string" and file:match("%.([^.]+)$")
+    return type(ext) == "string" and COMIC_EXT[ext:lower()] == true
+end
+
+--- DocSettingsLoad：在原生 ReadSettings 之前写入 kopt 默认。
+---@param doc_settings table
+---@param document table|nil
+---@return boolean
+function M.injectComic(doc_settings, document)
+    if type(doc_settings) ~= "table" or type(document) ~= "table" or not isComicArchive(document.file) then
+        return false
+    end
+    local changed = false
+    if not doc_settings:readSetting(COMIC_FIT_KEY) then
+        -- 3=none，4=page，1=width：与 koptoptions / ReaderZooming 的取值一致。
+        doc_settings:saveSetting("kopt_trim_page", 3)
+        doc_settings:saveSetting("kopt_zoom_mode_genus", 4)
+        doc_settings:saveSetting("kopt_zoom_mode_type", 1)
+        doc_settings:saveSetting("kopt_page_scroll", 1)
+        doc_settings:saveSetting("zoom_mode", "pagewidth")
+        doc_settings:saveSetting(COMIC_FIT_KEY, true)
+        changed = true
+    end
+    -- 上一版只种了对齐标记的 sidecar 也要去掉灰缝，但不能再改用户后来的缩放/裁边。
+    if not doc_settings:readSetting(COMIC_GAP_KEY) then
+        doc_settings:saveSetting("kopt_page_gap_height", 0)
+        doc_settings:saveSetting(COMIC_GAP_KEY, true)
+        changed = true
+    end
+    return changed
+end
+
 return M
