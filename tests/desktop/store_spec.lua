@@ -197,10 +197,14 @@ store_settings.enabled = false
 Assert.len(Store.providers(), 0)
 store_settings.enabled = true
 
--- 默认不加载：没搜索词不发请求。
+-- 只能搜索的来源：没搜索词不发请求，只给空页。
+store.provider_id = "wechat"
 store:updateView()
 Assert.eq(requests, 0)
+Assert.len(source_searches, 0)
 Assert.len(store.state.books, 0)
+store.provider_id = store_settings.provider
+store.state = nil
 
 -- 搜索由本页接管：留在 store tab、回第一页并丢弃旧结果。
 build_opts.on_search()
@@ -297,9 +301,19 @@ store_settings.opds_enabled = true
 local opds = Store:new{ desktop = desktop, name = "store" }
 opds.provider_id = "opds"
 desktop.tab = "store"
-opds:fetch()
+-- 经 updateView 守卫：OPDS 无搜索、空 trail、无预载状态时必须拉根目录，不能停在空页。
+Assert.not_nil(opds:listable())
+Assert.is_nil(opds:browsable())
+package.loaded["ui.guard"] = { wrap = function(_label, fn) return fn end }
+local UIManager = require("ui/uimanager")
+local old_nextTick = UIManager.nextTick
+UIManager.nextTick = function(_, fn) fn() end
+opds:updateView()
+UIManager.nextTick = old_nextTick
 Assert.is_nil(opds_requests[1].feed)
+Assert.eq(opds_requests[1].search, "")
 Assert.len(opds.books, 2)
+Assert.eq(opds.books[1].title, "新书")
 opds:build({ desktop = desktop }, {}, {})
 Assert.is_nil(build_opts.on_back)
 

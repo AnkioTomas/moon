@@ -1,5 +1,5 @@
 --[[--
-书城 Tab：Z-Library / OPDS 与各启用书源的搜索。默认不加载任何书，只有搜索按钮；
+书城 Tab：Z-Library / OPDS 与各启用书源的搜索。能浏览或列目录的来源打开即拉根目录；只能搜索的来源默认不加载，只有搜索按钮；
 工具条左侧的下拉切换搜索来源（见 Store.providers）。
 Z-Library / OPDS 是书城后端（`store.<id>` 提供 listStoreAsync / installAsync，下载后导入本地书库）；
 书源是带 `searchAsync` 或 `browseAsync` 的启用源，结果进详情页后加入本地书库。
@@ -109,6 +109,13 @@ end
 function Store:browsable()
     local provider = self:provider()
     return provider and provider.backend and provider.backend.browseAsync and provider or nil
+end
+
+--- 当前来源能列目录（书城后端：OPDS 等只有 listStoreAsync、没有 browseAsync）：没搜索词时拉根目录。
+---@return StoreProvider|nil
+function Store:listable()
+    local provider = self:provider()
+    return provider and provider.store and provider or nil
 end
 
 --- 工具条下要画的 chip 分组；搜索中不显示。
@@ -405,8 +412,8 @@ function Store:updateView()
         state = { books = self:pageBooks() }
         self.state = state
     end
-    -- 默认不加载：没搜索词也没下钻就只给空页。
-    if not state and not self.search and #self.trail == 0 and not self:browsable() then
+    -- 默认不加载：没搜索词也没下钻、又不能浏览或列目录，就只给空页。
+    if not state and not self.search and #self.trail == 0 and not self:browsable() and not self:listable() then
         state = { books = {} }
         self.state = state
     end
