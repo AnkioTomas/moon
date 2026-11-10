@@ -357,6 +357,7 @@ function M.deviceText(info)
         "network_connected: " .. tostring(info.connected),
         "has_battery: " .. tostring(info.has_battery),
         "battery: " .. tostring(info.battery or "n/a"),
+        "startup_mode: " .. tostring(info.startup_mode or require("utils.mem").startupMode()),
     }
     return table.concat(lines, "\n") .. "\n"
 end
@@ -567,6 +568,7 @@ function M.gatherExtras()
             connected = connected,
             has_battery = Device:hasBattery() and true or false,
             battery = battery,
+            startup_mode = require("utils.mem").startupMode(),
         }))
     end)
 
@@ -872,6 +874,7 @@ function M.infoText(info, files, notes)
         "plugin_version: " .. tostring(info.plugin_version or "?"),
         "koreader_version: " .. tostring(info.koreader_version or "?"),
         "device: " .. tostring(info.device or "?"),
+        "startup_mode: " .. tostring(info.startup_mode or require("utils.mem").startupMode()),
         "language: " .. tostring(info.language or "?"),
         "generated: " .. tostring(info.generated or os.date("%Y-%m-%d %H:%M:%S %z")),
         "",

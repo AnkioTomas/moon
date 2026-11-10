@@ -1336,6 +1336,7 @@ local function buildLogsZip(diag, diag_notes, deferred)
         plugin_version = require("bookversion"),
         koreader_version = ok_v and Version:getCurrentRevision() or ("? (" .. tostring(Version) .. ")"),
         device = tostring(Device.model or "?"),
+        startup_mode = require("utils.mem").startupMode(),
         language = require("gettext").current_lang or G_reader_settings:readSetting("language") or "C",
     }
     return Logs.build(tempPath() .. ".zip", files, info, require("ffi/archiver").Writer, extras, notes)
