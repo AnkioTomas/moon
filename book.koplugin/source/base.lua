@@ -272,6 +272,15 @@ function SourceBase:deleteBookAsync(identity, cb)
     if not require("book.store").markDeleted(self.id, identity.stable_id) then
         return SourceBase.defer(cb, false, _("删除本书失败"))
     end
+    local book = identity.book
+    if not book then
+        local BookDB = require("book.books_db")
+        if type(BookDB.get) == "function" then
+            book = BookDB.get(self.id, identity.stable_id)
+        end
+    end
+    require("utils.log").info("book delete", self.id, identity.stable_id,
+        book and (book.title or book.stable_id) or identity.stable_id)
     if not self:configured() then
         if not require("book.books_db").remove(self.id, identity.stable_id) then
             require("utils.log").warn("book tombstone remove failed", self.id, identity.stable_id)

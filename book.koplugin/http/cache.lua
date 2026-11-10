@@ -129,6 +129,16 @@ function Cache.fetch(key, ttl, load, cb)
     end }
 end
 
+--- 按完整键删一条，不用 LIKE，避免短关键词误伤更长的键。
+---@param key string
+function Cache.forget(key)
+    if type(key) ~= "string" or key == "" then return end
+    local ok, err = DB.exec([[DELETE FROM http WHERE key=?;]], key)
+    if not ok then
+        logger.warn("book.http cache forget failed", key, err)
+    end
+end
+
 --- 清空全部缓存；传 url_substr 则只失效 key 含该子串的条目。
 ---@param url_substr string|nil
 function Cache.clear(url_substr)
