@@ -124,6 +124,34 @@ marks.render_key = nil
 marks:updateView()
 Assert.eq(page_lookups, 12, "排版变了重算页码")
 
+-- 没有 getDocumentRenderingHash 时不崩溃；仍能按 xpointer 画已定位的句子。
+do
+    local saved = ui.document.getDocumentRenderingHash
+    ui.document.getDocumentRenderingHash = nil
+    marks.spans, marks.spans_hash, marks.render_key = nil, nil, nil
+    local before = page_lookups
+    marks:updateView()
+    Assert.len(marks.current, 1, "无排版指纹仍画出当前页标记")
+    Assert.eq(page_lookups, before + 6)
+    marks.render_key = nil
+    marks:updateView()
+    Assert.eq(page_lookups, before + 6, "无指纹时复用已算的页码")
+    ui.document.getDocumentRenderingHash = saved
+end
+
+-- 连换算页码 / 屏幕框的接口都没有：跳过标记，不在绘制路径上崩溃。
+do
+    local saved_page, saved_boxes = ui.document.getPageFromXPointer, ui.document.getScreenBoxesFromPositions
+    ui.document.getPageFromXPointer, ui.document.getScreenBoxesFromPositions = nil, nil
+    marks.spans, marks.spans_hash, marks.render_key = nil, nil, nil
+    marks:updateView()
+    Assert.len(marks.current, 0)
+    ui.document.getPageFromXPointer, ui.document.getScreenBoxesFromPositions = saved_page, saved_boxes
+    marks.spans, marks.spans_hash, marks.render_key = nil, nil, nil
+    marks:updateView()
+    Assert.len(marks.current, 1, "接口恢复后仍能画标记")
+end
+
 -- 点按回调打开该句段评。
 marks.current[1].tap()
 Assert.eq(opened.spot.range, "1-5")

@@ -426,3 +426,27 @@ do
     Assert.eq(got[1].chapter_idx, 5)
 end
 
+
+-- 没有 getDocumentRenderingHash 时不崩溃；已定位的句子仍能取框。
+do
+    local saved = document.getDocumentRenderingHash
+    document.getDocumentRenderingHash = nil
+    local c = Linked.newCache()
+    -- 先带指纹走一遍，把句子定位进 cache；再摘掉方法只测绘制路径。
+    document.getDocumentRenderingHash = saved
+    hash = 3
+    place(ui, entries, c)
+    document.getDocumentRenderingHash = nil
+    document.page = 3
+    local n = #place(ui, entries, c)
+    Assert.is_true(n > 0, "无排版指纹仍画出已定位的句子")
+    document.getDocumentRenderingHash = saved
+end
+
+-- 没有 xpointer 换算接口：跳过，不崩溃。
+do
+    local saved_page, saved_boxes = document.getPageFromXPointer, document.getScreenBoxesFromPositions
+    document.getPageFromXPointer, document.getScreenBoxesFromPositions = nil, nil
+    Assert.len(place(ui, entries, Linked.newCache()), 0)
+    document.getPageFromXPointer, document.getScreenBoxesFromPositions = saved_page, saved_boxes
+end

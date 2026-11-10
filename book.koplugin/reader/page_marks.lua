@@ -95,6 +95,29 @@ function PageMarks.viewKey(ui, revision)
     }, "\0")
 end
 
+--- CRE 排版指纹。图片 / PDF / kopt 等文档没有这个方法，返回 nil，不能在绘制路径上直接调用。
+---@param document table|nil
+---@return any|nil
+function PageMarks.renderingHash(document)
+    local fn = document and document.getDocumentRenderingHash
+    if type(fn) ~= "function" then
+        return nil
+    end
+    local ok, hash = pcall(fn, document)
+    if ok then
+        return hash
+    end
+end
+
+--- 能否按 xpointer 换算页码和屏幕框。没有这些接口时段评标记应跳过，而不是在绘制时崩溃。
+---@param document table|nil
+---@return boolean
+function PageMarks.canMapXPointers(document)
+    return document ~= nil
+        and type(document.getPageFromXPointer) == "function"
+        and type(document.getScreenBoxesFromPositions) == "function"
+end
+
 --- 屏幕框与屏幕相交（左上角出屏但仍相交也算）。
 ---@param box table|nil
 ---@param width number|nil

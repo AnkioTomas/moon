@@ -425,7 +425,10 @@ end
 ---@return ReviewPlacement[]
 function Linked.place(ui, entries, cache, redraw)
     local document = ui.document
-    local hash = document:getDocumentRenderingHash()
+    if not PageMarks.canMapXPointers(document) then
+        return {}
+    end
+    local hash = PageMarks.renderingHash(document)
     if cache.hash ~= hash then
         cache.hash, cache.pages, cache.scanned = hash, {}, {}
     end
