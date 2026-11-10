@@ -220,6 +220,29 @@ function NoteDB.all(source_id, stable_id)
     return rows(DB.query(sql .. " ORDER BY updated_at ASC;"))
 end
 
+--- 逐行访问全部注解快照（含书名作者），不把整表收进一张数组。
+--- 回调返回 false 时提前结束。JOIN books，调用前会确保 books 表已登记。
+---@param fn fun(row: { source_id: string, stable_id: string, chapter_idx: integer, payload: string, updated_at: integer, sync_status: integer, title: string, authors: string }): boolean|nil
+---@return boolean
+function NoteDB.each(fn)
+    require("book.books_db")
+    return DB.each([[SELECT n.source_id, n.stable_id, n.chapter_idx, n.payload, n.updated_at, n.sync_status,
+        COALESCE(b.title, ''), COALESCE(b.authors, '')
+        FROM notes n LEFT JOIN books b ON b.source_id=n.source_id AND b.stable_id=n.stable_id
+        ORDER BY n.updated_at DESC;]], nil, function(row)
+        return fn({
+            source_id = row[1],
+            stable_id = row[2],
+            chapter_idx = tonumber(row[3]) or 0,
+            payload = row[4],
+            updated_at = tonumber(row[5]) or 0,
+            sync_status = tonumber(row[6]) or 0,
+            title = row[7] or "",
+            authors = row[8] or "",
+        })
+    end)
+end
+
 --- 全部注解快照连同书名作者（书行缺失时为空串）。
 ---@return { source_id: string, stable_id: string, payload: string, title: string, authors: string }[]
 function NoteDB.allWithBook()

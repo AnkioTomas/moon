@@ -199,6 +199,47 @@ function DB.query(sql, ...)
     return result, nrows or 0
 end
 
+--- 逐行回调，不把整份结果集收进内存。fn 返回 false 时提前结束。
+---@param sql string
+---@param binds any[]|nil 绑定到 ? 的参数（按下标 1..n）
+---@param fn fun(row: table, names: table|nil): boolean|nil
+---@return boolean ok
+function DB.each(sql, binds, fn)
+    DB.ensure()
+    if not conn then
+        return false
+    end
+    local argc = type(binds) == "table" and #binds or 0
+    local stmt
+    local started_at = Perf.now()
+    local ok, err = pcall(function()
+        stmt = conn:prepare(sql)
+        if argc > 0 then
+            stmt:bind(unpack(binds, 1, argc))
+        end
+        while true do
+            local row, names = stmt:step({}, {})
+            if not row then
+                break
+            end
+            if fn(row, names) == false then
+                break
+            end
+        end
+    end)
+    closeStmt(stmt)
+    local elapsed_ms = Perf.elapsedMs(started_at)
+    if not ok then
+        noteError(err)
+        logger.warn("book.db each failed", err, sql, "params", unpack(binds or {}, 1, argc))
+        return false
+    end
+    if elapsed_ms >= SLOW_QUERY_MS then
+        logger.dbg("book.db slow each", "ms", elapsed_ms, sql)
+    end
+    return true
+end
+
 ---@type { name: string, fn: fun(): boolean }[]
 local schemas = {}
 local schema_ready = false
