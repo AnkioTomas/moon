@@ -2147,4 +2147,12 @@ return {
     ["无法解析订阅目录"] = "Could not parse the subscription catalog",
     ["正在加载…"] = "Loading…",
     ["没有可订阅的条目"] = "Nothing to subscribe to",
+    ["内存不足"] = "Not enough memory",
+    ["内存不足，已取消本次操作"] = "Not enough memory; this step was cancelled",
+    ["当前可用内存约 %1 MB，完成「%2」大约需要 %3 MB，继续的话可能被系统强制结束。可以用 no-framework 模式重启（关闭 Kindle 系统界面以腾出内存），然后再试一次。"] = "About %1 MB of memory is available, but “%2” needs about %3 MB. Continuing may freeze or get the process killed. You can restart in no-framework mode (this stops the Kindle system UI to free RAM), then try again.",
+    ["当前可用内存约 %1 MB，完成「%2」大约需要 %3 MB，内存不足，无法继续。"] = "About %1 MB of memory is available, but “%2” needs about %3 MB. There isn’t enough memory to continue.",
+    ["以 no-framework 重启"] = "Restart in no-framework mode",
+    ["字体转换"] = "font conversion",
+    ["字体解压"] = "font extraction",
+    ["章节解包"] = "chapter unpacking",
 }
