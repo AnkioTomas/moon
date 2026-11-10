@@ -716,17 +716,39 @@ do
     Assert.is_nil(ok)
     Assert.eq(err, "缺少章节信息")
     Assert.is_nil(captured, "不得用当前章 uid 40 上报")
-    -- locator 对不上章节正文：永久失败（否则脏同步每轮白撞）
+    -- locator 对不上章节正文：按章级坐标回退上报，不再失败重试
     local map_ok, map_err, map_meta
+    captured = nil
+    src:putProgressAsync(REF, {
+        fraction = 0.5,
+        chapter_fraction = 0.25,
+        locator = "/html/body/div/text().0",
+        extra = { chapter_uid = 42, chapter_idx = 0, chapter_offset = 99999 },
+    }, function(v, e, meta) map_ok, map_err, map_meta = v, e, meta end)
+    Assert.is_true(map_ok)
+    Assert.is_nil(map_err)
+    Assert.not_nil(captured)
+    Assert.is_nil(map_meta and map_meta.permanent)
+    Assert.eq(captured.chapter_offset, math.floor(0.25 * 16015 + 0.5),
+        "对不上时按章内比例换算，不复用陈旧 extra 偏移")
+    captured = nil
     src:putProgressAsync(REF, {
         fraction = 0.5,
         locator = "/html/body/div/text().0",
-        extra = UID,
+        extra = { chapter_uid = 42, chapter_idx = 0, chapter_offset = 321 },
     }, function(v, e, meta) map_ok, map_err, map_meta = v, e, meta end)
-    Assert.is_nil(map_ok)
-    Assert.is_nil(captured)
-    Assert.is_nil(map_meta and map_meta.permanent, "映射失败的进度必须保留脏状态等待重试")
-    Assert.eq(map_err, "reading position not found in chapter")
+    Assert.is_true(map_ok)
+    Assert.is_nil(map_err)
+    Assert.eq(captured.chapter_offset, 321, "没有章内比例时回退同章旧偏移")
+    captured = nil
+    src:putProgressAsync(REF, {
+        fraction = 0.5,
+        locator = "/html/body/div/text().0",
+        extra = { chapter_uid = 42, chapter_idx = 0 },
+    }, function(v, e, meta) map_ok, map_err, map_meta = v, e, meta end)
+    Assert.is_true(map_ok)
+    Assert.is_nil(map_err)
+    Assert.eq(captured.chapter_offset, 0, "对不上且没有可用比例/偏移时按章首上报")
     toc_payload["b1"] = nil
     require("book.toc_db").removeIdentity("wechat", "b1")
     require("source.wechat.toc").clear()

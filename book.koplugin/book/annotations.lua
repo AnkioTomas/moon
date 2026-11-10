@@ -376,6 +376,22 @@ local function matchingHeads(flow, needle)
     return heads
 end
 
+--- 把 KOReader / crengine xpointer 路径规范成与 ``Annotations.flow``（toStringV2）同一套写法。
+--- 去掉 ``DocFragment`` 外壳；把 V1 的 ``[1]`` 下标收成 V2（``[2]`` 及以后保留）。
+---@param path string
+---@return string
+local function canonicalPath(path)
+    local rest = path:match("/DocFragment%[?%d*%]?(.*)$")
+    if rest then
+        if rest:match("^/html") then
+            path = rest
+        elseif rest:match("^/body") then
+            path = "/html" .. rest
+        end
+    end
+    return (path:gsub("%[1%]", ""))
+end
+
 ---@param flow WechatRuneFlow
 ---@param pos string|nil
 ---@return integer|nil
@@ -387,14 +403,23 @@ local function headAtXPointer(flow, pos)
     local path, offset = pos:match("^(.*)%.(%d+)$")
     offset = tonumber(offset)
     if not path then return nil end
+    local want = canonicalPath(path)
     for i = 1, flow.count do
-        if flow.ends[i] - 1 == offset and flow.paths[flow.starts[i]] == path then
+        if flow.ends[i] - 1 == offset and canonicalPath(flow.paths[flow.starts[i]]) == want then
             return i
         end
     end
     -- KOReader 的 last_xpointer 也可能指向图片等没有 text() 子节点的元素。
     -- 用元素之后最近的可见正文作为同步坐标；只有元素在正文末尾时才退回前一个字符。
     local boundary = flow.element_boundaries[path]
+    if boundary == nil then
+        for key, value in pairs(flow.element_boundaries) do
+            if canonicalPath(key) == want then
+                boundary = value
+                break
+            end
+        end
+    end
     if boundary ~= nil and flow.count > 0 then
         return boundary < flow.count and boundary + 1 or flow.count
     end
@@ -589,6 +614,7 @@ local function elementWireOffset(html, locator)
     if not want or want == "" then
         return nil
     end
+    want = canonicalPath(want)
     html = Text.stripBom(tostring(html or ""))
     local source = toRunes(html)
     ---@type WechatDomNode
@@ -634,7 +660,7 @@ local function elementWireOffset(html, locator)
                         parent = top, name = name, ord = top.counts[name], counts = {}, texts = 0,
                         skip = false, before = 0,
                     }
-                    if elementPath(node) == want then
+                    if canonicalPath(elementPath(node)) == want then
                         return start_offset
                     end
                     if not VOID_TAGS[name] and not tag:match("/%s*$") then top = node end

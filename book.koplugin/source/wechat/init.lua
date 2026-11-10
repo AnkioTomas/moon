@@ -1044,8 +1044,8 @@ function Source:putProgressAsync(identity, pos, cb)
             if cancelled then return end
             if not source then cb(nil, format); return end
             local offset, summary, fraction, map_err = Position.encode(identity, chapter, pos, source, format)
-            -- offset=0 是章首合法坐标；只有 nil 才是映射失败。
-            -- 坐标暂时无法映射时保留脏行，不能把未上传的进度标成已同步。
+            -- offset=0 是章首合法坐标。正文已加载时 encode 会回退到章级比例，一般不再返回 nil；
+            -- 若仍为空（防御），保留脏行待重试，不能把未上传的进度标成已同步。
             if offset == nil then
                 cb(nil, map_err or _("无法定位阅读进度"))
                 return

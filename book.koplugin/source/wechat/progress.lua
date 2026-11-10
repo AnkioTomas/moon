@@ -100,6 +100,68 @@ function Position.localize(identity, chapter, pos, source, format)
     return true
 end
 
+--- 统计 UTF-8 rune 数（纯图章回退时按原文 HTML 长度比例换算偏移）。
+---@param str string
+---@return integer
+local function countRunes(str)
+    str = Text.stripBom(tostring(str or ""))
+    local count, i, len = 0, 1, #str
+    while i <= len do
+        local byte = str:byte(i)
+        i = i + (byte < 0x80 and 1 or byte < 0xe0 and 2 or byte < 0xf0 and 3 or 4)
+        count = count + 1
+    end
+    return count
+end
+
+--- 定位失败或没有 locator 时的章级坐标：优先章内页比例，其次同章旧偏移，否则章首。
+---@param wire WechatWireMapping
+---@param chapter BookChapter
+---@param pos ProgressPosition
+---@param source string
+---@return integer offset
+---@return string summary
+---@return number fraction
+local function fallbackPosition(wire, chapter, pos, source)
+    local function atFraction(frac)
+        if frac <= 0 then
+            return 0, "", 0
+        end
+        if wire.count > 0 then
+            local last = wire.ends[wire.count] or 0
+            if frac >= 1 then
+                return last, "", 1
+            end
+            return math.floor(frac * last + 0.5), "", frac
+        end
+        local total = countRunes(source)
+        local offset = 0
+        if frac >= 1 then
+            offset = total
+        elseif total > 0 then
+            offset = math.floor(frac * total + 0.5)
+        end
+        return offset, "", frac
+    end
+    local frac = tonumber(pos.chapter_fraction)
+    if frac ~= nil then
+        return atFraction(frac)
+    end
+    local extra = pos.extra
+    local cached = extra and tonumber(extra.chapter_offset)
+    if cached and tonumber(extra.chapter_idx) == tonumber(chapter.idx) then
+        local last
+        if wire.count > 0 then
+            last = wire.ends[wire.count] or 0
+        else
+            last = countRunes(source)
+        end
+        local fraction = last > 0 and math.max(0, math.min(1, cached / last)) or 0
+        return cached, "", fraction
+    end
+    return 0, "", 0
+end
+
 ---@param identity BookIdentity
 ---@param chapter BookChapter
 ---@param pos ProgressPosition
@@ -111,21 +173,20 @@ end
 ---@return string|nil err
 function Position.encode(identity, chapter, pos, source, format)
     local wire = Annotations.rangeMapping(source, format)
-    if not pos.locator then
-        if pos.chapter_fraction == 1 then
-            return wire.ends[wire.count] or 0, "", 1
+    if pos.locator then
+        local flow = Annotations.flow(localHtml(identity, chapter, source, format))
+        local offset, summary, fraction = Annotations.toWirePosition(
+            wire, flow, pos.locator, format == "html" and source or nil)
+        if offset ~= nil then
+            -- 纯图章没有可见正文摘要；章内页比例比 HTML 字节比例更贴近实际翻页位置。
+            if flow.count == 0 and pos.chapter_fraction ~= nil then
+                return offset, summary or "", pos.chapter_fraction
+            end
+            return offset, summary, fraction
         end
-        if pos.chapter_fraction == 0 then return 0, "", 0 end
-        return nil, nil, nil, _("无法定位阅读进度")
+        -- 路径对不上时按章级坐标上报，避免脏同步无限重试。
     end
-    local flow = Annotations.flow(localHtml(identity, chapter, source, format))
-    local offset, summary, fraction, err = Annotations.toWirePosition(
-        wire, flow, pos.locator, format == "html" and source or nil)
-    -- 纯图章没有可见正文摘要；章内页比例比 HTML 字节比例更贴近实际翻页位置。
-    if offset ~= nil and flow.count == 0 and pos.chapter_fraction ~= nil then
-        return offset, summary or "", pos.chapter_fraction
-    end
-    return offset, summary, fraction, err
+    return fallbackPosition(wire, chapter, pos, source)
 end
 
 return Position

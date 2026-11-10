@@ -56,9 +56,26 @@ Assert.eq(pos.locator, "/html/body/p[1]/text().1", "TXT 的标题与章节壳层
 Assert.eq(Position.encode(identity, chapter, pos, "一行正文\n第二行", "txt"), 1)
 Assert.eq(Position.encode(identity, chapter, { fraction = 0, chapter_fraction = 0 }, source, "html"), 0)
 Assert.not_nil(Position.encode(identity, chapter, { fraction = 1, chapter_fraction = 1 }, source, "html"))
-local offset, _summary, _fraction, reason = Position.encode(identity, chapter, { fraction = 0.5 }, source, "html")
-Assert.is_nil(offset)
-Assert.eq(reason, "无法定位阅读进度")
+local mid_offset = Position.encode(identity, chapter, { fraction = 0.5, chapter_fraction = 0.25 }, source, "html")
+local Annotations = require("book.annotations")
+local wire_end = Annotations.rangeMapping(source, "html").ends
+wire_end = wire_end[#wire_end] or 0
+Assert.eq(mid_offset, math.floor(0.25 * wire_end + 0.5), "没有 locator 时按章内比例换算原文偏移")
+local offset, summary, fraction, reason = Position.encode(identity, chapter, { fraction = 0.5 }, source, "html")
+Assert.eq(offset, 0, "没有定位和章内比例时按章首上报")
+Assert.eq(summary, "")
+Assert.eq(fraction, 0)
+Assert.is_nil(reason)
+Assert.eq(Position.encode(identity, chapter, {
+    fraction = 0.5, locator = "/html/body/div/text().0", extra = { chapter_idx = 1, chapter_offset = 16 },
+}, source, "html"), 16, "对不上时回退同章旧偏移")
+Assert.eq(Position.encode(identity, chapter, {
+    fraction = 0.5, locator = "/html/body/div/text().0", extra = { chapter_idx = 9, chapter_offset = 16 },
+}, source, "html"), 0, "旧偏移属于别的章时不能复用")
+Assert.eq(Position.encode(identity, chapter, {
+    fraction = 0.5, chapter_fraction = 0.25, locator = "/html/body/div/text().0",
+    extra = { chapter_idx = 1, chapter_offset = 16 },
+}, source, "html"), mid_offset, "对不上时优先章内比例，不用陈旧 extra 偏移")
 
 local open = io.open
 io.open = function(filename, mode)
@@ -94,6 +111,33 @@ do
     Assert.is_true(offset > 0, "第二张图不应落在文档开头")
     Assert.eq(summary, "")
     Assert.eq(fraction, 0.5, "纯图章沿用阅读器章内页比例")
+    local frag_offset, frag_summary, frag_fraction, frag_err = Position.encode(comic_id, comic_chapter, {
+        locator = "/body/DocFragment[1]/body/div[2]/img.0",
+        chapter_fraction = 0.5,
+        extra = {},
+    }, comic, "html")
+    Assert.is_nil(frag_err)
+    Assert.eq(frag_offset, offset, "纯图章 DocFragment 路径应映到同一偏移")
+    Assert.eq(frag_summary, "")
+    Assert.eq(frag_fraction, 0.5)
+    local raw_len = 0
+    do
+        local i, len = 1, #comic
+        while i <= len do
+            local byte = comic:byte(i)
+            i = i + (byte < 0x80 and 1 or byte < 0xe0 and 2 or byte < 0xf0 and 3 or 4)
+            raw_len = raw_len + 1
+        end
+    end
+    local fb_offset, fb_summary, fb_fraction, fb_err = Position.encode(comic_id, comic_chapter, {
+        locator = "/html/body/div[9]/img.0",
+        chapter_fraction = 0.25,
+        extra = {},
+    }, comic, "html")
+    Assert.is_nil(fb_err)
+    Assert.eq(fb_offset, math.floor(0.25 * raw_len + 0.5), "纯图章对不上时按原文 HTML 长度比例回退")
+    Assert.eq(fb_summary, "")
+    Assert.eq(fb_fraction, 0.25)
     -- 正文回归：原有文本章 encode 不被破坏
     Assert.eq(Position.encode(identity, chapter, {
         locator = "/html/body/p/text().1", fraction = 0.5, extra = { chapter_offset = 16 },
