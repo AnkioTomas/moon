@@ -121,6 +121,12 @@ function Mem.isInsufficient(err)
     return type(err) == "string" and err:find(Mem.INSUFFICIENT, 1, true) ~= nil
 end
 
+--- 章节解包预检弹窗里的操作名。文案在核心词典，书源不要再 require("gettext")。
+---@return string
+function Mem.chapterUnpackWhat()
+    return require("gettext")("章节解包")
+end
+
 --- 内存不够：warn 日志（立刻落盘）并弹确认框。
 --- Kindle 且框架仍在跑时，提供「以 no-framework 模式重启」；否则只告知无法继续。
 --- 须在 UI 线程调用（不要在 Job 子进程里弹窗）。
