@@ -113,3 +113,27 @@ end
 
 local missing_ok = Woff.toSfnt(dir .. "/missing.woff", dir .. "/missing.ttf")
 Assert.is_nil(missing_ok)
+
+
+-- 内存预检：不够则在 read("*a") 之前失败，不写 dest；够则仍能转换
+do
+    local Mem = require("utils.mem")
+    local saved = Mem.availableBytes
+    Mem.availableBytes = function() return 1024 end
+    local tight = dir .. "/tight.ttf"
+    os.remove(tight)
+    local tight_ok, tight_err = Woff.toSfnt(src, tight)
+    Assert.is_nil(tight_ok)
+    Assert.is_true(Mem.isInsufficient(tight_err), tight_err)
+    Assert.is_nil(read(tight))
+    Assert.is_nil(read(tight .. ".part"))
+
+    Mem.availableBytes = function() return 64 * 1024 * 1024 end
+    local room = dir .. "/room.ttf"
+    os.remove(room)
+    local room_ok, room_err = Woff.toSfnt(src, room)
+    Assert.is_true(room_ok, room_err)
+    Assert.eq(read(room), sfnt())
+    Mem.availableBytes = saved
+    os.remove(room)
+end

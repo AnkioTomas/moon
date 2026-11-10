@@ -90,6 +90,14 @@ end
 function Woff.toSfnt(src, dest)
     local f, err = io.open(src, "rb")
     if not f then return nil, err end
+    -- 先按文件大小预检再 read("*a")：整份 WOFF 进内存是这一步的峰值来源。
+    local size = f:seek("end") or 0
+    f:seek("set")
+    local ok, mem_err = require("utils.mem").canAfford(require("utils.mem").estimateWoffToSfnt(size))
+    if not ok then
+        f:close()
+        return nil, mem_err
+    end
     local data = f:read("*a")
     f:close()
     local part = dest .. ".part"

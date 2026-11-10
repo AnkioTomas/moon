@@ -139,10 +139,34 @@ list()
 Assert.eq(installed(), "user:KaiCN.ttf=Kai CN,user:Plain.otf=Plain Sans,user:WenKai.ttf=霞鹜文楷,"
     .. "local:Bare-Font.ttf=Bare-Font,system:System.ttf=System Sans")
 
+-- 下载过程日志：抓 utils.log，确认里程碑带上 id / 落盘路径，且不把完整 URL 打进去。
+local font_logs = {}
+local function hookFontLogs()
+    font_logs = {}
+    local logger = require("utils.log")
+    local function hook(level)
+        return function(...)
+            local parts = { level }
+            for i = 1, select("#", ...) do
+                parts[#parts + 1] = tostring(select(i, ...))
+            end
+            font_logs[#font_logs + 1] = table.concat(parts, " ")
+        end
+    end
+    logger.info, logger.warn = hook("info"), hook("warn")
+    logger.flushSync = function() end
+end
+local function findFontLog(needle)
+    for _idx, line in ipairs(font_logs) do
+        if line:find(needle, 1, true) then return line end
+    end
+end
+
 -- 下载到的不是 zip（强制门户 / CDN 错误页以 200 返回）：解压前按魔数拒绝，删掉残包，回调失败
 do
     local dir = Config.dir() .. "/font_list_spec_absent"
     os.execute("mkdir -p '" .. dir .. "'")
+    hookFontLogs()
     require("http.request").download = function(_opts, dest, cb)
         local f = assert(io.open(dest, "wb"))
         f:write("<html>blocked</html>")
@@ -151,11 +175,80 @@ do
         return { cancel = function() end }
     end
     local ok, e
-    Catalog.ensureInstalledAsync({ name = "f1", kind = "weread", id = "f1", url = "https://x/f1.zip" }, nil,
+    Catalog.ensureInstalledAsync({ name = "f1", kind = "weread", id = "f1", url = "https://x/f1.zip", zip_size = 12 }, nil,
         function(r, er) ok, e = r, er end)
     Assert.is_nil(ok)
     Assert.eq(e, "字体解压失败")
     Assert.is_nil(io.open(dir .. "/f1.zip", "rb"), "残包已删")
+    local start = findFontLog("info book.font download start")
+    Assert.not_nil(start)
+    Assert.not_nil(start:find("f1", 1, true))
+    Assert.not_nil(start:find("dest=" .. dir .. "/f1.ttf", 1, true))
+    Assert.not_nil(start:find("zip=" .. dir .. "/f1.zip", 1, true))
+    Assert.not_nil(start:find("zip_size=12", 1, true))
+    Assert.not_nil(start:find("host=x", 1, true))
+    Assert.is_nil(start:find("https://x/f1.zip", 1, true), "不记录完整下载地址")
+    Assert.not_nil(findFontLog("info book.font download done"))
+    Assert.not_nil(findFontLog("info book.font extract start"))
+    local failed = findFontLog("warn book.font extract failed")
+    Assert.not_nil(failed)
+    Assert.not_nil(failed:find(dir .. "/f1.ttf", 1, true))
+    Assert.is_nil(findFontLog("book.font installed"))
+    os.execute("rm -rf '" .. dir .. "'")
+end
+
+-- 下载失败也要留下路径，方便对照半截 zip
+do
+    local dir = Config.dir() .. "/font_list_spec_absent"
+    os.execute("mkdir -p '" .. dir .. "'")
+    hookFontLogs()
+    require("http.request").download = function(_opts, _dest, cb)
+        cb(false, "timeout")
+        return { cancel = function() end }
+    end
+    local ok, e
+    Catalog.ensureInstalledAsync({ name = "f1", kind = "weread", id = "f1", url = "https://x/f1.zip" }, nil,
+        function(r, er) ok, e = r, er end)
+    Assert.is_nil(ok)
+    Assert.eq(e, "timeout")
+    local failed = findFontLog("warn book.font download failed")
+    Assert.not_nil(failed)
+    Assert.not_nil(failed:find("zip=" .. dir .. "/f1.zip", 1, true))
+    Assert.not_nil(failed:find("timeout", 1, true))
+    Assert.is_nil(findFontLog("book.font extract start"))
+    os.execute("rm -rf '" .. dir .. "'")
+end
+
+-- 内存不够：下载完成后不解压、不转码，弹窗并回调失败
+do
+    local dir = Config.dir() .. "/font_list_spec_absent"
+    os.execute("mkdir -p '" .. dir .. "'")
+    hookFontLogs()
+    local shown
+    package.loaded["ui.themes.widgets.confirm"] = {
+        new = function(_, opts) shown = opts; return { show = function() end } end,
+    }
+    local Mem = require("utils.mem")
+    local saved = Mem.availableBytes
+    Mem.availableBytes = function() return 1024 end
+    require("http.request").download = function(_opts, dest, cb)
+        local f = assert(io.open(dest, "wb"))
+        f:write("PK\3\4" .. ("x"):rep(2000))
+        f:close()
+        cb(true)
+        return { cancel = function() end }
+    end
+    local ok, e
+    Catalog.ensureInstalledAsync({ name = "f1", kind = "weread", id = "f1", url = "https://x/f1.zip" }, nil,
+        function(r, er) ok, e = r, er end)
+    Assert.is_nil(ok)
+    Assert.eq(e, "内存不足")
+    Assert.is_nil(findFontLog("book.font extract start"), "不够内存不能开工")
+    Assert.is_nil(io.open(dir .. "/f1.zip", "rb"), "不够内存时删掉 zip")
+    Assert.not_nil(shown)
+    Assert.is_true(shown.text:find("字体解压", 1, true) ~= nil)
+    Mem.availableBytes = saved
+    package.loaded["ui.themes.widgets.confirm"] = nil
     os.execute("rm -rf '" .. dir .. "'")
 end
 
@@ -211,7 +304,10 @@ do
         called, result, failure = called + 1, ok, err
     end
     write(Fonts.wereadPath("aik"), "test-sfnt")
+    hookFontLogs()
     local handle = Catalog.ensureInstalledAsync({ name = "aik", kind = "weread", id = "aik" }, nil, callback)
+    Assert.not_nil(findFontLog("info book.font prepare start"))
+    Assert.not_nil(findFontLog("src=" .. Fonts.wereadPath("aik")))
     Assert.eq(called, 0, "返回前不回调成功")
     Assert.len(repairs, 0, "返回前不读写字体")
     Assert.eq(jobs[1].opts.name, "font.prepare")
@@ -267,12 +363,23 @@ do
         cb(true)
         return { cancel = function() end }
     end
-    Catalog.ensureInstalledAsync({ name = "new", kind = "weread", id = "new", url = "https://x/new.zip" }, nil, callback)
+    hookFontLogs()
+    Catalog.ensureInstalledAsync({ name = "new", kind = "weread", id = "new", url = "https://cdn.example/new.zip?sign=secret", zip_size = 2048 }, nil, callback)
     Assert.eq(jobs[6].opts.name, "font.extract")
+    local start = findFontLog("info book.font download start")
+    Assert.not_nil(start)
+    Assert.not_nil(start:find("dest=" .. Fonts.wereadPath("new"), 1, true))
+    Assert.not_nil(start:find("zip_size=2048", 1, true))
+    Assert.not_nil(start:find("host=cdn.example", 1, true))
+    Assert.is_nil(start:find("sign=secret", 1, true), "不记录签名参数")
     run(jobs[6])
     Assert.is_true(result)
     Assert.eq(repairs[#repairs], Fonts.wereadPath("new"))
     Assert.len(jobs, 6)
+    Assert.not_nil(findFontLog("info book.font download done"))
+    Assert.not_nil(findFontLog("info book.font extract start"))
+    Assert.not_nil(findFontLog("info book.font woff convert start " .. Fonts.wereadPath("new")))
+    Assert.eq(findFontLog("info book.font installed"), "info book.font installed new " .. Fonts.wereadPath("new"))
 
     repair_error = "repair failed"
     Catalog.ensureInstalledAsync({ name = "bad", kind = "weread", id = "bad", url = "https://x/bad.zip" }, nil, callback)
