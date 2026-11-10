@@ -10,43 +10,12 @@ local T = require("ffi/util").template
 
 
 local Common = require("desktop.detail.common")
+local Cache = require("desktop.detail.cache")
 local storeBackend = Common.storeBackend
 local bookOwnerSource = Common.bookOwnerSource
 local bookSupportsScrape = Common.bookSupportsScrape
 local bookSupportsEdit = Common.bookSupportsEdit
-
----@param book table
----@return string
-local function cacheKey(book)
-    return "cache\0" .. book.source_id .. "\0" .. book.stable_id
-end
-
---- 章节缓存结果提示：成功 / 部分完成 / 失败。
----@param result { ok: boolean, cached: integer, total: integer, failed: integer, err: string|nil, failed_idx: integer[]|nil, reviews?: { ok: boolean, done: integer, err?: string } }
-local function notifyCached(result)
-    local text
-    if result.ok then
-        text = _("缓存完成：") .. result.cached .. " / " .. result.total .. _(" 章")
-    elseif result.total > 0 then
-        text = _("缓存部分完成：") .. result.cached .. " / " .. result.total .. _(" 章")
-        if result.failed > 0 then text = text .. "，" .. result.failed .. _(" 章失败") end
-        if result.failed_idx and #result.failed_idx > 0 then
-            local shown = {}
-            for i = 1, math.min(#result.failed_idx, 10) do shown[i] = result.failed_idx[i] end
-            text = text .. "\n" .. T(_("失败章节：第 %1 章"), table.concat(shown, "、")
-                .. (#result.failed_idx > 10 and "…" or ""))
-        end
-        if result.err then text = text .. "\n" .. result.err end
-    else
-        text = result.err or _("缓存失败")
-    end
-    local reviews = result.reviews
-    if reviews then
-        text = text .. "\n" .. (reviews.ok and T(_("段评已缓存 %1 章"), reviews.done)
-            or T(_("段评缓存到第 %1 章中止：%2"), reviews.done, reviews.err or _("失败")))
-    end
-    Toast:new{ text = text, timeout = 5 }:show()
-end
+local cacheKey = Cache.key
 
 return function(Detail)
 --- 书城详情：已在架可开读的书（书源在架行，或本页刚装进本地书库的书）。
@@ -125,36 +94,7 @@ end
 --- 源支持段评时多一个开关：同时缓存段评（每句只缓存前 10 条评论，请求频繁有封号风险）。
 function Detail:chooseCacheRange(with_reviews)
     if self.closed then return end
-    local book = self.book
-    local pos = require("book.progress_db").get(book.source_id, book.stable_id) or {}
-    local function from(count)
-        return function()
-            self:cacheAllChapters({ chapter_idx = pos.chapter_idx, fraction = pos.fraction, count = count }, with_reviews)
-        end
-    end
-    local function ahead(count)
-        return { text = T(_("往后 %1 章"), count), callback = from(count) }
-    end
-    local items = {
-        { text = _("全本缓存"), callback = function() self:cacheAllChapters(nil, with_reviews) end },
-        { text = _("从当前进度缓存到结尾"), callback = from(nil) },
-        { buttons = { ahead(10), ahead(20) } },
-        { buttons = { ahead(50), ahead(100) } },
-    }
-    local Prefetch = require("book.review_prefetch")
-    if Prefetch.supported(bookOwnerSource(book, self.source)) then
-        table.insert(items, 1, {
-            text = (with_reviews and "[✓] " or "[  ] ") .. _("同时缓存段评（每句前 10 条）"),
-            callback = function() self:chooseCacheRange(not with_reviews) end,
-        })
-        if with_reviews then
-            table.insert(items, 2, { widget = function(width)
-                return require("ui.themes.widgets.text").box("body", _("段评请求频繁，可能导致账号被风控封号，请谨慎使用。"), width,
-                    { bg = require("ui.themes").current().dialog.bg })
-            end })
-        end
-    end
-    require("ui.themes.widgets.sheet"):new{ title = _("缓存章节"), items = items }:show()
+    Cache.chooseRange(self.book, self.source, with_reviews)
 end
 
 --- 缓存章节正文（可带段评）：入队并前台显示进度（同一本书已在缓存时拒绝并提示）。
@@ -162,41 +102,7 @@ end
 ---@param with_reviews boolean|nil 正文缓存完后接着缓存段评
 function Detail:cacheAllChapters(range, with_reviews)
     if self.closed then return end
-    local book = self.book
-    local source = bookOwnerSource(book, self.source)
-    if not source or type(source.cacheAllChaptersAsync) ~= "function" then return end
-    local identity = { source_id = book.source_id, stable_id = book.stable_id, book = book }
-    require("workers.ui.task_dialog").start{
-        key = cacheKey(book),
-        kind = "cache",
-        title = book.title or book.stable_id,
-        restartable = true,
-        -- 已落盘章节重试时自动跳过，只重试服务端限流（425）与分片校验失败。
-        retryable = function(result)
-            local err = result.err or ""
-            return err:find("HTTP 425", 1, true) ~= nil or err:find("shard md5 mismatch", 1, true) ~= nil
-        end,
-        on_done = notifyCached,
-        run = function(report, done)
-            -- 句柄始终指向当前阶段：正文 → 段评。
-            local stage
-            local function reviews(result)
-                if not (with_reviews and result.ok) then return done(result) end
-                stage = require("book.review_prefetch").run(source, identity, range, function(n, total)
-                    report(_("缓存段评"), n, total)
-                end, function(ok, n, total, err)
-                    result.reviews = { ok = ok, done = n, total = total, err = err }
-                    done(result)
-                end)
-            end
-            stage = source:cacheAllChaptersAsync(identity, function(cached, total)
-                report(nil, cached, total)
-            end, function(ok, cached, err, total, failed, failed_idx)
-                reviews({ ok = ok, cached = cached, total = total, failed = failed, err = err, failed_idx = failed_idx })
-            end, range)
-            return { cancel = function() if stage then stage.cancel() end end }
-        end,
-    }
+    Cache.cacheAll(self.book, self.source, range, with_reviews)
 end
 
 --- 整本书源的未下载书（WebDAV、moon）：入队只落盘不开书，openBookAsync 负责下载并登记路径。
