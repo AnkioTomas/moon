@@ -238,26 +238,24 @@ function Source:getDetailAsync(identity, cb)
     return h
 end
 
---- 已落盘章节 HTML 里的 toc_* 并进目录；有改动才需要调用方写回。
----@param identity BookIdentity
+--- 刷新目录时按 uid 并入已缓存的章内锚点。TocDB.put 只保留同 uid 的 words/paid，不会带回 extra。
+---@param previous BookChapter[]|nil
 ---@param toc BookChapter[]
----@return boolean changed
-local function attachHtmlAnchors(identity, toc)
+local function mergeCachedAnchors(previous, toc)
+    if not previous or #previous == 0 then return end
     local Content = require("source.fanqie.content")
-    local source_id = identity.source_id or "fanqie"
-    local changed = false
-    for _idx, chapter in ipairs(toc) do
-        local path = Paths.bookWorkDir(identity.stable_id, source_id) .. "/" .. tostring(chapter.idx) .. ".html"
-        local f = io.open(path, "r")
-        if f then
-            local html = f:read("*a")
-            f:close()
-            if Content.merge_anchors(chapter, Content.html_anchors(html, (chapter.depth or 1) + 1)) then
-                changed = true
-            end
+    local by_uid = {}
+    for _idx, chapter in ipairs(previous) do
+        if chapter.uid then
+            by_uid[tostring(chapter.uid)] = chapter
         end
     end
-    return changed
+    for _idx, chapter in ipairs(toc) do
+        local old = chapter.uid and by_uid[tostring(chapter.uid)]
+        if old then
+            Content.merge_anchors(chapter, old.anchors)
+        end
+    end
 end
 
 --- 正文刚下完时，把章内锚点写进已缓存目录（失败不影响开章）。
@@ -313,7 +311,7 @@ function Source:refreshTocAsync(identity, cb)
             cb(nil, _("番茄目录为空"))
             return
         end
-        attachHtmlAnchors(identity, toc)
+        mergeCachedAnchors(Toc.read(self.id, identity.stable_id), toc)
         if not Toc.put(self.id, identity.stable_id, toc) then
             cb(nil, _("章节目录保存失败"))
             return
@@ -327,9 +325,6 @@ function Source:loadTocAsync(identity, cb)
     local Toc = require("source.toc")
     local cached = Toc.read(self.id, identity.stable_id)
     if cached and #cached > 0 then
-        if attachHtmlAnchors(identity, cached) then
-            Toc.put(self.id, identity.stable_id, cached)
-        end
         return Base.defer(cb, cached)
     end
     return self:refreshTocAsync(identity, cb)
