@@ -100,3 +100,37 @@ Assert.eq(Package.pickStyle({
 }), "b")
 Assert.eq(Package.pickStyle({ ["Styles/a.css"] = "1", ["Styles/z.css"] = "2" }), "1")
 Assert.is_nil(Package.pickStyle({ ["Text/a.xhtml"] = "<p/>" }))
+
+-- 官方 chapters 批次串：连续合并，首批 0-n，其后 0,a-b。
+Assert.eq(Package.formatChaptersParam({ 1, 2, 3, 4, 5 }), "0-5")
+Assert.eq(Package.formatChaptersParam({ 6, 7, 8, 9, 10 }), "0,6-10")
+Assert.eq(Package.formatChaptersParam({ 96, 97, 98, 99, 100 }), "0,96-100")
+Assert.eq(Package.formatChaptersParam({ 12 }), "0,12")
+Assert.eq(Package.formatChaptersParam({}), "0")
+Assert.eq(Package.formatChaptersParam({ "a", "b" }), "0,a,b")
+
+-- 批量解包：一次 zip 多章 + 样式。
+package.loaded["json"] = {
+    decode = function()
+        return { chapters = {
+            { chapterUid = 1, files = { "Text/c1.xhtml" } },
+            { chapterUid = 2, files = { "Text/c2.xhtml" } },
+        } }
+    end,
+}
+package.loaded["source.wechat.package"] = nil
+local Batch = require("source.wechat.package")
+local batch_files = {
+    ["info.txt"] = "info",
+    ["Text/c1.xhtml"] = "<html><body><p>一</p></body></html>",
+    ["Text/c2.xhtml"] = "<html><body><p>二</p></body></html>",
+    ["Styles/stylesheets.css"] = ".x{}",
+}
+local extracted, style = Batch.extractChapters(batch_files, "bid", { 1, 2 }, "epub")
+Assert.eq(style, ".x{}")
+Assert.eq(extracted["1"].text, "<html><body><p>一</p></body></html>")
+Assert.eq(extracted["2"].text, "<html><body><p>二</p></body></html>")
+Assert.is_nil(extracted["1"].err)
+local miss = Batch.extractChapters(batch_files, "bid", { 9 }, "epub")
+Assert.not_nil(miss["9"].err)
+

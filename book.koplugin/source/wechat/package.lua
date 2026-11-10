@@ -141,6 +141,69 @@ function Package.pickStyle(files)
     return names[1] and files[names[1]] or nil
 end
 
+--- 官方 /book/chapterdownload 的 chapters 参数。
+--- 连续 uid 写成 a-b；缓存/批量时带上 0（整书样式）。第一批若从 1 起连续，合并成 0-n（如 0-5）；
+--- 其后是 0,a-b（如 0,6-10）。非数字 uid 退回 0,u1,u2,…。
+---@param uids (string|number)[] 本章批次的 chapterUid（不含 0）
+---@return string
+function Package.formatChaptersParam(uids)
+    uids = uids or {}
+    if #uids == 0 then return "0" end
+    local nums = {}
+    for i, u in ipairs(uids) do
+        local n = tonumber(u)
+        if not n then
+            local parts = { "0" }
+            for _idx, x in ipairs(uids) do parts[#parts + 1] = tostring(x) end
+            return table.concat(parts, ",")
+        end
+        nums[i] = n
+    end
+    local contiguous = true
+    for i = 2, #nums do
+        if nums[i] ~= nums[i - 1] + 1 then contiguous = false; break end
+    end
+    if contiguous then
+        local a, b = nums[1], nums[#nums]
+        if a == 1 then return "0-" .. tostring(b) end
+        if a == b then return "0," .. tostring(a) end
+        return "0," .. tostring(a) .. "-" .. tostring(b)
+    end
+    local parts = { "0" }
+    for _idx, n in ipairs(nums) do parts[#parts + 1] = tostring(n) end
+    return table.concat(parts, ",")
+end
+
+--- 从已解包的 zip 按 uid 列表抽出各章正文（及可选样式）。
+---@param files table<string, string>
+---@param book_id string
+---@param uids (string|number)[]
+---@param book_type '"epub"'|'"txt"'
+---@return table<string, { text: string|nil, err: string|nil, format: string }>
+---@return string|nil style
+function Package.extractChapters(files, book_id, uids, book_type)
+    local out = {}
+    for _idx, uid in ipairs(uids) do
+        local key = tostring(uid)
+        if book_type == "txt" then
+            local text = Package.chapterZipText(files, book_id, uid)
+            if text then
+                out[key] = { text = text, format = "txt" }
+            else
+                out[key] = { err = "zip: chapter " .. key .. " not in package", format = "txt" }
+            end
+        else
+            local html, err = Package.chapterHtml(files, uid)
+            if html then
+                out[key] = { text = html, format = "html" }
+            else
+                out[key] = { err = err or ("package: chapter " .. key .. " not in package"), format = "html" }
+            end
+        end
+    end
+    return out, Package.pickStyle(files)
+end
+
 --- 取某章的 xhtml：章节由主文件（标题 / 插图）加若干 _000N 续篇组成，续篇 body 依次并入主文件 body 末尾。
 ---@param files table<string, string> Package.unzip 的结果
 ---@param uid string|number

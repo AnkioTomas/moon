@@ -29,27 +29,35 @@ local Chapter = {}
 --- App 章节包：chapters 填章 uid（"0" 是整书资源：样式表、公共图片）。
 --- EPUB 是加密 zip，口令在响应头 encryptKey；TXT 支持 tar 和 zip。
 --- bookVersion 用书籍版本；-2063 按回包的新版本或刷新详情后最多重试一次。
+--- opts.offline：缓存全书 / 批量预取用 1（对齐官方）；单章在线阅读用 0。
+--- opts.batch：pick 返回整表，cb(result, err)；否则 cb(text, err, style)。
 ---@param bookId string
 ---@param chapters string
 ---@param book_type '"epub"'|'"txt"'
----@param pick fun(files: table<string, string>): string|nil, string|nil 在子进程里从解开的 zip 取需要的那一份文本
----@param cb fun(text: string|nil, err: any, style: string|nil)
+---@param pick fun(files: table<string, string>): any
+---@param cb function
+---@param opts { offline?: boolean, batch?: boolean }|nil
 ---@return { cancel: fun() }
-local function downloadPackageAsync(bookId, chapters, book_type, pick, cb)
+local function downloadPackageAsync(bookId, chapters, book_type, pick, cb, opts)
+    opts = opts or {}
+    local offline = opts.offline and "1" or "0"
     local cancelled, call, job = false, nil, nil
     local download
+    local function fail(err)
+        if opts.batch then cb(nil, err) else cb(nil, err) end
+    end
     local function fetchVersion(attempt)
         local fired = false
         local next_call = Client:bookInfoAsync(bookId, function(wire, err)
             fired = true
             if cancelled then return end
             if not wire then
-                cb(nil, err)
+                fail(err)
                 return
             end
             local version = Mapper.bookVersion(wire)
             if not version then
-                cb(nil, _("缺少书籍版本"))
+                fail(_("缺少书籍版本"))
                 return
             end
             Context.rememberBookVersion(bookId, version)
@@ -65,7 +73,7 @@ local function downloadPackageAsync(bookId, chapters, book_type, pick, cb)
                 bookId = bookId, chapters = chapters,
                 pf = "wechat_wx-2001-android-100-weread", pfkey = "pfKey", zoneId = "1",
                 bookVersion = version, bookType = book_type, quote = "", release = "1",
-                stopAutoPayWhenBNE = "1", preload = "0", preview = "0", offline = "0",
+                stopAutoPayWhenBNE = "1", preload = "0", preview = "0", offline = offline,
                 giftPayingCard = "0", enVersion = "10.2.2", modernVersion = "10.2.2", teenmode = "0",
             },
         }, function(res, err, meta)
@@ -84,20 +92,25 @@ local function downloadPackageAsync(bookId, chapters, book_type, pick, cb)
                 return
             end
             if not res then
-                cb(nil, err)
+                fail(err)
                 return
             end
             local body = res.body or ""
             if body:sub(258, 262) == "ustar" then
                 job = Job.run(function()
-                    local text, terr = Package.chapterText(body, bookId, chapters)
+                    -- tar 包通常一章；chapters 可能是 "12" 或批量串，取第一个数字 uid。
+                    local uid = tostring(chapters):match("(%d+)") or chapters
+                    local text, terr = Package.chapterText(body, bookId, uid)
                     return { text = text, err = terr }
                 end, {
                     name = "weread_chapter_package",
                     kind = "light",
                     timeout = 60,
-                    on_done = function(out) if not cancelled then cb(out.text, out.err) end end,
-                    on_failed = function(jerr) if not cancelled then cb(nil, tostring(jerr)) end end,
+                    on_done = function(out)
+                        if cancelled then return end
+                        if opts.batch then cb(out, out.err) else cb(out.text, out.err) end
+                    end,
+                    on_failed = function(jerr) if not cancelled then fail(tostring(jerr)) end end,
                     on_cancelled = function() end,
                 })
                 return
@@ -105,22 +118,31 @@ local function downloadPackageAsync(bookId, chapters, book_type, pick, cb)
             local key = Request.header(res, "encryptKey")
             local password = key and Package.password(Eink.credentials().vid, key)
             if not password then
-                cb(nil, "chapterdownload: no encryptKey")
+                fail("chapterdownload: no encryptKey")
                 return
             end
-            -- 解密 + 解压是逐字节纯 Lua，放子进程；包里的图片不回传（JSON 帧装不下二进制）
+            -- 解密 + 解压是逐字节纯 Lua，放子进程；包里的图片在 pick 里就地落盘（JSON 帧装不下二进制）。
             -- 样式表是文本，随章包顺手带回，避免整书 Styles/ 缺失时正文失去 text-indent。
             job = Job.run(function()
                 local files, zerr = Package.unzip(body, password)
                 if not files then return { err = zerr } end
+                if opts.batch then
+                    local payload = pick(files) or {}
+                    if payload.err then return payload end
+                    if payload.style == nil then payload.style = Package.pickStyle(files) end
+                    return payload
+                end
                 local text, perr = pick(files)
                 return { text = text, err = perr, style = Package.pickStyle(files) }
             end, {
                 name = "weread_chapter_package",
                 kind = "light",
                 timeout = 60,
-                on_done = function(out) if not cancelled then cb(out.text, out.err, out.style) end end,
-                on_failed = function(jerr) if not cancelled then cb(nil, tostring(jerr)) end end,
+                on_done = function(out)
+                    if cancelled then return end
+                    if opts.batch then cb(out, out and out.err) else cb(out.text, out.err, out.style) end
+                end,
+                on_failed = function(jerr) if not cancelled then fail(tostring(jerr)) end end,
                 on_cancelled = function() end,
             })
         end)
@@ -134,6 +156,63 @@ local function downloadPackageAsync(bookId, chapters, book_type, pick, cb)
             if call then call:cancel() end
             if job then job:cancel() end
         end }
+end
+
+--- 批量包解出的章：key 为 uid 字符串。单章打开不经此表。
+---@type table<string, { text: string, format: '"html"'|'"txt"', style: string|nil }>
+local primed = {}
+
+local function primedKey(bookId, uid)
+    return bookId .. "\0" .. tostring(uid)
+end
+
+--- 把官方一批（最多 5 章 + 样式 0）打进 primed，供随后的 fetchHtmlAsync 直接取。
+---@param bookId string
+---@param chapters BookChapter[]
+---@param opts { offline?: boolean }|nil
+---@param cb fun(ok: boolean, err: any)
+---@return { cancel: fun() }
+function Chapter.primeBatchAsync(bookId, chapters, opts, cb)
+    opts = opts or {}
+    if type(chapters) ~= "table" or #chapters == 0 then
+        cb(true)
+        return { cancel = function() end }
+    end
+    local uids, book_type = {}, "epub"
+    for _idx, ch in ipairs(chapters) do
+        uids[#uids + 1] = ch.uid
+        if ch.format == "txt" then book_type = "txt" end
+    end
+    local param = Package.formatChaptersParam(uids)
+    return downloadPackageAsync(bookId, param, book_type, function(files)
+        local work_dir = Paths.bookWorkDir(bookId, "wechat")
+        Paths.ensureDir(work_dir .. "/images")
+        for name, data in pairs(files) do
+            local base = name:match("^Images/([^/]+)$")
+            if base then
+                local f = assert(io.open(work_dir .. "/images/" .. base, "wb"))
+                f:write(data)
+                f:close()
+            end
+        end
+        local extracted, style = Package.extractChapters(files, bookId, uids, book_type)
+        return { chapters = extracted, style = style }
+    end, function(out, err)
+        if not out or err then
+            cb(false, err or _("下载失败"))
+            return
+        end
+        local style = out.style
+        for _idx, uid in ipairs(uids) do
+            local row = out.chapters and out.chapters[tostring(uid)]
+            if row and row.text then
+                primed[primedKey(bookId, uid)] = {
+                    text = row.text, format = row.format or "html", style = style,
+                }
+            end
+        end
+        cb(true)
+    end, { offline = opts.offline == true, batch = true })
 end
 
 --- 整书样式表（章节 link 指向 Styles/stylesheets.css 或 stylesheet.css）。
@@ -173,6 +252,19 @@ function Chapter.fetchHtmlAsync(bookId, chapter, cb)
     local uid = chapter.uid
     if type(uid) ~= "string" or uid == "" then
         cb(nil, _("章节缺少 uid"))
+        return { cancel = function() end }
+    end
+    local hit = primed[primedKey(bookId, uid)]
+    if hit then
+        primed[primedKey(bookId, uid)] = nil
+        local text, format, style = hit.text, hit.format, hit.style
+        if format == "txt" then
+            cb(Text.textToBody(text), nil, text, "txt", style)
+        elseif not Text.stripBom(text):find("^%s*<") then
+            cb(nil, _("试读结束"))
+        else
+            cb(text, nil, text, "html", style)
+        end
         return { cancel = function() end }
     end
     local book_type = chapter.format == "txt" and "txt" or "epub"
@@ -445,5 +537,163 @@ function Chapter.fetchContentAsync(bookId, chapter, cb)
             if note_job then note_job:cancel() end
         end }
 end
+
+
+local BATCH = 5
+
+--- 阅读预取 / 缓存全书：按官方五章一批（chapters 带 0）。
+---@param identity BookIdentity
+---@param toc BookChapter[]
+---@param from_idx integer
+---@param count integer
+---@param ops {
+---   fetchContent: fun(identity: BookIdentity, chapter: BookChapter, cb: function): { cancel: fun() },
+---   progress: fun(done: integer, total: integer)|nil,
+---   offline: boolean|nil,
+---   interval_seconds: number|nil,
+---   persist_book: boolean|nil,
+---   book: Book|nil,
+---   reuse: (fun(path: string): boolean)|nil,
+---   volatile: boolean|nil,
+--- }
+---@param cb fun(cached: integer, total: integer, failed: integer, err: any, failed_idx: integer[]|nil)|nil
+---@return { cancel: fun() }
+function Chapter.prefetchBatchedAsync(identity, toc, from_idx, count, ops, cb)
+    from_idx = tonumber(from_idx) or 0
+    count = tonumber(count) or 0
+    local Shared = require("source.chapter")
+    local lfs = require("libs/libkoreader-lfs")
+    local cancelled, active = false, nil
+    local cached_count, failed_count, last_error, failed_idx = 0, 0, nil, {}
+    local total = 0
+    if count > 0 and type(toc) == "table" then
+        total = math.max(0, math.min(count, #toc - from_idx))
+    end
+    if total == 0 then
+        require("ui/uimanager"):nextTick(require("ui.guard").wrap("chapter callback", function()
+            if not cancelled and cb then cb(0, 0, 0) end
+        end))
+        return { cancel = function() cancelled = true end }
+    end
+
+    local offset = 0
+    local interval = math.max(0, tonumber(ops.interval_seconds) or 0)
+    local function soon(fn)
+        local UIManager = require("ui/uimanager")
+        if interval > 0 then
+            UIManager:scheduleIn(interval, require("ui.guard").wrap("wechat batch", fn))
+        else
+            UIManager:nextTick(require("ui.guard").wrap("wechat batch", fn))
+        end
+    end
+
+    local function chapterReady(chapter)
+        local path = Paths.chapterPath(identity.stable_id, chapter.idx, identity.source_id)
+        if ops.reuse then return ops.reuse(path) end
+        local attr = lfs.attributes(path)
+        return attr and attr.mode == "file" and (attr.size or 0) > 0
+    end
+
+    local function step()
+        if cancelled then return end
+        if offset >= total then
+            if cb then cb(cached_count, total, failed_count, last_error, failed_idx) end
+            return
+        end
+        local n = math.min(BATCH, total - offset)
+        local need = {}
+        for j = 1, n do
+            local chapter = toc[from_idx + offset + j]
+            if chapter and not chapterReady(chapter) then
+                need[#need + 1] = chapter
+            end
+        end
+        local function runSlice()
+            if cancelled then return end
+            active = Shared.prefetchAsync(identity, ops.book, toc, from_idx + offset, n, {
+                fetchContent = ops.fetchContent,
+                persist_book = ops.persist_book,
+                volatile = ops.volatile,
+                reuse = ops.reuse,
+                interval_seconds = 0,
+            }, function(cached, _t, failed, err, idxs)
+                active = nil
+                if cancelled then return end
+                cached_count = cached_count + (cached or 0)
+                failed_count = failed_count + (failed or 0)
+                last_error = err or last_error
+                if type(idxs) == "table" then
+                    for _i, idx in ipairs(idxs) do failed_idx[#failed_idx + 1] = idx end
+                end
+                offset = offset + n
+                if ops.progress then ops.progress(cached_count + failed_count, total) end
+                soon(step)
+            end)
+        end
+        if #need == 0 then
+            runSlice()
+            return
+        end
+        active = Chapter.primeBatchAsync(identity.stable_id, need, { offline = ops.offline == true }, function(ok, err)
+            active = nil
+            if cancelled then return end
+            if not ok then logger.warn("weread batch prime failed", identity.stable_id, err) end
+            runSlice()
+        end)
+    end
+
+    if require("ui/network/manager"):isConnected() then
+        soon(step)
+    else
+        require("ui/uimanager"):nextTick(require("ui.guard").wrap("chapter callback", function()
+            if not cancelled and cb then
+                cb(0, total, total, _("网络不可用，请先连接 Wi-Fi"))
+            end
+        end))
+    end
+    return { cancel = function()
+            cancelled = true
+            if active and active.cancel then active.cancel() end
+        end }
+end
+
+--- 缓存全书（或 range）：offline=1，五章一批。
+---@param source BookSource
+---@param identity BookIdentity
+---@param on_progress fun(done: integer, total: integer)|nil
+---@param cb fun(ok: boolean, cached: integer, err: string|nil, total: integer, failed: integer, failed_idx: integer[]|nil)
+---@param range table|nil
+---@return { cancel: fun() }
+function Chapter.cacheAllBatchedAsync(source, identity, on_progress, cb, range)
+    local cancelled, active = false, nil
+    active = source:loadTocAsync(identity, function(toc, err)
+        if cancelled then return end
+        if not toc then
+            cb(false, 0, err or _("章节列表为空"), 0, 0)
+            return
+        end
+        local Shared = require("source.chapter")
+        local from_idx, count = Shared.cacheRange(toc, range)
+        active = Chapter.prefetchBatchedAsync(identity, toc, from_idx, count, {
+            fetchContent = function(r, chapter, done)
+                return Chapter.fetchContentAsync(r.stable_id, chapter, done)
+            end,
+            progress = on_progress,
+            offline = true,
+            persist_book = false,
+            -- 批次之间歇一下；批内已是一次请求。
+            interval_seconds = 1.5,
+        }, function(cached, total, failed, last_err, failed_idx)
+            if not cancelled then
+                cb(failed == 0, cached, last_err, total, failed, failed_idx)
+            end
+        end)
+    end)
+    return { cancel = function()
+            cancelled = true
+            if active and active.cancel then active.cancel() end
+        end }
+end
+
 
 return Chapter

@@ -95,10 +95,46 @@ end
 package.preload["source.wechat.package"] = function()
     return {
         password = function() return "pw" end,
+        formatChaptersParam = function(uids)
+            uids = uids or {}
+            if #uids == 0 then return "0" end
+            local nums = {}
+            for i, u in ipairs(uids) do
+                local n = tonumber(u)
+                if not n then
+                    local parts = { "0" }
+                    for _idx, x in ipairs(uids) do parts[#parts + 1] = tostring(x) end
+                    return table.concat(parts, ",")
+                end
+                nums[i] = n
+            end
+            local ok = true
+            for i = 2, #nums do if nums[i] ~= nums[i - 1] + 1 then ok = false break end end
+            if ok then
+                local a, b = nums[1], nums[#nums]
+                if a == 1 then return "0-" .. b end
+                if a == b then return "0," .. a end
+                return "0," .. a .. "-" .. b
+            end
+            local parts = { "0" }
+            for _idx, n in ipairs(nums) do parts[#parts + 1] = tostring(n) end
+            return table.concat(parts, ",")
+        end,
+        extractChapters = function(files, _book, uids, book_type)
+            local out, style = {}, files["Styles/stylesheets.css"]
+            for _idx, uid in ipairs(uids) do
+                local html = FULL
+                if trial then html = TRIAL elseif bom then html = "98791" .. FULL end
+                -- keep real BOM via bytes below in separate fix
+                out[tostring(uid)] = { text = html, format = book_type == "txt" and "txt" or "html" }
+            end
+            return out, style
+        end,
         unzip = function()
             local q = queries[#queries]
-            if q.chapters == "0" then
-                return { ["Styles/stylesheets.css"] = ".content{text-indent:2em}" }
+            local ch = tostring(q.chapters or "")
+            if ch == "0" or ch:find("^0%-") or ch:find("^0,") then
+                return { ["Styles/stylesheets.css"] = ".content{text-indent:2em}", dummy = true }
             end
             return { dummy = true }
         end,
@@ -154,6 +190,7 @@ do
     Assert.eq(queries[1].bookType, "epub")
     Assert.eq(queries[1].chapters, "chapter")
     Assert.eq(queries[1].bookVersion, 7)
+    Assert.eq(queries[1].offline, "0", "单章在线阅读 offline=0")
 end
 
 do
@@ -445,4 +482,28 @@ do
         Assert.matches(err, "zip: chapter 1595 not in package")
     end)
     txt_zip, zip_text_missing = false, false
+end
+
+do
+    -- 批量：prime 五章 offline=1、chapters=0-5；随后 fetchHtml 不再打网。
+    Context.rememberBookVersion("batch-book", 7)
+    local before = #queries
+    local chapters = {}
+    for i = 1, 5 do chapters[i] = { uid = tostring(i), idx = i } end
+    local ok_out, err_out
+    Chapter.primeBatchAsync("batch-book", chapters, { offline = true }, function(ok, err)
+        ok_out, err_out = ok, err
+    end)
+    Assert.is_true(ok_out)
+    Assert.is_nil(err_out)
+    Assert.eq(queries[before + 1].chapters, "0-5")
+    Assert.eq(queries[before + 1].offline, "1")
+    local after_prime = #queries
+    local html_out
+    Chapter.fetchHtmlAsync("batch-book", { uid = "3" }, function(html, err)
+        Assert.is_nil(err)
+        html_out = html
+    end)
+    Assert.eq(#queries, after_prime, "primed 章不得再次请求 chapterdownload")
+    Assert.eq(html_out, FULL)
 end

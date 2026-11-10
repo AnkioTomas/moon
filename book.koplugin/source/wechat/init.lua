@@ -843,18 +843,21 @@ end
 ---@param cb fun()|nil
 ---@return { cancel: fun() }
 function Source:prefetchChaptersAsync(identity, toc, from_idx, count, cb)
-    return require("source.chapter").prefetchAsync(identity, identity.book, toc, from_idx, count, {
+    -- 阅读中预取也按官方五章一批（带样式 0）；offline=0，与单章在线一致。
+    return WChapter.prefetchBatchedAsync(identity, toc, from_idx, count, {
         fetchContent = fetchContent,
+        book = identity.book,
+        offline = false,
     }, cb)
 end
 
---- 缓存整本章节正文；目录只拉一次，正文按序下载并返回部分成功统计。
+--- 缓存整本章节正文；目录只拉一次，正文按官方五章一批（offline=1）下载。
 ---@param identity BookIdentity
 ---@param on_progress fun(done: integer, total: integer)|nil
 ---@param cb fun(ok: boolean, cached: integer, err: string|nil, total: integer, failed: integer)
 ---@return { cancel: fun() }
 function Source:cacheAllChaptersAsync(identity, on_progress, cb, range)
-    return require("source.chapter").cacheAllAsync(self, identity, fetchContent, on_progress, cb, nil, range)
+    return WChapter.cacheAllBatchedAsync(self, identity, on_progress, cb, range)
 end
 
 --- 拉取云端进度并补齐本地需要的坐标。
