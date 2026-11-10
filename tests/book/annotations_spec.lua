@@ -22,6 +22,15 @@ do
     locator = Annotations.fromWireOffset(wire, flow, 0)
     Assert.eq(locator, "/html/body/p/text()[1].0", "标签中的位置落到后续正文")
     Assert.eq(Annotations.toWirePosition(wire, flow, "/missing/text().0"), nil)
+    Assert.eq(Annotations.toWirePosition(wire, flow, "/body/DocFragment[1]/body/p/text()[1].12000"), 12015,
+        "DocFragment 外壳规范成本地 HTML 路径后再映射")
+    Assert.eq(Annotations.toWirePosition(wire, flow, "/body/DocFragment[1]/html/body/p/text()[1].12000"), 12015)
+    Assert.eq(Annotations.toWirePosition(wire, flow,
+        "/body[1]/DocFragment[1]/html[1]/body[1]/p[1]/text()[1].12000"), 12015,
+        "V1 [1] 下标与 toStringV2 路径对得上")
+    Assert.eq(Annotations.toWirePosition(wire, flow, "/html[1]/body[1]/p[1]/text()[1].12000"), 12015)
+    Assert.eq(select(4, Annotations.toWirePosition(wire, flow, "/html/body/div/text().0")),
+        "reading position not found in chapter", "真正缺失的路径仍失败")
 end
 
 do
@@ -42,6 +51,8 @@ do
     local expected = assert(html:find("图片后的正文", 1, true)) - 1
     Assert.eq(offset, expected, "图片位置映射到之后最近的可见正文")
     Assert.eq(summary, "图片后的正文")
+    Assert.eq(Annotations.toWirePosition(wire, flow, "/body/DocFragment[1]/body/div[1]/img.0"), expected)
+    Assert.eq(Annotations.toWirePosition(wire, flow, "/html[1]/body[1]/div[1]/img[1].0"), expected)
 
     local end_html = "<html><body><p>章节正文</p><img src=\"tail.jpg\"/></body></html>"
     local end_wire, end_flow = Annotations.wireMapping(end_html), Annotations.flow(end_html)
@@ -89,6 +100,9 @@ do
     Assert.eq(offset, expected, "第二张图的 <img> 在 wire HTML 上的 rune 偏移")
     Assert.eq(summary, "")
     Assert.is_true(fraction ~= nil and fraction > 0 and fraction < 1)
+    Assert.eq(Annotations.toWirePosition(wire, flow, "/body/DocFragment[1]/body/div[2]/img.0", html), expected,
+        "纯图章 DocFragment 前缀仍能映到 <img> 偏移")
+    Assert.eq(Annotations.toWirePosition(wire, flow, "/html[1]/body[1]/div[2]/img[1].0", html), expected)
 
     Assert.eq(Annotations.toWirePosition(wire, flow, "/html/body/div[2]/img.0"), nil,
         "没有 source 时纯图章不能瞎编偏移")
