@@ -23,6 +23,7 @@
 ---@field updated integer|nil 起点章节更新时间（Unix 秒）
 ---@field idx integer 连续章序号（1-based）
 ---@field depth integer|nil 展示层级（1-based）
+---@field volume string|nil 卷名（仅展示，不占独立章节序号）
 ---@field anchors BookChapterAnchor[]|nil 章内目录节点
 ---@field toc_version integer|nil 目录缓存格式版本（仅首章携带）
 ---@field source_idx string|nil 源端非连续章节号
