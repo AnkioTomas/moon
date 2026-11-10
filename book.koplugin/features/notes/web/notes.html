@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<!-- 高亮与笔记页（features/notes 经 web.routes 开放；顶栏入口由 /js.js 按 /api/pages 补上；逻辑在 /notes.js，接口 /api/notes/*） -->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>高亮与笔记 - 远程管理</title>
+<link rel="icon" href="/favicon.ico?v=2" sizes="16x16 32x32 48x48">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=2">
+<meta name="theme-color" content="#263a52">
+<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/notes.css">
+<script>try{var t=localStorage.getItem('moon-theme');if(t==='light'||t==='dark')document.documentElement.setAttribute('data-theme',t);var l=localStorage.getItem('moon-lang');if(l&&!/^zh_CN/.test(l))document.documentElement.classList.add('i18n-wait')}catch(e){}</script>
+</head>
+<body class="file-page notes-page">
+<header class="appbar"><div class="appbar-inner">
+<a class="appbar-brand" href="/"><img src="/logo.jpg" alt="" width="28" height="28"><span>月读远程管理</span></a>
+<nav class="appbar-nav" aria-label="页面导航"><a href="/"><span>首页</span></a><a href="/file.html"><span>文件</span></a><a href="/input.html"><span>输入</span></a><a href="/clipboard.html"><span>剪贴板</span></a><a href="/settings.html"><span>配置</span></a><a href="/update.html"><span>更新</span></a></nav>
+<button type="button" id="theme-toggle" class="icon-btn" aria-label="切换主题" title="主题：跟随系统"><svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 18V4a8 8 0 0 1 0 16z"/></svg></button>
+</div></header>
+
+<main class="file-main">
+<div class="tab-strip sub-strip">
+<div class="file-action-toolbar sub-toolbar" role="toolbar" aria-label="笔记操作">
+<div class="fa-group fa-left">
+<label class="sub-search"><span class="visually-hidden">搜索</span><input id="q" type="search" placeholder="搜索原文、备注或书名" autocomplete="off"></label>
+<select id="type" aria-label="类型"><option value="">全部类型</option><option value="highlight">高亮</option><option value="note">笔记</option></select>
+</div>
+<div class="fa-group fa-right">
+<a id="export" class="file-action" href="/api/notes/export" download="moon-notes.md">导出 Markdown</a>
+</div>
+</div>
+</div>
+<div id="batch" class="sub-batch" role="toolbar" aria-label="批量操作" hidden>
+<span id="batch-count" class="count-badge"></span>
+<button type="button" id="b-delete" class="file-action danger-text">删除所选</button>
+<button type="button" id="b-clear" class="file-action">取消选择</button>
+</div>
+
+<div class="explorer-shell">
+<aside class="explorer-sidebar notes-sidebar" aria-label="书籍">
+<div class="sidebar-title">书籍</div>
+<p id="book-status" class="notes-side-status" aria-live="polite"></p>
+<div id="books" class="quick-list notes-books"></div>
+<nav id="book-pager" class="notes-pager" hidden>
+<button type="button" id="book-prev" class="file-action">上一页</button>
+<span id="book-page-label" class="count-badge"></span>
+<button type="button" id="book-next" class="file-action">下一页</button>
+</nav>
+<div class="sidebar-credit">月读 · Ankio · <a href="https://ankio.net" target="_blank" rel="noopener noreferrer">ankio.net</a></div>
+</aside>
+
+<section class="explorer-content" aria-labelledby="list-title">
+<div class="command-bar">
+<label id="sel-all-wrap" class="notes-sel-all" hidden>
+<input id="sel-all" type="checkbox">
+<span>全选</span>
+</label>
+<h1 id="list-title" class="notes-current-title">高亮与笔记</h1>
+<span id="status" class="count-badge" aria-live="polite">正在加载…</span>
+<span class="command-spacer"></span>
+</div>
+<div class="table-wrap" id="listwrap">
+<div id="list" class="notes-list"></div>
+</div>
+<nav id="item-pager" class="notes-pager" hidden>
+<button type="button" id="item-prev" class="file-action">上一页</button>
+<span id="item-page-label" class="count-badge"></span>
+<button type="button" id="item-next" class="file-action">下一页</button>
+</nav>
+</section>
+</div>
+</main>
+
+<div id="toasts" class="sub-toasts" aria-live="polite"></div>
+
+<div id="ov" class="overlay" hidden>
+<div id="dlg" class="dialog" role="dialog" aria-modal="true" aria-labelledby="dt">
+<h2 id="dt"></h2>
+<p id="dm"></p>
+<label id="dilabel" class="visually-hidden" for="di">输入</label>
+<input id="di" type="text" hidden>
+<div class="btns">
+<button type="button" id="dc">取消</button>
+<button type="button" id="dk" class="primary">确定</button>
+</div>
+</div>
+</div>
+
+<div id="edit-ov" class="overlay" hidden>
+<div class="dialog notes-edit-dialog" role="dialog" aria-modal="true" aria-labelledby="e-title">
+<h2 id="e-title">编辑备注</h2>
+<p id="e-meta" class="notes-meta"></p>
+<p class="notes-cite"><span id="e-text" class="notes-quote"></span></p>
+<label class="notes-note-label" for="e-note">备注</label>
+<textarea id="e-note" rows="7" placeholder="给这段高亮写备注…"></textarea>
+<p id="e-msg" class="notes-msg" role="status"></p>
+<div class="btns">
+<button type="button" id="e-cancel">取消</button>
+<button type="button" id="e-save" class="primary">保存备注</button>
+</div>
+</div>
+</div>
+
+<script src="/js.js"></script>
+<script src="/notes.js"></script>
+</body>
+</html>

@@ -426,4 +426,258 @@ function Note.syncAsync(source, opts, cb)
         end }
 end
 
+
+--- 分页文档的 pos 是 {x,y,page} 表，tostring 只得到地址，不能当键。
+---@param pos any
+---@return string
+local function posKey(pos)
+    if type(pos) == "table" then
+        return tostring(pos.page) .. "," .. tostring(pos.x) .. "," .. tostring(pos.y)
+    end
+    return tostring(pos or "")
+end
+
+--- 一条注解在所属快照内的身份：优先源侧 id，否则用内容坐标。
+---@param item table
+---@return string
+local function itemId(item)
+    if item.wr_bookmark_id then
+        return "wr:" .. tostring(item.wr_bookmark_id)
+    end
+    if item.kavita_id then
+        return "kv:" .. tostring(item.kavita_id)
+    end
+    local id = item.id or item.annotation_id
+    if id ~= nil then
+        return "id:" .. tostring(id)
+    end
+    return table.concat({
+        "p",
+        tostring(item.text or ""),
+        tostring(item.page or ""),
+        posKey(item.pos0),
+        posKey(item.pos1),
+        tostring(item.datetime or ""),
+    }, "\0")
+end
+
+local function b64url(data)
+    local Text = require("utils.text")
+    return (Text.base64Encode(data):gsub("%+", "-"):gsub("/", "_"):gsub("=", ""))
+end
+
+local function unb64url(s)
+    s = s:gsub("-", "+"):gsub("_", "/")
+    local pad = (4 - #s % 4) % 4
+    if pad > 0 then s = s .. string.rep("=", pad) end
+    return require("utils.text").base64Decode(s)
+end
+
+--- 远程管理等用的跨书条目键（不落库）：source + 书 + 章 + 条目标识，URL 安全。
+---@param source_id string
+---@param stable_id string
+---@param chapter_idx integer|nil
+---@param item table
+---@return string
+function Note.itemKey(source_id, stable_id, chapter_idx, item)
+    local raw = table.concat({
+        tostring(source_id or ""),
+        tostring(stable_id or ""),
+        tostring(tonumber(chapter_idx) or 0),
+        itemId(item),
+    }, "\31")
+    return b64url(raw)
+end
+
+--- 解开 Note.itemKey。非法输入返回 nil。
+---@param key string
+---@return { source_id: string, stable_id: string, chapter_idx: integer, item_id: string }|nil
+function Note.parseItemKey(key)
+    if type(key) ~= "string" or key == "" then
+        return nil
+    end
+    local ok, raw = pcall(unb64url, key)
+    if not ok or type(raw) ~= "string" then
+        return nil
+    end
+    local source_id, stable_id, idx, item_id = raw:match("^(.-)\31(.-)\31(.-)\31(.*)$")
+    if not source_id or item_id == nil or item_id == "" then
+        return nil
+    end
+    return {
+        source_id = source_id,
+        stable_id = stable_id,
+        chapter_idx = tonumber(idx) or 0,
+        item_id = item_id,
+    }
+end
+
+---@param item table
+---@param item_id string
+---@return boolean
+local function itemMatches(item, item_id)
+    return itemId(item) == item_id
+end
+
+---@param item table
+---@return table
+local function copyItem(item)
+    local out = {}
+    for k, v in pairs(item) do
+        out[k] = v
+    end
+    return out
+end
+
+--- 当前阅读器若正打开同一书/章，把改动写进内存注解和 sidecar，避免下次保存把远程改动盖掉。
+---@param source_id string
+---@param stable_id string
+---@param chapter_idx integer
+---@param item_id string
+---@param note string|nil
+---@param remove boolean
+local function patchOpenDocument(source_id, stable_id, chapter_idx, item_id, note, remove)
+    local ok_ui, ReaderUI = pcall(require, "apps/reader/readerui")
+    if not ok_ui or not ReaderUI or not ReaderUI.instance then
+        return
+    end
+    local ui = ReaderUI.instance
+    local ok_sess, Session = pcall(require, "reader.session")
+    local identity = ok_sess and Session and Session._snapshot and Session._snapshot.identity
+    if not identity then
+        return
+    end
+    if identity.source_id ~= source_id or identity.stable_id ~= stable_id then
+        return
+    end
+    if (tonumber(identity.chapter_idx) or 0) ~= chapter_idx then
+        return
+    end
+    local live = ui.annotation and ui.annotation.annotations
+    if type(live) ~= "table" then
+        return
+    end
+    if remove then
+        for i = #live, 1, -1 do
+            if type(live[i]) == "table" and itemMatches(live[i], item_id) then
+                table.remove(live, i)
+            end
+        end
+    else
+        for _idx, item in ipairs(live) do
+            if type(item) == "table" and itemMatches(item, item_id) then
+                item.note = note
+            end
+        end
+    end
+    if ui.doc_settings then
+        ui.doc_settings:saveSetting("annotations", live)
+        if ui.doc_settings.flush then
+            ui.doc_settings:flush()
+        end
+    end
+    if ui.annotation and type(ui.annotation.updateAnnotations) == "function" then
+        ui.annotation:updateAnnotations(true)
+    end
+end
+
+local function maybePushDirty(source_id)
+    local ok_net, NetworkMgr = pcall(require, "ui/network/manager")
+    if not ok_net or not NetworkMgr or not NetworkMgr:isConnected() then
+        return
+    end
+    local ok_reg, Registry = pcall(require, "source.registry")
+    if not ok_reg or not Registry then
+        return
+    end
+    local source = Registry.resolve(source_id)
+    if source and type(source.pushNotesAsync) == "function" and type(source.pushDirty) == "function" then
+        source:pushDirty()
+    end
+end
+
+--- 改一条注解的备注，或从快照里删掉它。
+--- 走与阅读器保存相同的清洁 / 源侧墓碑（prepareLocalAnnotations）路径，再脏写 notes 表。
+--- 不修改 text / pos0 / pos1 / page，也不新建条目。
+---@param opts { key: string, note?: string|nil, remove?: boolean }
+---@return boolean ok
+---@return string|nil err
+function Note.mutate(opts)
+    opts = opts or {}
+    local parsed = Note.parseItemKey(opts.key)
+    if not parsed then
+        return false, "invalid key"
+    end
+    local source_id, stable_id, chapter_idx = parsed.source_id, parsed.stable_id, parsed.chapter_idx
+    local row = NoteDB.get(source_id, stable_id, chapter_idx)
+    if not row then
+        return false, "not found"
+    end
+    local previous, authoritative = Normalize.decode(row.payload)
+    if not previous then
+        return false, "invalid snapshot"
+    end
+    local found, deleted
+    local current = {}
+    for _idx, item in ipairs(previous) do
+        if type(item) == "table" and itemMatches(item, parsed.item_id)
+            and not item.wr_deleted and not item.kavita_deleted then
+            found = item
+            if opts.remove then
+                deleted = copyItem(item)
+            else
+                local copy = copyItem(item)
+                local note = opts.note
+                if type(note) == "string" then
+                    note = note:match("^%s*(.-)%s*$")
+                    if note == "" then note = nil end
+                else
+                    note = nil
+                end
+                copy.note = note
+                current[#current + 1] = copy
+            end
+        else
+            current[#current + 1] = copyItem(item)
+        end
+    end
+    if not found then
+        return false, "not found"
+    end
+    local source
+    local ok_reg, Registry = pcall(require, "source.registry")
+    if ok_reg and Registry then
+        source = Registry.resolve(source_id)
+    end
+    local total_pages = found.total_pages
+    local clean = Note.clean(source, current, total_pages)
+    if source and type(source.prepareLocalAnnotations) == "function" then
+        source:prepareLocalAnnotations(previous, clean, deleted)
+    end
+    local ok, payload = pcall(JSON.encode, Normalize.pack(clean, authoritative))
+    if not ok then
+        logger.warn("book.note mutate encode failed", stable_id, payload)
+        return false, "encode failed"
+    end
+    local updated_at = Note.nextRevision()
+    if not NoteDB.upsert(source_id, stable_id, chapter_idx, payload, updated_at) then
+        logger.warn("book.note mutate save failed", stable_id)
+        return false, "save failed"
+    end
+    local new_note = nil
+    if not opts.remove then
+        new_note = opts.note
+        if type(new_note) == "string" then
+            new_note = new_note:match("^%s*(.-)%s*$")
+            if new_note == "" then new_note = nil end
+        else
+            new_note = nil
+        end
+    end
+    patchOpenDocument(source_id, stable_id, chapter_idx, parsed.item_id, new_note, opts.remove == true)
+    maybePushDirty(source_id)
+    return true
+end
+
+
 return Note
