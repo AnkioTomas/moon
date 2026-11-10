@@ -51,6 +51,7 @@ return {
     ["正在扫描本地书库…"] = "Scanning local library…",
     ["正在检查远端目录…"] = "Checking remote folders…",
     ["正在列出远端目录 %1"] = "Listing remote folder %1",
+    ["正在列出远端书库…"] = "Listing the remote library…",
     ["正在下载书目…"] = "Downloading book list…",
     ["正在检查阅读进度…"] = "Checking reading progress…",
     ["正在下载进度 %1"] = "Downloading progress for %1",

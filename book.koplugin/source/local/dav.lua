@@ -90,8 +90,9 @@ function Webdav:join(path, as_dir)
     return url
 end
 
---- 同一 url 上的请求串行。start(release) 开始一次请求，结束时必须 release（含失败）。
+--- 同一 url 上的请求串行（上传、下载、MKCOL 等）。start(release) 开始一次请求，结束时必须 release（含失败）。
 --- 回调先于 release：回调里再发的请求排在后面，不会和当前这次重叠，也不会死锁。
+--- 列目录另走 _list：硬刷新要对大量书文件夹并发 PROPFIND，不能再跟读写挤一条串行车道。
 ---@param start fun(release: fun()): { cancel: fun() }|nil
 ---@return { cancel: fun() }
 function Webdav:_one(start)
@@ -184,37 +185,55 @@ local function httpDate(value)
     return t + os.difftime(now, os.time(os.date("!*t", now)))
 end
 
---- 解析 PROPFIND 207 响应
+--- href 归一成不含 scheme/host、去尾斜杠的路径，供和被列目录比较、拼相对路径。
+---@param value string
+---@return string
+local function hrefPath(value)
+    local path = (util.urlDecode(value) or value)
+    path = util.htmlEntitiesToUtf8(path)
+    path = path:match("^https?://[^/]*(.*)$") or path
+    return trimSlashes(path)
+end
+
+--- 解析 PROPFIND 207 响应。Depth:1 与 Depth:infinity 都按 href 相对被列目录还原路径，
+--- 不能只用 basename，否则深层列表会把 `分类/系列/书.epub` 收成根下的 `书.epub`。
 ---@param xml string
 ---@param folder_url string
 ---@param folder_path string
 ---@return table
 local function parseList(xml, folder_url, folder_path)
-    local folder_href = trimSlashes(util.urlDecode(folder_url:match("^https?://[^/]*(.*)$") or folder_url))
+    local folder_href = hrefPath(folder_url)
     local entries = {}
     for item in xml:gmatch("<[%w_]*:?response[^>]*>(.-)</[%w_]*:?response>") do
         local href = item:match("<[%w_]*:?href[^>]*>(.-)</[%w_]*:?href>")
         if href then
             local full = util.urlDecode(href) or href
             full = util.htmlEntitiesToUtf8(full)
-            local name = ffiUtil.basename(full)
+            local full_path = hrefPath(href)
             local is_empty_type = item:find("<[%w_]*:?resourcetype%s*/>")
                 or item:find("<[%w_]*:?resourcetype>%s*</[%w_]*:?resourcetype>")
             local is_collection = item:find("<[%w_]*:?collection[^<]*/>")
                 or item:find("<[%w_]*:?collection>%s*</[%w_]*:?collection>")
             local is_dir = not is_empty_type and is_collection ~= nil
 
-            -- Depth:1 回包里第一条是被列目录自身，跳过。
-            if not is_dir or trimSlashes(full) ~= folder_href then
+            -- 回包里第一条通常是被列目录自身，跳过。
+            if not is_dir or full_path ~= folder_href then
+                local rel
+                local prefix = folder_href == "" and "/" or (folder_href .. "/")
+                if full_path:sub(1, #prefix) == prefix then
+                    rel = full_path:sub(#prefix + 1)
+                else
+                    rel = ffiUtil.basename(full)
+                end
+                local name = ffiUtil.basename(rel)
                 entries[#entries + 1] = {
                     name = name,
-                    path = folder_path ~= "" and (folder_path .. "/" .. name) or name,
+                    path = folder_path ~= "" and (folder_path .. "/" .. rel) or rel,
                     href = full,
                     is_dir = is_dir,
                     size = is_dir and 0
                         or tonumber(item:match("<[%w_]*:?getcontentlength[^>]*>(%d+)</[%w_]*:?getcontentlength>")) or 0,
-                    mtime = not is_dir
-                        and httpDate(item:match("<[%w_]*:?getlastmodified[^>]*>(.-)</[%w_]*:?getlastmodified>")) or nil,
+                    mtime = httpDate(item:match("<[%w_]*:?getlastmodified[^>]*>(.-)</[%w_]*:?getlastmodified>")),
                 }
             end
         end
@@ -228,24 +247,113 @@ local function parseList(xml, folder_url, folder_path)
     return entries
 end
 
---- Nonblocking Depth:1 directory listing.
----@param path string|nil
----@param cb fun(entries: WebdavEntry[]|nil, err: string|nil)
+--- 列目录允许的同时在飞请求数。完整读写仍走 _one 串行，避免和笔记 / 上传互相拖垮弱网设备。
+local LIST_CONCURRENCY = 4
+
+---@type table<string, { active: integer, queue: function[] }>
+local list_lanes = {}
+
+--- 同一 url 上的列目录请求：最多 LIST_CONCURRENCY 路同时在飞，其余排队。
+---@param start fun(release: fun()): { cancel: fun() }|nil
+---@return { cancel: fun() }
+function Webdav:_list(start)
+    local key = self.url
+    local lane = list_lanes[key]
+    if not lane then
+        lane = { active = 0, queue = {} }
+        list_lanes[key] = lane
+    end
+    local handle = {}
+    local function go()
+        lane.active = lane.active + 1
+        local released = false
+        local function release()
+            if released then return end
+            released = true
+            lane.active = lane.active - 1
+            local nxt = table.remove(lane.queue, 1)
+            if nxt then
+                nxt()
+            elseif lane.active == 0 and list_lanes[key] == lane then
+                list_lanes[key] = nil
+            end
+        end
+        local job = start(release)
+        handle.cancel = function()
+            if job and job.cancel then job:cancel() end
+            release()
+        end
+    end
+    if lane.active >= LIST_CONCURRENCY then
+        local entry = go
+        lane.queue[#lane.queue + 1] = entry
+        handle.cancel = function()
+            for i = #lane.queue, 1, -1 do
+                if lane.queue[i] == entry then table.remove(lane.queue, i) end
+            end
+        end
+    else
+        go()
+    end
+    return handle
+end
+
+--- 列目录专用请求：并发走 _list，成功 / 失败回调与 _request 相同。
+---@param opts HttpRequest
+---@param cb fun(res: table|nil, err: string|nil, code: number|nil)
 ---@return HttpJob
-function Webdav:listAsync(path, cb)
+function Webdav:_listRequest(opts, cb)
+    opts.auth_username = self.username
+    opts.auth_password = self.password
+    return self:_list(function(release)
+        local fired = false
+        local function finish(res, err)
+            if fired then return end
+            fired = true
+            local pok, err_obj = xpcall(function()
+                if err then
+                    cb(nil, networkErr(err))
+                elseif not res or not Request.ok(res.code) then
+                    cb(nil, statusErr(res and res.code), res and tonumber(res.code))
+                else
+                    cb(res)
+                end
+            end, debug.traceback)
+            release()
+            if not pok then error(err_obj, 0) end
+        end
+        local job = Request.request(opts, finish)
+        return { cancel = function()
+            if job and job.cancel then job:cancel() end
+            if not fired then fired = true; release() end
+        end }
+    end)
+end
+
+--- Nonblocking directory listing。opts.depth 缺省 "1"；硬刷新可传 "infinity" 一次拉整棵树。
+---@param path string|nil
+---@param cb fun(entries: WebdavEntry[]|nil, err: string|nil, code: number|nil)
+---@param opts { depth?: "1"|"infinity", timeout?: number, connect_timeout?: number }|nil
+---@return HttpJob
+function Webdav:listAsync(path, cb, opts)
+    opts = opts or {}
     path = trimSlashes(path or "")
     local url = self:join(path, true)
-    return self:_request({
+    local depth = opts.depth == "infinity" and "infinity" or "1"
+    local req = {
         url = url,
         method = "PROPFIND",
         headers = {
             ["Content-Type"] = "application/xml; charset=utf-8",
-            ["Depth"] = "1",
+            ["Depth"] = depth,
         },
         body = PROPFIND_LIST,
-    }, function(res, err)
+    }
+    if opts.timeout then req.timeout = opts.timeout end
+    if opts.connect_timeout then req.connect_timeout = opts.connect_timeout end
+    return self:_listRequest(req, function(res, err, code)
         if not res then
-            cb(nil, err)
+            cb(nil, err, code)
             return
         end
         local xml = res.body or ""
