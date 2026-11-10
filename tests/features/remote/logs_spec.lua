@@ -135,7 +135,7 @@ function Writer:addFileFromMemory(name, content) added[name] = content; return t
 function Writer:close() self.closed = true end
 local out, err = Logs.build(dir .. "/out.zip", files, {
     plugin_version = "1.2.3", koreader_version = "v2026.07", device = "Kindle", language = "en_US",
-    generated = "2026-10-14 20:00:00",
+    generated = "2026-10-14 20:00:00", startup_mode = "no-framework",
 }, Writer)
 Assert.eq(out, dir .. "/out.zip")
 Assert.is_nil(err)
@@ -147,6 +147,7 @@ local info = added["info.txt"]
 has(info, "plugin_version: 1.2.3")
 has(info, "koreader_version: v2026.07")
 has(info, "device: Kindle")
+has(info, "startup_mode: no-framework")
 has(info, "language: en_US")
 has(info, "generated: 2026-10-14 20:00:00")
 has(info, "moon/book.log")
@@ -161,6 +162,7 @@ Logs.PER_FILE, Logs.TOTAL = per, total
 hasnt(added["moon/book.log"], "line-one")
 has(added["info.txt"], "truncated to last part: moon/book.log")
 has(added["info.txt"], "skipped (size cap)")
+has(added["info.txt"], "startup_mode:")
 
 os.execute("rm -rf '" .. dir .. "'")
 
@@ -315,12 +317,14 @@ do
         screen_w = 1072, screen_h = 1448, dpi = 300,
         storage_total = 1000, storage_free = 400, storage_avail = 350,
         connected = true, has_battery = true, battery = 88,
+        startup_mode = "framework",
     })
     has(device, "model: KindlePaperWhite4")
     has(device, "platform: kindle")
     has(device, "screen: 1072x1448")
     has(device, "network_connected: true")
     has(device, "battery: 88")
+    has(device, "startup_mode: framework")
 
     local sess_none = Logs.sessionText({ open = false }, roots)
     has(sess_none, "(none")
