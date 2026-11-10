@@ -684,6 +684,54 @@ end
 desktop.detail[1]:paintTo(Kit.canvas(), 0, 0)
 desktop.detail:close()
 
+-- 未下载的 WebDAV 书：没有 path / book.format 时，从 stable_id 后缀显示格式；书名仍是词干，不把远端路径当路径行。
+local function info_texts(book)
+    Detail.open(desktop, "library", book)
+    local texts = Kit.texts(desktop.detail)
+    Assert.eq(desktop.detail.book.title, book.title, "书名仍是词干，不含后缀")
+    desktop.detail:close()
+    return texts
+end
+local function has_format(texts, label)
+    Assert.contains(texts, "格式")
+    Assert.contains(texts, label)
+    for _idx, text in ipairs(texts) do
+        Assert.is_true(not text:find("Some Book.", 1, true) and not text:find("webdav://", 1, true),
+            "不把带后缀文件名或远端路径当标题/路径：" .. text)
+    end
+end
+has_format(info_texts({
+    source_id = "local", stable_id = "webdav://Some Book.epub", title = "Some Book",
+}), "EPUB")
+has_format(info_texts({
+    source_id = "local", stable_id = "webdav://Some Book.mobi", title = "Some Book",
+}), "MOBI")
+has_format(info_texts({
+    source_id = "local", stable_id = "webdav://Some Book.txt", title = "Some Book",
+}), "TXT")
+
+-- 本地 path 的 fb2.zip 显示 FB2.ZIP，不会被当成 ZIP。
+texts_w = info_texts({
+    source_id = "local", stable_id = "/books/长书.fb2.zip", path = "/books/长书.fb2.zip", title = "长书",
+})
+Assert.contains(texts_w, "格式")
+Assert.contains(texts_w, "FB2.ZIP")
+Assert.contains(texts_w, "/books/长书.fb2.zip")
+for _idx, text in ipairs(texts_w) do
+    Assert.is_true(text ~= "ZIP", "fb2.zip 不当成 ZIP：" .. text)
+end
+
+-- 非书籍或没有后缀：不编造格式行。
+for _idx, book in ipairs({
+    { source_id = "local", stable_id = "webdav://notes.bin", title = "notes" },
+    { source_id = "local", stable_id = "webdav://NoExt", title = "NoExt" },
+}) do
+    texts_w = info_texts(book)
+    for _idx2, text in ipairs(texts_w) do
+        Assert.is_true(text ~= "格式" and text ~= "BIN", "非书籍后缀不显示格式：" .. text)
+    end
+end
+
 -- 全本书有简介：不再为简介预扣高度，刚好放下时路径还在；再矮则丢掉前面的行，路径留下。
 Detail.open(desktop, "library", {
     source_id = "local", stable_id = "/books/长书.epub", path = "/books/长书.epub", title = "长书",

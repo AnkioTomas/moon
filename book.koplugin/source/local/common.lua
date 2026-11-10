@@ -40,15 +40,28 @@ local BOOK_EXT = {
     ["fb2.zip"] = true,
 }
 
+--- 从文件名、路径或 stable_id 取出已识别的书籍后缀（小写）。
+--- `fb2.zip` 是一种格式，不会当成 zip；无法识别则返回 nil。
+---@param name string|nil
+---@return string|nil
+local function bookExt(name)
+    if type(name) ~= "string" or name == "" then
+        return nil
+    end
+    local base = name:match("[^/]+$") or name
+    local ext = base:lower():match("%.(fb2%.zip)$") or base:match("%.([^.]+)$")
+    if not ext then
+        return nil
+    end
+    ext = string.lower(ext)
+    return BOOK_EXT[ext] and ext or nil
+end
+
 --- 判断文件是否为可打开的书籍。
 ---@param name string
 ---@return boolean
 local function isBookFile(name)
-    local ext = name:lower():match("%.(fb2%.zip)$") or name:match("%.([^.]+)$")
-    if not ext then
-        return false
-    end
-    return BOOK_EXT[string.lower(ext)] == true
+    return bookExt(name) ~= nil
 end
 
 local MOBI_EXT = { mobi = true, azw = true, azw3 = true }
@@ -439,6 +452,7 @@ return {
     SOURCE_ID = SOURCE_ID,
     defer = defer,
     isBookFile = isBookFile,
+    bookExt = bookExt,
     isDrmMobi = isDrmMobi,
     rootPath = rootPath,
     localRoot = localRoot,
