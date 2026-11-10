@@ -50,7 +50,7 @@ local function affordPackage(need, fail)
     logger.warn("book.mem insufficient", "weread_chapter_package", err)
     logger.flushSync()
     Mem.promptInsufficient({
-        what = require("gettext")("章节解包"),
+        what = Mem.chapterUnpackWhat(),
         needed = detail.needed,
         available = detail.available,
     })
