@@ -119,8 +119,38 @@ Chapter.openAsync({ type = "chapter" }, identity, { title = "书" }, { chapter_i
 }, function(p) path = p end)
 Assert.eq(assert(io.open(path, "rb")):read("*a"), DOC)
 
--- 已落盘且无远程 img 时直接复用，不再请求正文。
-Chapter.openAsync({ type = "chapter" }, identity, {}, { chapter_idx = 2 }, ops, function(p) path = p end)
+-- 已落盘且无远程 img：切章快开，不拉目录、不取正文，只登记后在下一拍交付。
+local toc_loads = 0
+local hit_ops = {
+    loadToc = function(_, cb)
+        toc_loads = toc_loads + 1
+        cb(toc)
+    end,
+    fetchContent = ops.fetchContent,
+}
+local hit_path
+Chapter.openAsync({ type = "chapter" }, identity, {}, { chapter_idx = 2 }, hit_ops, function(p)
+    hit_path = p
+end)
+Assert.is_nil(hit_path, "快开回调在 nextTick")
+Assert.eq(toc_loads, 0)
+Assert.len(fetched, 1)
+Stubs.flush()
+Assert.eq(hit_path, tmp .. "/2.html")
+Assert.eq(toc_loads, 0)
+Assert.len(fetched, 1)
+Assert.eq(touches[#touches].chapter_idx, 2)
+path = hit_path
+
+-- 快开取消后不再交付结果。
+hit_path = nil
+local hit_job = Chapter.openAsync({ type = "chapter" }, identity, {}, { chapter_idx = 2 }, hit_ops, function(p)
+    hit_path = p
+end)
+hit_job.cancel()
+Stubs.flush()
+Assert.is_nil(hit_path)
+Assert.eq(toc_loads, 0)
 Assert.len(fetched, 1)
 
 -- 源要求文件头带标记时，旧缓存重新下载，新文件带上标记。
@@ -157,6 +187,7 @@ local restored = io.open(tmp .. "/3.html", "wb")
 restored:write('<!DOCTYPE html><html><body><img src="images/a.png"/></body></html>')
 restored:close()
 Chapter.openAsync({ type = "chapter" }, identity, {}, { chapter_idx = 3 }, ops, function(p) path = p end)
+Stubs.flush()
 Assert.eq(path, tmp .. "/3.html")
 Assert.len(fetched, 1)
 
@@ -165,6 +196,7 @@ local bom_cache = io.open(tmp .. "/3.html", "wb")
 bom_cache:write('\239\187\191<?xml version="1.0"?><html><body><p>正文</p></body></html>')
 bom_cache:close()
 Chapter.openAsync({ type = "chapter" }, identity, {}, { chapter_idx = 3 }, ops, function(p) path = p end)
+Stubs.flush()
 Assert.eq(path, tmp .. "/3.html")
 Assert.len(fetched, 1)
 
@@ -279,6 +311,7 @@ local failed_path, failed_err
 Chapter.openAsync({ type = "chapter" }, identity, {}, { chapter_idx = 1 }, ops, function(p, e)
     failed_path, failed_err = p, e
 end)
+Stubs.flush()
 Assert.is_nil(failed_path)
 Assert.eq(failed_err, "db failed")
 
