@@ -248,7 +248,6 @@ local function coreEntries(desktop)
             },
         },
         network,
-        { group = "maintenance", order = 70, id = "debug_log", row = Maintenance:debugLogRow(desktop) },
         { group = "maintenance", order = 90, id = "close_desktop", row = Maintenance:closeRow(desktop) },
     }
 end
@@ -357,8 +356,8 @@ local GROUP_FOLDERS = {
         },
         {
             id = "other", icon = "info", title = _("其它"),
-            subtitle = _("调试与关闭桌面"), default = true,
-            match = { "debug_log", "close_desktop" },
+            subtitle = _("关闭桌面"), default = true,
+            match = { "close_desktop" },
         },
     },
 }

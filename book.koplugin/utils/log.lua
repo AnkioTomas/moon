@@ -4,16 +4,14 @@ Book 独立文件日志。
 同一天内重启继续追加日志，跨天首次启动时清空旧日志；后续日志积攒 10 条后经 nextTick
 批量追加到 $DATA/.moon/book.log。
 
-进程启动时 main.lua 调 `boot` 写一行版本与设备（不受调试开关影响）。
-
-调试模式（book_debug_enabled）打开时：dbg/info 才写文件，且所有级别同步镜像到
-KOReader `logger`（crash.log / 控制台），方便和系统日志一起看。
+进程启动时 main.lua 调 `boot` 先写字符串 logo，再写一行版本、设备与启动模式。
+info / warn / error 始终写入 book.log；dbg 为空操作（调用点可保留，避免把高频痕迹写进日志）。
+不镜像到 KOReader `logger` / crash.log。
 
 @module koplugin.book.utils.log
 --]]
 
 local Paths = require("utils.paths")
-local Settings = require("utils.settings")
 
 local Log = {}
 local BATCH_SIZE = 10
@@ -98,16 +96,6 @@ local function write(level, ...)
     if #buffer >= BATCH_SIZE then scheduleFlush(false) end
 end
 
-local function debugEnabled()
-    return Settings.get("utils").book_debug_enabled == true
-end
-
---- 调试模式下镜像到 KOReader logger。
----@param method string dbg|info|warn|err
-local function mirrorKo(method, ...)
-    require("logger")[method](...)
-end
-
 --- 提交当前尾批；实际写盘仍在下一次 UI tick 完成。
 function Log.flush()
     scheduleFlush(true)
@@ -121,37 +109,67 @@ function Log.flushSync()
     if not writeBatch(batch) then restoreBatch(batch) end
 end
 
---- 启动横幅：月读 / KOReader 版本与设备型号，不受调试开关影响，反馈问题时先看这一行。
+--- 不带时间戳与级别前缀。只给启动 logo 用，避免新月图形的对齐被拆掉。
+---@param text string
+local function writeRaw(text)
+    if not start() then return end
+    if text == "" then return end
+    if text:sub(-1) ~= "\n" then
+        text = text .. "\n"
+    end
+    buffer[#buffer + 1] = text
+    if #buffer >= BATCH_SIZE then scheduleFlush(false) end
+end
+
+-- 月读新月标志（源自 logo.png 的弦月），字标按最宽行 37 列居中。
+-- 长括号字符串，不经 write()，以免每行被加上时间戳前缀。
+local BOOT_LOGO = [[
+                 ▄▄
+           ▄▄███████
+        ▄▄█████████▀
+      ▄██████████▀
+    ▄███████████▀
+   █████████████
+  █████████████
+ ██████████████
+▄██████████████
+████████████████▄
+█████████████████▄
+█████▀▀████████▀▀██▄
+█████▄ ▄██████▄ ▄████▄▄         ▄████
+██████████▄▄███████████████████████
+▀██████████████████████████████████
+ ████████████████████████████████
+  ███████████████████████████████▀
+   ████████████████████████████▀
+    ▀████████████████████████▀
+             月读 · Moon
+]]
+
+--- 启动横幅：先写字符串 logo，再写月读 / KOReader 版本、设备与启动模式。
+--- logo 为原始块，元数据行仍走 BOOT，方便检索。
 function Log.boot()
+    writeRaw(BOOT_LOGO)
     write("BOOT", "moon", require("bookversion"), "koreader", require("version"):getShortVersion(),
-        "device", require("device").model)
+        "device", require("device").model,
+        "startup_mode", require("utils.mem").startupMode())
     Log.flush()
 end
 
+--- 空操作：高频痕迹（如耗时采样）不写 book.log。
 function Log.dbg(...)
-    if not debugEnabled() then return end
-    write("DEBUG", ...)
-    mirrorKo("dbg", ...)
 end
 
 function Log.info(...)
-    if not debugEnabled() then return end
     write("INFO", ...)
-    mirrorKo("info", ...)
 end
 
 function Log.warn(...)
     write("WARN", ...)
-    if debugEnabled() then
-        mirrorKo("warn", ...)
-    end
 end
 
 function Log.error(...)
     write("ERROR", ...)
-    if debugEnabled() then
-        mirrorKo("err", ...)
-    end
 end
 
 return Log

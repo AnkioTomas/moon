@@ -211,7 +211,6 @@ package.preload["desktop.pages.setting.maintenance"] = function()
         end
     end
     return {
-        debugLogRow = function() return row("调试日志") end,
         closeRow = function() return row("关闭桌面") end,
     }
 end
