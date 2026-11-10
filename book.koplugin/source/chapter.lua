@@ -6,6 +6,7 @@
 
 起始章：pending_progress 的 chapter_idx（或 fraction×目录折算），否则第 1 章，夹到 [1, #toc]；远端进度不参与选章，开书 pull 后收敛。
 正文先写 .part 再 rename，Store.touch 成功才把 path 交给调用方；本地缓存快开也要 touch。工作目录 Paths.bookWorkDir（md5(stable_id)）。
+openAsync / openWithUi 在章节文件已可复用时只 touch + nextTick 交付，不拉目录、不走 ensure / 重渲。
 
 @module koplugin.book.source.chapter
 --]]
@@ -412,7 +413,23 @@ local function ensure(identity, toc, idx, ops, cb)
     end)
 end
 
---- 按章打开：拉目录 → 选章 → 落盘正文 → 登记路径；可取消。
+--- 本地命中：登记身份后在下一拍交付路径；不拉目录、不重渲。
+---@param identity BookIdentity
+---@param path string
+---@param idx number
+---@param is_cancelled fun(): boolean
+---@param cb fun(path: string|nil, err: string|nil)
+local function deliverLocalHit(identity, path, idx, is_cancelled, cb)
+    path = variant(identity, idx, path)
+    local touched, touch_err = require("book.store").touch(path, identity, {
+        chapter_idx = idx,
+    })
+    require("ui/uimanager"):nextTick(require("ui.guard").wrap("chapter callback", function()
+        if not is_cancelled() then cb(touched and path or nil, touch_err) end
+    end))
+end
+
+--- 按章打开：本地命中则只登记后交付；否则拉目录 → 选章 → 落盘正文 → 登记路径；可取消。
 ---@param source BookSource
 ---@param identity BookIdentity
 ---@param book Book
@@ -424,6 +441,14 @@ function Chapter.openAsync(source, identity, book, opts, ops, cb)
     opts = opts or {}
     ops.book_title = ops.book_title or (book and book.title)
     local cancelled = false
+    local local_path, local_idx = existingLocalPath(identity, opts, ops)
+    if local_path then
+        -- 切章走 openAsync 是为了不弹准备框；本地已有文件时同样不得再 loadToc / ensure。
+        deliverLocalHit(identity, local_path, local_idx, function() return cancelled end, cb)
+        return { cancel = function()
+                cancelled = true
+            end }
+    end
     local active
     local progress = ops.progress or function() end
 
@@ -517,16 +542,10 @@ function Chapter.openWithUi(source, identity, book, opts, ops, cb)
 
     local local_path, local_idx = existingLocalPath(identity, opts, ops)
     if local_path then
-        local_path = variant(identity, local_idx, local_path)
-        local touched, touch_err = require("book.store").touch(local_path, identity, {
-            chapter_idx = local_idx,
-        })
         -- 本地命中直接交付。不要在切章时再启动后台 openAsync：它会重复读目录、
         -- 扫描/改写整份 HTML，并把这些同步工作塞回 UI 线程，抵消快开收益。
         -- 但身份登记不能省：旧缓存可能早于 chapters 表，ReaderReady 只按路径精确查库。
-        require("ui/uimanager"):nextTick(require("ui.guard").wrap("chapter callback", function()
-            if not cancelled then cb(touched and local_path or nil, touch_err) end
-        end))
+        deliverLocalHit(identity, local_path, local_idx, function() return cancelled end, cb)
         return { cancel = function()
                 cancelled = true
             end }
