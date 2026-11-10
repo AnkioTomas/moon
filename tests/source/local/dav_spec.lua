@@ -412,6 +412,48 @@ do
     Request.request = orig
 end
 
+-- ── listAsync Depth:infinity：按 href 还原多层相对路径，目录也解析 mtime ──
+do
+    local dav = Webdav.new({ url = "http://example.com/dav/" })
+    canned_res = { code = 207, body = [[<?xml version="1.0" encoding="utf-8"?>
+<d:multistatus xmlns:d="DAV:">
+  <d:response>
+    <d:href>/dav/</d:href>
+    <d:propstat><d:prop><d:resourcetype><d:collection/></d:resourcetype></d:prop></d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/dav/%E7%AC%AC%E4%B8%89%E7%89%A7%E5%9C%BA/</d:href>
+    <d:propstat><d:prop><d:resourcetype><d:collection/></d:resourcetype>
+      <d:getlastmodified>Tue, 02 Jan 2024 03:04:05 GMT</d:getlastmodified></d:prop></d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>/dav/%E7%AC%AC%E4%B8%89%E7%89%A7%E5%9C%BA/%E7%AC%AC%E4%B8%89%E7%89%A7%E5%9C%BA.epub</d:href>
+    <d:propstat><d:prop><d:resourcetype/><d:getcontentlength>88</d:getcontentlength></d:prop></d:propstat>
+  </d:response>
+  <d:response>
+    <d:href>http://example.com/dav/%E5%88%86%E7%B1%BB/%E7%B3%BB%E5%88%97/%E4%B9%A6.epub</d:href>
+    <d:propstat><d:prop><d:resourcetype/><d:getcontentlength>12</d:getcontentlength></d:prop></d:propstat>
+  </d:response>
+</d:multistatus>]] }
+    canned_err = nil
+    local entries
+    dav:listAsync(nil, function(e) entries = e end, { depth = "infinity", timeout = 120 })
+    Assert.len(entries, 3)
+    Assert.eq(entries[1].name, "第三牧场")
+    Assert.is_true(entries[1].is_dir)
+    Assert.eq(entries[1].path, "第三牧场")
+    Assert.eq(entries[1].mtime, 1704164645)
+    -- 文件按 name 字节序：书.epub < 第三牧场.epub
+    Assert.eq(entries[2].name, "书.epub")
+    Assert.eq(entries[2].path, "分类/系列/书.epub")
+    Assert.eq(entries[3].name, "第三牧场.epub")
+    Assert.eq(entries[3].path, "第三牧场/第三牧场.epub")
+    Assert.eq(entries[3].size, 88)
+    local req = captured[#captured]
+    Assert.eq(req.headers["Depth"], "infinity")
+    Assert.eq(req.timeout, 120)
+end
+
 -- ── 还原现场（不影响后续 spec 文件）────────────────────────
 package.preload["http.request"] = nil
 package.loaded["http.request"] = nil
