@@ -32,6 +32,7 @@ Cache.fetch(key, ttl, load, cb) 缓存解码结果，别手写「读缓存 → �
 ---@field max_bytes number|nil 仅 download；超限失败
 ---@field resume boolean|nil 仅 download：失败保留 .part，下次带 Range 续传；服务器回 200 时自动重下
 ---@field cache_ttl number|nil 仅 GET；>0 时走 http.cache，秒（按 auth_username 隔离）
+---@field stale_on_error boolean|nil 仅 GET；缓存未命中且请求失败时回落磁盘上的过期条目
 
 --- request / stream / download：一张表，必须带 url。
 ---@class HttpRequest : HttpRequestOpts
@@ -218,7 +219,7 @@ local function send(method, url, body, opts, cb)
                 done(res.body or "", nil, res)
             end
         end)
-    end, cb)
+    end, cb, { stale_on_error = opts.stale_on_error })
 end
 
 --- GET。成功 cb(body, nil, res)，失败 cb(nil, err, res)。

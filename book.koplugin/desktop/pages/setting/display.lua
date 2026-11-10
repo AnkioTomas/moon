@@ -258,6 +258,20 @@ function Display:appearanceSections(ctx)
             local conf = MoonSettings.get("ui")
             return Row.widget({
                 width = iw,
+                icon = "font_download", title = _("在线字体"),
+                subtitle = _("从网上获取可选字体；关闭后不再下载，已安装的仍可使用"),
+                toggle = conf.online_fonts ~= false,
+                callback = function()
+                    conf.online_fonts = conf.online_fonts == false
+                    MoonSettings.save("ui", conf)
+                    desktop:updateView()
+                end,
+            })
+        end,
+        function(iw)
+            local conf = MoonSettings.get("ui")
+            return Row.widget({
+                width = iw,
                 icon = "format_bold", title = _("字体加粗"),
                 subtitle = _("界面文字加粗，觉得字偏灰时打开，不影响书籍正文"),
                 toggle = conf.font_bold,

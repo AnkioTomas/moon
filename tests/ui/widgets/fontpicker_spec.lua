@@ -75,6 +75,7 @@ package.preload["ui.fonts.catalog"] = function()
             zip_size = 1000,
         }
     end
+    local online_enabled = true
     return {
         -- 缓存命中时同步回调。
         listAsync = function(cb)
@@ -85,6 +86,8 @@ package.preload["ui.fonts.catalog"] = function()
             prepare_callback = cb
             return { cancel = function() prepare_cancelled = true end }
         end,
+        onlineEnabled = function() return online_enabled end,
+        _setOnlineEnabled = function(v) online_enabled = v end,
     }
 end
 package.loaded["ui.fonts"] = nil
@@ -166,5 +169,34 @@ FontPicker.open{ title = "西文字体", initial_tab = "system", current_id = fu
 Assert.eq(Kit.shown[#Kit.shown].tabs.active, "system", "首次选西文字体直接打开系统字库")
 FontPicker.open{ initial_tab = "system", current_id = function() return "Font25.ttf" end }
 Assert.eq(Kit.shown[#Kit.shown].tabs.active, "local", "已选字体仍优先定位到所在分栏")
+
+-- 关闭在线字体：底部不出现「在线」栏；打开后四个分栏都在。
+do
+    local Catalog = require("ui.fonts.catalog")
+    local function tab_ids(shown)
+        local ids = {}
+        for _idx, tab in ipairs(shown.tabs.tabs) do ids[#ids + 1] = tab.id end
+        return table.concat(ids, ",")
+    end
+    Catalog._setOnlineEnabled(false)
+    FontPicker.open{ title = "字体" }
+    local off = Kit.shown[#Kit.shown]
+    Assert.eq(tab_ids(off), "user,local,system", "关闭后不展示在线分栏")
+    Assert.eq(off.tabs.active, "local", "当前字体仍定位到所在分栏")
+    for _idx, tab in ipairs(off.tabs.tabs) do
+        Assert.is_true(tab.id ~= "weread")
+        Assert.is_true(tab.text ~= "在线")
+    end
+    -- 即使指定打开在线栏，也应落到第一个可见栏，而不是空的在线页。
+    FontPicker.open{ title = "字体", initial_tab = "weread", current_id = function() return "" end }
+    Assert.eq(Kit.shown[#Kit.shown].tabs.active, "user")
+    Assert.eq(tab_ids(Kit.shown[#Kit.shown]), "user,local,system")
+
+    Catalog._setOnlineEnabled(true)
+    FontPicker.open{ title = "字体" }
+    local on = Kit.shown[#Kit.shown]
+    Assert.eq(tab_ids(on), "weread,user,local,system", "打开后仍有在线分栏")
+    Assert.eq(on.tabs.tabs[1].text, "在线")
+end
 
 return true

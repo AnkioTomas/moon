@@ -10,6 +10,8 @@ return {
         ui_font = "",
         ui_font_name = "",
         font_bold = false,
+        -- 在线字体默认开启；设为 false 后不再拉取或下载在线字体，已安装的仍可用。
+        online_fonts = true,
         tabbar_labels = true,
         grid_max_cols = 4,
         mesh_mask = true,
