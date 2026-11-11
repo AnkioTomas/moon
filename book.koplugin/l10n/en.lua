@@ -1063,6 +1063,7 @@ return {
     ["连接超时，请检查网络"] = "Connection timed out. Check your network",
     ["AI 未配置"] = "AI is not configured",
     ["AI 没有返回内容"] = "AI returned nothing",
+    ["AI 没有返回可用译文"] = "AI returned no usable translations",
     ["AI 返回的内容无法解析"] = "Could not parse the AI response",
     ["回答被截断：输出长度上限不够"] = "Response truncated: output token limit too low",
     ["%1小时"] = "%1 h",

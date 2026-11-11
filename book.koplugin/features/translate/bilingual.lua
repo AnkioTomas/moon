@@ -46,28 +46,161 @@ function ENGINES.edge.translate(texts, lang, cb)
     end)
 end
 
---- AI：JSON 数组进、JSON 数组出，条数对不上整批作废重试。
-function ENGINES.ai.translate(texts, lang, cb)
-    local name = require("features.translate.languages").displayName(require("ui/translator"), lang)
-    return require("ai").jsonExtract({
-        { role = "system", content = "You are a professional book translator. Translate every string in the JSON "
-            .. "array `items` into " .. name .. ". Keep the order and the number of items. Reply with JSON only: "
-            .. '{"items": ["...", "..."]}' },
-        { role = "user", content = JSON.encode({ items = texts }) },
-    }, { max_tokens = 4000 }, function(result, err)
-        local items = result and result.items
-        if type(items) ~= "table" or #items ~= #texts then
-            cb(nil, err or "AI returned mismatched items")
-            return
+---@param value any
+---@return string|nil
+local function trimAiText(value)
+    if type(value) ~= "string" then return nil end
+    local text = value:match("^%s*(.-)%s*$")
+    if text == "" then return nil end
+    return text
+end
+
+---@param value any
+---@return integer|nil
+local function parseAiId(value)
+    local id = value
+    if type(id) == "string" then id = tonumber(id) end
+    if type(id) == "number" and id > 0 and id % 1 == 0 then return id end
+    return nil
+end
+
+---@class BilingualAiItem
+---@field id integer
+---@field text string
+
+--- 从 AI 返回里按 id 对齐；条数不够时不按可能错位的顺序填入。
+--- 纯字符串且条数与请求一致时仍按顺序（旧协议）。
+---@param requested BilingualAiItem[]
+---@param items any
+---@return table<integer, string>
+local function alignAiItems(requested, items)
+    local out = {}
+    if type(items) ~= "table" or #requested == 0 then return out end
+    local by_id = {}
+    for _idx, item in ipairs(requested) do
+        by_id[item.id] = item
+    end
+    local rows, as_objects, as_strings = {}, false, false
+    for _idx, item in ipairs(items) do
+        if type(item) == "table" then
+            as_objects = true
+            rows[#rows + 1] = { id = parseAiId(item.id), text = trimAiText(item.text) }
+        elseif type(item) == "string" then
+            as_strings = true
+            rows[#rows + 1] = { text = trimAiText(item) }
         end
-        for _idx, item in ipairs(items) do
-            if type(item) ~= "string" then
-                cb(nil, "AI returned non-text item")
-                return
+    end
+    if as_objects then
+        local used = false
+        for _idx, row in ipairs(rows) do
+            if row.id and row.text and by_id[row.id] and not out[row.id] then
+                out[row.id] = row.text
+                used = true
             end
         end
-        cb(items)
+        if used or #items ~= #requested then return out end
+    elseif not as_strings or #items ~= #requested then
+        return out
+    end
+    for i, item in ipairs(requested) do
+        local text = rows[i] and rows[i].text
+        if text and not out[item.id] then out[item.id] = text end
+    end
+    return out
+end
+
+--- AI：每项带 id 与原文，按 id 对齐。能对上的先留下，缺的再补一次；
+--- 仍缺的本轮不写入缓存（下次续跑）。整批都没有可用译文才失败。
+function ENGINES.ai.translate(texts, lang, cb)
+    local name = require("features.translate.languages").displayName(require("ui/translator"), lang)
+    local aligned, current, stopped = {}, nil, false
+
+    ---@param ids integer[]
+    ---@return BilingualAiItem[]
+    local function requestOf(ids)
+        local requested = {}
+        for _idx, id in ipairs(ids) do
+            requested[#requested + 1] = { id = id, text = texts[id] }
+        end
+        return requested
+    end
+
+    ---@return integer[]
+    local function missingIds()
+        local ids = {}
+        for i = 1, #texts do
+            if not aligned[i] then ids[#ids + 1] = i end
+        end
+        return ids
+    end
+
+    local function filled()
+        local list = {}
+        for i = 1, #texts do list[i] = aligned[i] end
+        cb(list)
+    end
+
+    ---@param err any
+    ---@param fallback any
+    ---@return string
+    local function failReason(err, fallback)
+        if type(err) == "string" and err ~= "" then return err end
+        if type(fallback) == "string" and fallback ~= "" then return fallback end
+        return _("AI 没有返回可用译文")
+    end
+
+    ---@param ids integer[]
+    ---@param after fun(err: any)
+    local function request(ids, after)
+        local requested = requestOf(ids)
+        local handle
+        handle = require("ai").jsonExtract({
+            { role = "system", content = "You are a professional book translator. Translate every item in the JSON "
+                .. "array `items` into " .. name .. ". Each item has an `id` and `text`. Reply with JSON only: "
+                .. '{"items": [{"id": 1, "text": "..."}]}'
+                .. " Use the same id for each item. Do not skip, merge, or drop items." },
+            { role = "user", content = JSON.encode({ items = requested }) },
+        }, { max_tokens = 4000 }, function(result, err)
+            if current == handle then current = nil end
+            if stopped then return end
+            local items = result and result.items
+            if items == nil and type(result) == "table" and result[1] ~= nil then
+                items = result
+            end
+            local got = alignAiItems(requested, items)
+            for id, text in pairs(got) do
+                if not aligned[id] then aligned[id] = text end
+            end
+            after(err)
+        end)
+        if current == nil then current = handle end
+    end
+
+    local ids = {}
+    for i = 1, #texts do ids[i] = i end
+    request(ids, function(err)
+        if stopped then return end
+        local left = missingIds()
+        if #left == 0 then
+            filled()
+            return
+        end
+        request(left, function(retry_err)
+            if stopped then return end
+            if #missingIds() == #texts then
+                cb(nil, failReason(retry_err, err))
+                return
+            end
+            filled()
+        end)
     end)
+    return { cancel = function()
+        stopped = true
+        if current then
+            local cancel = current.cancel
+            if type(cancel) == "function" then cancel(current) end
+        end
+    end }
 end
 
 ---@param identity BookIdentity
@@ -103,16 +236,27 @@ local function loadCache(path)
 end
 
 --- 先补一个换行：上次被杀时留下的残行不能和这批第一条粘在一起（空行读时丢掉）。
+--- 只写入已对齐的非空译文；漏翻的不进缓存，下次续跑再补。
 ---@param path string
 ---@param texts string[]
----@param list string[]
+---@param list string[]|nil
+---@return integer
 local function appendCache(path, texts, list)
+    local lines = {}
+    for i, text in ipairs(texts) do
+        local translated = list and list[i]
+        if type(translated) == "string" and translated ~= "" then
+            lines[#lines + 1] = JSON.encode({ text, translated })
+        end
+    end
+    if #lines == 0 then return 0 end
     local f = assert(io.open(path, "ab"))
     assert(f:write("\n"))
-    for i, text in ipairs(texts) do
-        assert(f:write(JSON.encode({ text, list[i] }), "\n"))
+    for _idx, line in ipairs(lines) do
+        assert(f:write(line, "\n"))
     end
     assert(f:close())
+    return #lines
 end
 
 ---@param path string
@@ -376,6 +520,7 @@ local function task(input)
             close_pending = close
             local inflight, done_reading = 0, false
             local finished = found.total - found.pending
+            local gained, last_err = 0, nil
             local function pump()
                 if stopped then return end
                 while not stopped and inflight < engine.parallel and not done_reading do
@@ -390,15 +535,23 @@ local function task(input)
                         return engine.translate(texts, input.lang, settle)
                     end, function(list, err)
                         inflight = inflight - 1
-                        if not list then return finish({ ok = false, err = err }) end
-                        appendCache(input.cache, texts, list)
-                        finished = finished + #texts
-                        report(_("正在翻译…"), finished, found.total)
+                        local saved = appendCache(input.cache, texts, list)
+                        if saved > 0 then
+                            gained = gained + saved
+                            finished = finished + saved
+                            report(_("正在翻译…"), finished, found.total)
+                        elseif err then
+                            last_err = err
+                        end
                         pump()
                     end)
                 end
                 if not stopped and done_reading and inflight == 0 then
                     close_pending()
+                    -- 这一轮完全没有新译文才失败；有一部分已译就生成双语版，漏的下次续跑。
+                    if found.pending > 0 and gained == 0 then
+                        return finish({ ok = false, err = last_err or _("AI 没有返回可用译文") })
+                    end
                     produce()
                 end
             end
@@ -675,5 +828,6 @@ Bilingual._appendCache = appendCache
 Bilingual._task = task
 Bilingual._pendingBatches = pendingBatches
 Bilingual._originalXPointer = originalXPointer
+Bilingual._alignAiItems = alignAiItems
 
 return Bilingual
