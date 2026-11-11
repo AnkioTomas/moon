@@ -15,7 +15,7 @@ for _idx, id in ipairs({ "night", "wifi", "tasks", "rotate", "refresh", "screens
     end
 end
 for _idx, id in ipairs({
-    "toc", "refresh_toc", "font", "highlights", "bookorbit",
+    "toc", "refresh_toc", "auto_toc", "font", "highlights", "bookorbit",
     "push_progress", "pull_progress", "cache", "reload_chapter", "save_default",
 }) do
     package.preload["features.panel.actions.reader." .. id] = function()

@@ -483,4 +483,10 @@ function Session.refreshToc()
     return ChapterMode.refreshToc(Session._snapshot)
 end
 
+--- 手动重新生成整书自动目录，忽略已扫描标记；连续章节会话不可用。
+---@return boolean started
+function Session.autoToc()
+    return require("reader.session.auto_toc").rerun(Session._snapshot)
+end
+
 return Session
