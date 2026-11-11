@@ -59,7 +59,7 @@ local function excerpt(text, limit)
     if type(text) ~= "string" or text == "" then
         return ""
     end
-    local flat = text:gsub("%s+", " "):match("^%s*(.-)%s*$") or ""
+    local flat = Text.trim((text:gsub("%s+", " ")))
     if #flat <= limit then
         return flat
     end
@@ -74,14 +74,14 @@ local function itemTime(item)
     return type(t) == "string" and t or ""
 end
 
----@param a string
----@param b string
+---@param haystack any
+---@param needle string
 ---@return boolean
 local function contains(haystack, needle)
     if needle == "" then
         return true
     end
-    return (haystack or ""):lower():find(needle, 1, true) ~= nil
+    return type(haystack) == "string" and haystack:lower():find(needle, 1, true) ~= nil
 end
 
 ---@param row table
@@ -120,34 +120,35 @@ local function rowMatches(row, source_id, stable_id)
     return true
 end
 
----@param dto table
+---@param row table
+---@param item table
 ---@param q string
 ---@param typ string|nil
 ---@return boolean
-local function dtoMatches(dto, q, typ)
+local function itemMatches(row, item, q, typ)
     if typ == "highlight" or typ == "note" then
-        if dto.type ~= typ then
+        if Query.annotationType(item) ~= typ then
             return false
         end
     end
     if q == "" then
         return true
     end
-    return contains(dto.text, q) or contains(dto.note, q) or contains(dto.title, q)
-        or contains(dto.chapter, q) or contains(dto.authors, q)
+    return contains(item.text, q) or contains(item.note, q) or contains(row.title, q)
+        or contains(item.chapter, q) or contains(row.authors, q)
 end
 
 ---@param params table|nil
----@return { items: table[], page: integer, pages: integer, total: integer }
+---@return { items: table[], page: integer, pages: integer, total: integer }|nil, string|nil
 function Query.list(params)
     params = params or {}
     local page = math.max(1, math.floor(tonumber(params.page) or 1))
-    local q = type(params.q) == "string" and params.q:lower():match("^%s*(.-)%s*$") or ""
+    local q = type(params.q) == "string" and Text.trim(params.q:lower()) or ""
     local typ = type(params.type) == "string" and params.type or nil
     local source_id = params.source_id
     local stable_id = params.stable_id
     local matched = {}
-    NoteDB.each(function(row)
+    local ok = NoteDB.each(function(row)
         if not rowMatches(row, source_id, stable_id) then
             return
         end
@@ -156,14 +157,12 @@ function Query.list(params)
             return
         end
         for _idx, item in ipairs(items) do
-            if Query.isListable(item) then
-                local dto = listDto(row, item)
-                if dtoMatches(dto, q, typ) then
-                    matched[#matched + 1] = dto
-                end
+            if Query.isListable(item) and itemMatches(row, item, q, typ) then
+                matched[#matched + 1] = listDto(row, item)
             end
         end
     end)
+    if not ok then return nil, "query failed" end
     table.sort(matched, function(a, b)
         if a.datetime ~= b.datetime then
             return a.datetime > b.datetime
@@ -184,25 +183,22 @@ function Query.list(params)
 end
 
 ---@param params table|nil
----@return { books: table[], page: integer, pages: integer, total: integer }
+---@return { books: table[], page: integer, pages: integer, total: integer }|nil, string|nil
 function Query.books(params)
     params = params or {}
     local page = math.max(1, math.floor(tonumber(params.page) or 1))
-    local q = type(params.q) == "string" and params.q:lower():match("^%s*(.-)%s*$") or ""
+    local q = type(params.q) == "string" and Text.trim(params.q:lower()) or ""
     local typ = type(params.type) == "string" and params.type or nil
     local by, order = {}, {}
-    NoteDB.each(function(row)
+    local ok = NoteDB.each(function(row)
         local items = Normalize.decode(row.payload)
         if not items then
             return
         end
         local n = 0
         for _idx, item in ipairs(items) do
-            if Query.isListable(item) then
-                local dto = listDto(row, item)
-                if dtoMatches(dto, q, typ) then
-                    n = n + 1
-                end
+            if Query.isListable(item) and itemMatches(row, item, q, typ) then
+                n = n + 1
             end
         end
         if n == 0 then
@@ -227,6 +223,7 @@ function Query.books(params)
             book.authors = row.authors or ""
         end
     end)
+    if not ok then return nil, "query failed" end
     table.sort(order, function(a, b)
         local at, bt = a.title ~= "" and a.title or a.stable_id, b.title ~= "" and b.title or b.stable_id
         if at ~= bt then
@@ -299,7 +296,7 @@ end
 ---@return string|nil err
 function Query.exportFile()
     local books, order = {}, {}
-    NoteDB.each(function(row)
+    local queried = NoteDB.each(function(row)
         local items = Normalize.decode(row.payload)
         if not items then
             return
@@ -333,34 +330,48 @@ function Query.exportFile()
             end
         end
     end)
+    if not queried then return nil, "query failed" end
     local path = Paths.tmpname(".md")
     local f, err = io.open(path, "wb")
     if not f then
         logger.warn("notes export open failed", path, err)
         return nil, err or "open failed"
     end
-    f:write("# 高亮与笔记\n\n")
+    local function discard(export_err)
+        logger.warn("notes export failed", path, export_err)
+        local removed, remove_err = os.remove(path)
+        if not removed then logger.warn("notes export cleanup failed", path, remove_err) end
+        return nil, export_err
+    end
+    local function write(text)
+        local written, write_err = f:write(text)
+        if written then return true end
+        local closed, close_err = f:close()
+        if not closed then logger.warn("notes export close failed", path, close_err) end
+        return discard(write_err or "write failed")
+    end
+    local ok, write_err = write("# 高亮与笔记\n\n")
+    if not ok then return nil, write_err end
     for _idx, book in ipairs(order) do
-        f:write("# " .. mdEscape(book.title) .. "\n")
-        if book.authors ~= "" then
-            f:write(book.authors .. "\n")
-        end
-        f:write("\n")
+        ok, write_err = write("# " .. mdEscape(book.title) .. "\n"
+            .. (book.authors ~= "" and book.authors .. "\n" or "") .. "\n")
+        if not ok then return nil, write_err end
         for _c, chapter in ipairs(book.chapter_order) do
             if chapter ~= "" then
-                f:write("## " .. mdEscape(chapter) .. "\n\n")
+                ok, write_err = write("## " .. mdEscape(chapter) .. "\n\n")
+                if not ok then return nil, write_err end
             end
             for _i, item in ipairs(book.chapters[chapter]) do
-                f:write("> " .. (item.text:gsub("\n", "\n> ")) .. "\n")
-                if item.note ~= "" then
-                    f:write("\n" .. item.note .. "\n")
-                end
-                f:write("\n")
+                ok, write_err = write("> " .. (item.text:gsub("\n", "\n> ")) .. "\n"
+                    .. (item.note ~= "" and "\n" .. item.note .. "\n" or "") .. "\n")
+                if not ok then return nil, write_err end
             end
         end
-        f:write("\n")
+        ok, write_err = write("\n")
+        if not ok then return nil, write_err end
     end
-    f:close()
+    local closed, close_err = f:close()
+    if not closed then return discard(close_err or "close failed") end
     return path
 end
 

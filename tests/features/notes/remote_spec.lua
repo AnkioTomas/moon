@@ -138,10 +138,11 @@ Assert.eq(by_title.total, 32)
 -- 长中文摘录按 UTF-8 字符边界截断，不能把 JSON 弄成非法字节。
 do
     local Text = require("utils.text")
-    local long = string.rep("然而临到他走进屋来那苍白的脸", 20)
+    local long = string.rep("然而临到他走进屋来那苍白的脸", 20) .. "正文末尾词"
+    local long_note = string.rep("这是很长的备注", 20) .. "备注末尾词"
     Assert.is_true(#long > Query.EXCERPT)
     Assert.is_true(NoteDB.upsert("local", "utf8-book", 0, JSON.encode({
-        ann({ datetime = "2026-11-03 09:00:00", text = long, chapter = "长摘录" }),
+        ann({ datetime = "2026-11-03 09:00:00", text = long, note = long_note, chapter = "长摘录" }),
     }), 400))
     Assert.is_true(BookDB.upsert({ source_id = "local", stable_id = "utf8-book", title = "UTF8截断", authors = "", deleted = 0 }))
     local row = Query.list({ source_id = "local", stable_id = "utf8-book" })
@@ -150,6 +151,13 @@ do
     Assert.is_true(Text.isValidUtf8(excerpt))
     Assert.is_true(#excerpt > Query.EXCERPT) -- 正文截到上限后再加省略号
     Assert.is_true(excerpt:find("…", 1, true) ~= nil)
+    for _idx, q in ipairs({ "正文末尾词", "备注末尾词" }) do
+        local matched = Query.list({ q = q })
+        Assert.eq(matched.total, 1)
+        Assert.is_nil(matched.items[1].text:find("正文末尾词", 1, true))
+        Assert.is_nil(matched.items[1].note:find("备注末尾词", 1, true))
+        Assert.eq(Query.books({ q = q }).total, 1)
+    end
     -- 清空快照，避免后面的全局 books/export/HTTP 计数被这条打乱。
     Assert.is_true(NoteDB.upsert("local", "utf8-book", 0, "[]", 400))
 end
@@ -261,6 +269,72 @@ Assert.not_nil(file.path)
 Assert.is_true((assert(io.open(file.path, "rb")):read("*a")):find("活着句子1", 1, true) ~= nil)
 os.remove(file.path)
 Assert.is_nil(Remote.download("list"))
+
+-- 查询失败必须透传为失败，不返回空/部分列表，也不能生成导出附件。
+do
+    local each = NoteDB.each
+    local tmpname = require("utils.paths").tmpname
+    for _idx, partial in ipairs({ false, true }) do
+        NoteDB.each = function(fn)
+            if partial then fn({
+                source_id = "local", stable_id = "book-2", chapter_idx = 0,
+                payload = NoteDB.get("local", "book-2", 0).payload,
+            }) end
+            return false
+        end
+        require("utils.paths").tmpname = function() error("查询失败后不得创建导出") end
+        for _i, action in ipairs({ "list", "books" }) do
+            local result, err = Query[action]()
+            Assert.is_nil(result)
+            Assert.eq(err, "query failed")
+            local status, response = call("GET", action)
+            Assert.eq(status, 500)
+            Assert.not_nil(response.error)
+        end
+        local failed_path, err = Query.exportFile()
+        Assert.is_nil(failed_path)
+        Assert.eq(err, "query failed")
+        Assert.is_nil(Remote.download("export"))
+        Assert.eq(call("GET", "export"), 500)
+    end
+    NoteDB.each = each
+    require("utils.paths").tmpname = tmpname
+end
+
+-- 写入中途或 close 落盘失败：停止写入、关闭并清残件，HTTP 不发成功附件。
+do
+    local open, remove = io.open, os.remove
+    for _idx, close_failure in ipairs({ false, true }) do
+        local writes, closes, removed = 0, 0, nil
+        local err = "No space left on device"
+        io.open = function(pathname, mode)
+            Assert.eq(mode, "wb")
+            local file_handle = {}
+            function file_handle:write(_text)
+                writes = writes + 1
+                if not close_failure and writes == 3 then return nil, err end
+                return self
+            end
+            function file_handle:close()
+                closes = closes + 1
+                if close_failure then return nil, err end
+                return true
+            end
+            os.remove = function(target) Assert.eq(target, pathname); removed = target; return true end
+            return file_handle
+        end
+        local failed_path, export_err = Query.exportFile()
+        Assert.is_nil(failed_path)
+        Assert.eq(export_err, err)
+        Assert.eq(closes, 1)
+        Assert.not_nil(removed)
+        if not close_failure then Assert.eq(writes, 3, "第一次写失败后不得继续写") end
+        writes = 0
+        Assert.is_nil(Remote.download("export"))
+        Assert.eq(call("GET", "export"), 500)
+    end
+    io.open, os.remove = open, remove
+end
 
 Base.close()
 for _idx, suffix in ipairs({ "", "-wal", "-shm" }) do os.remove(db_path .. suffix) end

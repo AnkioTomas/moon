@@ -102,7 +102,7 @@
     function renderBooks(data) {
         var box = el('books');
         box.innerHTML = '';
-        var books = data.books || [];
+        var books = Array.isArray(data.books) ? data.books : [];
         bookPages = data.pages || 1;
         bookPage = data.page || 1;
         el('book-status').textContent = data.total
@@ -183,7 +183,7 @@
     function renderItems(data) {
         var list = el('list');
         list.innerHTML = '';
-        var items = data.items || [];
+        var items = Array.isArray(data.items) ? data.items : [];
         pageKeys = items.map(function (it) { return it.key; });
         itemPages = data.pages || 1;
         itemPage = data.page || 1;

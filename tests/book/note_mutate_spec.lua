@@ -181,6 +181,30 @@ for _idx, it in ipairs(kv_items) do
 end
 Assert.eq(kv_tomb, 1)
 
+-- 属主源已不可用：不允许通用清洗抹掉源字段、删除墓碑和原有同步状态。
+do
+    local Registry = require("source.registry")
+    local resolve = Registry.resolve
+    local pending = { datetime = wr.datetime, wr_bookmark_id = "pending", wr_deleted = true }
+    save("wechat", "unavailable", 0, { wr, pending }, true)
+    local before = NoteDB.get("wechat", "unavailable", 0)
+    Registry.resolve = function() return nil, "source unavailable" end
+    local unavailable_key = Note.itemKey("wechat", "unavailable", 0, wr)
+    for _idx, opts in ipairs({
+        { key = unavailable_key, note = "不能保存" },
+        { key = unavailable_key, remove = true },
+    }) do
+        local changed, change_err = Note.mutate(opts)
+        Assert.is_false(changed)
+        Assert.eq(change_err, "source unavailable")
+        local after = NoteDB.get("wechat", "unavailable", 0)
+        Assert.eq(after.payload, before.payload)
+        Assert.eq(after.updated_at, before.updated_at)
+        Assert.eq(after.sync_status, before.sync_status)
+    end
+    Registry.resolve = resolve
+end
+
 -- 当前正打开的章节：改备注会写进阅读器内存和 sidecar，避免下次保存盖掉。
 local open_item = item({
     text = "打开中的句子", note = "旧备注",
@@ -190,8 +214,9 @@ local open_item = item({
 })
 save("local", "open-book", 2, { open_item })
 local open_key = Note.itemKey("local", "open-book", 2, open_item)
-Assert.is_true(Note.mutate({ key = open_key, note = "远程改的" }))
+Assert.is_true(Note.mutate({ key = open_key, note = "  远程改的  " }))
 Assert.eq(live.annotations[1].note, "远程改的")
+Assert.eq(Normalize.decode(NoteDB.get("local", "open-book", 2).payload)[1].note, live.annotations[1].note)
 Assert.is_true(live.updated)
 Assert.is_true(live.flushed)
 Assert.eq(live.saved[1], "annotations")

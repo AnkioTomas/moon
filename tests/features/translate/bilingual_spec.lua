@@ -300,6 +300,19 @@ do
     Assert.is_nil(skipped[1])
     Assert.eq(skipped[2], "世界")
     Assert.is_nil(skipped[99], "请求里没有的 id 不能写入")
+    local unknown = align(req, {
+        { id = 98, text = "错误甲" }, { id = 99, text = "错误乙" }, { id = 100, text = "错误丙" },
+    })
+    Assert.is_nil(next(unknown), "对象编号全错也不能回退到顺序")
+    local mixed = align(req, { "错误甲", false, "错误丙" })
+    Assert.is_nil(next(mixed), "非法项不能删掉后按位置接到原文")
+    local objects = align(req, { "错误甲", { id = 3, text = "福" }, "错误丙" })
+    Assert.is_nil(objects[1])
+    Assert.is_nil(objects[2])
+    Assert.eq(objects[3], "福", "混合响应只能认显式匹配的对象编号")
+    local blanks = align(req, { "  ", " 世界 ", "福" })
+    Assert.is_nil(blanks[1])
+    Assert.eq(blanks[2], "世界", "纯字符串空项仍占原位置")
 end
 
 -- AI 翻译：少返回时保留已译、只补缺的；完全没有可用译文才失败。

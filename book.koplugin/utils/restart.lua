@@ -15,11 +15,6 @@ function Restart.now()
     UIManager:broadcastEvent(require("ui/event"):new("Restart"))
 end
 
---- 当前是否值得切到 no-framework（Kindle 且框架仍在跑）。
-function Restart.canNoFramework()
-    return require("utils.mem").canOfferNoFramework()
-end
-
 --- 先干净退出（走 Exit，不要 quit(85)，否则父进程 koreader.sh 会按原参数重启、框架还在），
 --- 再按官方入口拉起：koreader.sh --framework_stop。
 --- 后台脚本等当前 koreader.sh 退干净，避免和本轮退出抢实例。

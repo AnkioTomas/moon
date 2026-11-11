@@ -27,19 +27,6 @@ local _ = require("l10n").get("source.wechat")
 
 local Chapter = {}
 
---- App 章节包：chapters 填章 uid（"0" 是整书资源：样式表、公共图片）。
---- EPUB 是加密 zip，口令在响应头 encryptKey；TXT 支持 tar 和 zip。
---- bookVersion 用书籍版本；-2063 按回包的新版本或刷新详情后最多重试一次。
---- opts.offline：缓存全书 / 批量预取用 1（对齐官方）；单章在线阅读用 0。
---- opts.batch：pick 返回整表，cb(result, err)；否则 cb(text, err, style)。
----@param bookId string
----@param chapters string
----@param book_type '"epub"'|'"txt"'
----@param pick fun(files: table<string, string>): any
----@param cb function
----@param opts { offline?: boolean, batch?: boolean }|nil
----@return { cancel: fun() }
-
 --- 解包前预检：不够则弹窗（Kindle 可改走 no-framework）并失败，不 fork。
 ---@param need number
 ---@param fail fun(err: string)
@@ -58,6 +45,18 @@ local function affordPackage(need, fail)
     return false
 end
 
+--- App 章节包：chapters 填章 uid（"0" 是整书资源：样式表、公共图片）。
+--- EPUB 是加密 zip，口令在响应头 encryptKey；TXT 支持 tar 和 zip。
+--- bookVersion 用书籍版本；-2063 按回包的新版本或刷新详情后最多重试一次。
+--- opts.offline：缓存全书 / 批量预取用 1（对齐官方）；单章在线阅读用 0。
+--- opts.batch：pick 返回整表，cb(result, err)；否则 cb(text, err, style)。
+---@param bookId string
+---@param chapters string
+---@param book_type '"epub"'|'"txt"'
+---@param pick fun(files: table<string, string>): any, string|nil
+---@param cb function
+---@param opts { offline?: boolean, batch?: boolean }|nil
+---@return { cancel: fun() }
 local function downloadPackageAsync(bookId, chapters, book_type, pick, cb, opts)
     opts = opts or {}
     local offline = opts.offline and "1" or "0"
@@ -564,21 +563,22 @@ end
 
 local BATCH = 5
 
+---@class WechatPrefetchOps
+---@field fetchContent fun(identity: BookIdentity, chapter: BookChapter, cb: function): { cancel: fun() }
+---@field progress? fun(done: integer, total: integer)
+---@field offline boolean|nil
+---@field interval_seconds number|nil
+---@field persist_book boolean|nil
+---@field book Book|nil
+---@field reuse? fun(path: string): boolean
+---@field volatile boolean|nil
+
 --- 阅读预取 / 缓存全书：按官方五章一批（chapters 带 0）。
 ---@param identity BookIdentity
 ---@param toc BookChapter[]
 ---@param from_idx integer
 ---@param count integer
----@param ops {
----   fetchContent: fun(identity: BookIdentity, chapter: BookChapter, cb: function): { cancel: fun() },
----   progress: fun(done: integer, total: integer)|nil,
----   offline: boolean|nil,
----   interval_seconds: number|nil,
----   persist_book: boolean|nil,
----   book: Book|nil,
----   reuse: (fun(path: string): boolean)|nil,
----   volatile: boolean|nil,
---- }
+---@param ops WechatPrefetchOps
 ---@param cb fun(cached: integer, total: integer, failed: integer, err: any, failed_idx: integer[]|nil)|nil
 ---@return { cancel: fun() }
 function Chapter.prefetchBatchedAsync(identity, toc, from_idx, count, ops, cb)

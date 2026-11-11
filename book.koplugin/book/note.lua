@@ -15,6 +15,7 @@ local JSON = require("json")
 local NoteDB = require("book.note_db")
 local logger = require("utils.log")
 local Normalize = require("book.note.normalize")
+local Text = require("utils.text")
 
 local Note = {}
 local last_revision = 0
@@ -517,13 +518,6 @@ function Note.parseItemKey(key)
 end
 
 ---@param item table
----@param item_id string
----@return boolean
-local function itemMatches(item, item_id)
-    return itemId(item) == item_id
-end
-
----@param item table
 ---@return table
 local function copyItem(item)
     local out = {}
@@ -563,13 +557,13 @@ local function patchOpenDocument(source_id, stable_id, chapter_idx, item_id, not
     end
     if remove then
         for i = #live, 1, -1 do
-            if type(live[i]) == "table" and itemMatches(live[i], item_id) then
+            if type(live[i]) == "table" and itemId(live[i]) == item_id then
                 table.remove(live, i)
             end
         end
     else
         for _idx, item in ipairs(live) do
-            if type(item) == "table" and itemMatches(item, item_id) then
+            if type(item) == "table" and itemId(item) == item_id then
                 item.note = note
             end
         end
@@ -621,24 +615,19 @@ function Note.mutate(opts)
     if not previous then
         return false, "invalid snapshot"
     end
+    local new_note = type(opts.note) == "string" and Text.trim(opts.note) or nil
+    if opts.remove or new_note == "" then new_note = nil end
     local found, deleted
     local current = {}
     for _idx, item in ipairs(previous) do
-        if type(item) == "table" and itemMatches(item, parsed.item_id)
+        if type(item) == "table" and itemId(item) == parsed.item_id
             and not item.wr_deleted and not item.kavita_deleted then
             found = item
             if opts.remove then
                 deleted = copyItem(item)
             else
                 local copy = copyItem(item)
-                local note = opts.note
-                if type(note) == "string" then
-                    note = note:match("^%s*(.-)%s*$")
-                    if note == "" then note = nil end
-                else
-                    note = nil
-                end
-                copy.note = note
+                copy.note = new_note
                 current[#current + 1] = copy
             end
         else
@@ -648,10 +637,10 @@ function Note.mutate(opts)
     if not found then
         return false, "not found"
     end
-    local source
-    local ok_reg, Registry = pcall(require, "source.registry")
-    if ok_reg and Registry then
-        source = Registry.resolve(source_id)
+    local source, source_err = require("source.registry").resolve(source_id)
+    if not source then
+        logger.warn("book.note mutate source unavailable", source_id, source_err)
+        return false, source_err or "source unavailable"
     end
     local total_pages = found.total_pages
     local clean = Note.clean(source, current, total_pages)
@@ -667,16 +656,6 @@ function Note.mutate(opts)
     if not NoteDB.upsert(source_id, stable_id, chapter_idx, payload, updated_at) then
         logger.warn("book.note mutate save failed", stable_id)
         return false, "save failed"
-    end
-    local new_note = nil
-    if not opts.remove then
-        new_note = opts.note
-        if type(new_note) == "string" then
-            new_note = new_note:match("^%s*(.-)%s*$")
-            if new_note == "" then new_note = nil end
-        else
-            new_note = nil
-        end
     end
     patchOpenDocument(source_id, stable_id, chapter_idx, parsed.item_id, new_note, opts.remove == true)
     maybePushDirty(source_id)

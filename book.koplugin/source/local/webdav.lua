@@ -154,7 +154,7 @@ local function rememberVersion(self, version, device)
     writeFile(versionPath(self), version .. "\n" .. (device or ""))
 end
 
---- WebDAV 同步的一轮状态；各步骤只读写这张表，run.active 是当前在飞的可取消句柄。
+--- WebDAV 同步的一轮状态；串行步骤用 run.active，并发列目录用 run.list_jobs。
 ---@class WebdavRun
 ---@field upload_pending boolean|nil 是否还有待上传的本地书
 ---@field files string[] 本轮书架成员（相对路径）：books.sync 条目 + 未推的本地新增；刷新时再并入扫描结果
@@ -168,6 +168,8 @@ end
 ---@field covers table<string, boolean> 远端已有封面的 sidecar 键
 ---@field report fun(text: string, done: integer|nil, total: integer|nil) 真实步骤上报
 ---@field active table|nil
+---@field list_jobs table<table, boolean>|nil 在飞的子目录请求，完成即移除
+---@field list_errors integer|nil 本轮子目录读取失败次数
 ---@field cancelled boolean
 ---@field deleted integer|nil 本轮推删成功（墓碑已撕）的本数
 ---@field push_error string|nil 本地改动没推上去的第一条原因（脏标记保留，本轮其余步骤照跑）
@@ -302,6 +304,8 @@ local function listBooks(self, run, done)
     local root = self:webdavPath()
     local known = knownRemoteFiles()
     local mtimes, seen_mtimes = loadDirMtimes(self), {}
+    local list_jobs = {}
+    run.list_jobs = list_jobs
     run.list_errors = 0
 
     local function rememberMtime(rel, mtime)
@@ -333,13 +337,13 @@ local function listBooks(self, run, done)
         return true
     end
 
-    local function collect(folder_path, prefix, entries, depth)
+    local function collect(folder_path, prefix, entries, depth, complete_tree)
         local dirs = {}
         for _idx, entry in ipairs(entries) do
             if entry.name:sub(1, 1) ~= "." then
                 local rel = prefix ~= "" and prefix .. "/" .. entryRel(folder_path, entry) or entryRel(folder_path, entry)
                 if entry.is_dir then
-                    rememberMtime(rel, entry.mtime)
+                    if complete_tree then rememberMtime(rel, entry.mtime) end
                     if depth < BOOK_PATH_MAX_DEPTH and not skipUnchanged(rel, entry.mtime) then
                         dirs[#dirs + 1] = { path = entry.path, rel = rel, mtime = entry.mtime }
                     end
@@ -363,26 +367,38 @@ local function listBooks(self, run, done)
 
     local function walkEntries(path, prefix, depth, entries, finish)
         local dirs = collect(path, prefix, entries, depth)
+        local complete = true
         eachAsyncLimit(dirs, LIST_CONCURRENCY, function(dir, next_dir, index)
             if run.cancelled then return end
             run.report(T(_("正在列出远端目录 %1"), dir.path), index, #dirs)
-            local job = self.dav:listAsync(dir.path, function(child, err)
+            local job, completed
+            job = self.dav:listAsync(dir.path, function(child, err)
+                completed = true
+                if job then list_jobs[job] = nil end
                 if run.cancelled then return end
                 if not child then
                     -- 单本 / 单文件夹失败不中止整轮：记下、跳过，已列入的书仍保留。
                     require("utils.log").warn("book webdav list folder failed", dir.rel, err)
-                    run.list_errors = (run.list_errors or 0) + 1
+                    run.list_errors = run.list_errors + 1
+                    complete = false
                     adoptKnown(dir.rel)
                     return next_dir()
                 end
-                rememberMtime(dir.rel, dir.mtime)
-                walkEntries(dir.path, dir.rel, depth + 1, child, next_dir)
+                walkEntries(dir.path, dir.rel, depth + 1, child, function(child_complete)
+                    if child_complete then
+                        rememberMtime(dir.rel, dir.mtime)
+                    else
+                        complete = false
+                    end
+                    next_dir()
+                end)
             end, { timeout = folder_timeout, connect_timeout = folder_connect })
-            run.active = job
-        end, finish)
+            if job and not completed then list_jobs[job] = true end
+        end, function() finish(complete) end)
     end
 
     local function finishList(err)
+        run.list_jobs = nil
         if not err then saveDirMtimes(self, seen_mtimes) end
         done(err)
     end
@@ -412,7 +428,7 @@ local function listBooks(self, run, done)
                 if run.cancelled then return end
                 if entries and not (shallowOnly(entries) and collect(root, "", entries, 1)[1]) then
                     -- 一次拉到了深层文件，或根下没有还要下钻的目录。
-                    collect(root, "", entries, 1)
+                    collect(root, "", entries, 1, true)
                     -- collect 会把未跳过的子目录放进返回值；完整树里这些目录的文件已在 entries 中，
                     -- 不应再走 walk。上面的条件已排除「有待下钻目录」的浅列表。
                     return finishList()
@@ -1242,6 +1258,7 @@ function Webdav.scanWebdavAsync(self, cb, opts)
         return { cancel = function()
             run.cancelled = true
             if run.active and run.active.cancel then run.active:cancel() end
+            for job in pairs(run.list_jobs or {}) do job:cancel() end
         end }
     end)
 end

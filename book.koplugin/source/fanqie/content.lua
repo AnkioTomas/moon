@@ -4,6 +4,7 @@
 @module koplugin.book.source.fanqie.content
 --]]
 
+local Text = require("utils.text")
 local Content = {}
 
 local PUA_CODE = { { 58344, 58715 }, { 58345, 58716 } }
@@ -84,7 +85,7 @@ function Content.normalize_chapters(payload)
 
     local function trim(value)
         if type(value) ~= "string" then return nil end
-        value = value:match("^%s*(.-)%s*$")
+        value = Text.trim(value)
         if value == "" then return nil end
         return value
     end

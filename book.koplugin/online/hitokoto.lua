@@ -131,18 +131,11 @@ function Hitokoto.normalizeTypes(saved)
     return out
 end
 
---- 用户勾选的类型。读不到设置、缺省、空、脏数据都当成全部类型。
+--- 用户勾选的类型。缺省、空、脏数据都当成全部类型。
 ---@return string[]
 function Hitokoto.selectedTypes()
-    local saved
-    local ok, settings = pcall(require, "utils.settings")
-    if ok and type(settings) == "table" and type(settings.get) == "function" then
-        local home = settings.get("desktop.pages.home")
-        if type(home) == "table" then
-            saved = home.home_hitokoto_types
-        end
-    end
-    return Hitokoto.normalizeTypes(saved)
+    local home = require("utils.settings").get("desktop.pages.home")
+    return Hitokoto.normalizeTypes(home.home_hitokoto_types)
 end
 
 ---@return string
@@ -251,12 +244,7 @@ end
 --- 用户设置的联网刷新间隔；缺省、非法值按 1 小时。0 表示不联网。
 ---@return number
 function Hitokoto.configuredTtl()
-    local saved
-    local ok, settings = pcall(require, "utils.settings")
-    if ok and type(settings) == "table" and type(settings.get) == "function" then
-        local home = settings.get("desktop.pages.home")
-        if type(home) == "table" then saved = home.home_hitokoto_ttl end
-    end
+    local saved = require("utils.settings").get("desktop.pages.home").home_hitokoto_ttl
     if saved == 0 then return 0 end
     if type(saved) == "number" and saved > 0 then return saved end
     return 3600
