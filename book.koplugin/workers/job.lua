@@ -17,6 +17,7 @@ on_done / on_failed / on_cancelled 恰好触发一个；排队中的 fork 任务
 --]]
 
 local ffi = require("ffi")
+local bit = require("bit")
 local ffiUtil = require("ffi/util")
 local Posix = require("ffi/posix")
 local Protocol = require("workers.protocol")
@@ -33,6 +34,8 @@ local logger = require("utils.log")
 ---@field kind string
 ---@field state string
 ---@field timeout number|nil
+---@field exit_status string|nil
+---@field _reaped boolean|nil
 ---@field on_done fun(result: any)|nil
 ---@field on_failed fun(err: any)|nil
 ---@field on_cancelled fun(job: BookJob)|nil
@@ -96,7 +99,7 @@ function Job:_release()
     self.read_fd = nil
     self.poll_fn = nil
     self.timeout_fn = nil
-    reap(self.ui, self.pid, self.poll)
+    if not self._reaped then reap(self.ui, self.pid, self.poll) end
 end
 
 ---@param state "done"|"failed"|"cancelled"
@@ -106,7 +109,7 @@ function Job:_finish(state, result, err)
     self.settled = true
     self.state = state
     self.error = err
-    if state ~= "done" and self.pid then
+    if state ~= "done" and self.pid and not self._reaped then
         ffiUtil.terminateSubProcess(self.pid)
     end
     logger.dbg("book.worker", self.name, self.kind, state, err or "")
@@ -160,19 +163,41 @@ function Job:_read()
     end
 end
 
+--- ffiUtil.isSubProcessDone 会丢掉 waitpid 的状态，之后再也分不清正常退出与信号终止。
+function Job:_collect()
+    local status = ffi.new("int[1]")
+    local ret = ffi.C.waitpid(self.pid, status, ffi.C.WNOHANG)
+    if ret == 0 then return false end
+    if ret < 0 then
+        if ffi.errno() == ffi.C.EINTR then return false end
+        local err = "job waitpid failed: " .. Posix.strerror()
+        logger.warn("book.worker", self.name, err)
+        logger.flushSync()
+        self:_finish("failed", nil, err)
+        return true
+    end
+    local signal = bit.band(status[0], 127)
+    self.exit_status = signal == 0
+        and ("exit=" .. bit.rshift(status[0], 8)) or ("signal=" .. signal)
+    self._reaped = true
+    return true
+end
+
 function Job:_poll()
     if self.settled then return end
     self:_read()
     if self.settled then return end
-    if self.pid and ffiUtil.isSubProcessDone(self.pid) then
+    if self.pid and self:_collect() then
+        if self.settled then return end
         self:_read()
+        if self.settled then return end
         local ok, err = Protocol.finish(self.decoder)
-        if ok then
-            -- 子进程没留下任何结果就没了：多半是被 OOM killer 杀掉，留下可用内存供日志排查
-            local mem = require("workers.system"):memAvailableMB()
-            logger.warn("book.worker child died silently", self.name, mem and ("MemAvailable " .. math.floor(mem) .. "MB") or "")
-        end
-        self:_finish("failed", nil, ok and "job exited without result" or err)
+        local mem = require("workers.system"):memAvailableMB()
+        logger.warn("book.worker exited without result", self.name, "pid=" .. tostring(self.pid),
+            self.exit_status, "buffer=" .. #self.decoder.buffer,
+            mem and ("MemAvailable " .. math.floor(mem) .. "MB") or "")
+        logger.flushSync()
+        self:_finish("failed", nil, (ok and "job exited without result" or err) .. " (" .. self.exit_status .. ")")
         return
     end
     self.ui:scheduleIn(self.poll, self.poll_fn)
