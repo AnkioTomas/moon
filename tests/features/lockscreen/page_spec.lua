@@ -250,4 +250,46 @@ picker.on_select({}, "syst", "思源宋体")
 Assert.eq(log[1], "font:syst")
 Assert.len(ticks, 1, "选定字体后才重出图")
 
+
+-- 一言主体：附加「联网刷新」「句子类型」，与首页共用设置。
+local types_opts
+package.loaded["ui.hitokoto_settings"] = nil
+package.preload["ui.hitokoto_settings"] = function()
+    return {
+        ttl = function() return 3600 end,
+        ttlLabel = function() return "1 小时" end,
+        intervals = function()
+            return { { text = "1 小时", value = 3600 }, { text = "10 分钟", value = 600 } }
+        end,
+        typesStatus = function() return "全部" end,
+        setTtl = function(value) log[#log + 1] = "ttl:" .. tostring(value) end,
+        showTypes = function(opts) types_opts = opts end,
+    }
+end
+component_id, background_mode = "hitokoto", "bing"
+local hitokoto_rows = Lockscreen:rows(desktop)
+Assert.len(hitokoto_rows, 5, "一言主体多「联网刷新」和「句子类型」两行")
+local ttl_row = hitokoto_rows[4]({})
+Assert.eq(ttl_row.title, "联网刷新")
+Assert.eq(ttl_row.status, "1 小时")
+Assert.eq(ttl_row.current, 3600)
+ttl_row.callback()
+ticks, log = {}, {}
+Themed.last("list").on_select(3600)
+Assert.len(ticks, 0, "选中当前间隔不重出图")
+Themed.last("list").on_select(600)
+Assert.eq(log[#log - 2], "ttl:600")
+Assert.len(ticks, 1)
+local types_row = hitokoto_rows[5]({})
+Assert.eq(types_row.title, "句子类型")
+Assert.eq(types_row.status, "全部")
+types_row.callback()
+Assert.not_nil(types_opts)
+ticks, log = {}, {}
+types_opts.on_close()
+Assert.len(ticks, 0, "类型没改不重出图")
+types_opts.on_change()
+types_opts.on_close()
+Assert.len(ticks, 1, "类型改了才重出图")
+
 return true

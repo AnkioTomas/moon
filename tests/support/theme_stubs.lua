@@ -15,7 +15,7 @@
 
 local Themed = {}
 
-local NAMES = { "list", "sheet", "spin", "input", "toast", "confirm", "progress_dialog", "text_viewer", "qr" }
+local NAMES = { "list", "sheet", "spin", "input", "toast", "confirm", "progress_dialog", "text_viewer", "qr", "settings" }
 
 --- 登记桩并清空记录。
 function Themed.install()
@@ -47,6 +47,7 @@ function Themed.install()
                     self:close()
                     if self.on_background then self.on_background() end
                 end
+                o.updateView = function() end
                 o.setItems = function(self, items) self.items = items end
                 o.bytes = function(self, done, total) self.progress = { done, total } end
                 o.updates = {}
