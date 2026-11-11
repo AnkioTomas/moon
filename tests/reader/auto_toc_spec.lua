@@ -252,3 +252,107 @@ do
     Assert.is_nil(session.auto_toc_job)
     AutoToc.stop(nil)
 end
+
+
+-- 快捷面板重跑：已扫描且已有自定义目录时仍可再生成，并覆盖旧目录
+do
+    jobs, shown = {}, {}
+    local session, settings, footer = mkSession(BOOK, { scanned = true, handmade = true })
+    session.ui.handmade.toc = { { title = "旧章", xpointer = "/old", page = 1, depth = 1 } }
+    Assert.is_true(AutoToc.rerun(session))
+    Assert.len(jobs, 1)
+    jobs[1].opts.on_done(jobs[1].result)
+    local handmade = session.ui.handmade
+    Assert.is_true(handmade.toc_enabled)
+    Assert.eq(handmade.setup_calls, 1)
+    Assert.eq(footer(), 1)
+    Assert.len(handmade.toc, 4)
+    Assert.eq(handmade.toc[1].title, "前言")
+    Assert.is_true(settings.moon_auto_toc)
+    Assert.is_nil(session.auto_toc_job)
+    Assert.len(shown, 1)
+    Assert.eq(shown[1].text, "已自动生成目录（4 章）")
+end
+
+-- 开书自动路径仍然只跑一次：已扫描后 start 不再扫，rerun 才会再扫
+do
+    jobs = {}
+    local session = mkSession(BOOK, { scanned = true })
+    AutoToc.start(session)
+    Assert.len(jobs, 0)
+    Assert.is_true(AutoToc.rerun(session))
+    Assert.len(jobs, 1)
+end
+
+-- 连续章节身份不跑；分页 / 无 handmade 也不跑
+do
+    jobs = {}
+    local session = mkSession(BOOK)
+    session.identity = { chapter_idx = 1 }
+    Assert.is_false(AutoToc.rerun(session))
+    AutoToc.rerun((mkSession(BOOK, { paging = true })))
+    local no_handmade = mkSession(BOOK)
+    no_handmade.ui.handmade = nil
+    Assert.is_false(AutoToc.rerun(no_handmade))
+    Assert.is_false(AutoToc.rerun(nil))
+    Assert.len(jobs, 0)
+end
+
+-- 扫描进行中不重复开任务，并提示正在执行
+do
+    jobs, shown = {}, {}
+    local session = mkSession(BOOK)
+    AutoToc.start(session)
+    Assert.len(jobs, 1)
+    Assert.is_false(AutoToc.rerun(session))
+    Assert.len(jobs, 1)
+    Assert.len(shown, 1)
+    Assert.eq(shown[1].text, "「自动补目录」正在执行，请稍后再试")
+    jobs[1].opts.on_done(jobs[1].result)
+    Assert.is_nil(session.auto_toc_job)
+    -- 完成后可以再跑
+    local before = #jobs
+    Assert.is_true(AutoToc.rerun(session))
+    Assert.len(jobs, before + 1)
+end
+
+-- 手动重跑扫不到足够章节时要有明确提示；失败同样要反馈
+do
+    jobs, shown = {}, {}
+    local session, settings = mkSession({ "第一章 唯一", "正文。" }, { scanned = true })
+    Assert.is_true(AutoToc.rerun(session))
+    jobs[1].opts.on_done(jobs[1].result)
+    Assert.is_false(session.ui.handmade.toc_enabled)
+    Assert.is_true(settings.moon_auto_toc)
+    Assert.len(shown, 1)
+    Assert.eq(shown[1].text, "未找到足够的章节标题，无法生成目录")
+
+    jobs, shown = {}, {}
+    session, settings = mkSession(BOOK)
+    Assert.is_true(AutoToc.rerun(session))
+    jobs[1].opts.on_failed("boom")
+    -- 失败不记已扫描（与自动路径一致，下次可重试）
+    Assert.is_nil(settings.moon_auto_toc)
+    Assert.is_nil(session.auto_toc_job)
+    Assert.len(shown, 1)
+    Assert.eq(shown[1].text, "boom")
+end
+
+-- 无自定义目录时，手动重跑仍先试备用目录；成功则提示且不扫描
+do
+    jobs, shown = {}, {}
+    local session, settings, footer = mkSession(BOOK, {
+        scanned = true,
+        headings = { "雨夜", "归途", "尾声" },
+    })
+    Assert.is_true(AutoToc.rerun(session))
+    Assert.len(jobs, 0)
+    Assert.eq(session.ui.document.alt_builds, 1)
+    Assert.is_true(settings.alternative_toc)
+    Assert.is_true(settings.moon_auto_toc)
+    Assert.contains(session.ui.events, "UpdateToc")
+    Assert.eq(footer(), 1)
+    Assert.is_false(session.ui.handmade.toc_enabled)
+    Assert.len(shown, 1)
+    Assert.eq(shown[1].text, "已自动生成目录（3 章）")
+end
