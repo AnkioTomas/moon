@@ -335,7 +335,6 @@ end
 
 ---@param desktop BookDesktop
 function M:showSettings(desktop)
-    local layout = M.layout()
     local function refresh()
         desktop:onEvent("home_refresh")
     end
@@ -347,38 +346,37 @@ function M:showSettings(desktop)
         MoonSettings.save("desktop.pages.home", home)
         refresh()
     end
-    require("ui.themes.widgets.sheet"):new{
+    require("ui.themes.widgets.settings"):new{
         title = M.label,
-        items = {
-            { buttons = {
-                { text = layout == "stack" and _("✓ 堆叠") or _("堆叠"), callback = function()
-                    if M.layout() == "stack" then return end
-                    M.saveLayout("stack")
-                    refresh()
-                end },
-                { text = layout == "stereo" and _("✓ 立体") or _("立体"), callback = function()
-                    if M.layout() == "stereo" then return end
-                    M.saveLayout("stereo")
-                    refresh()
-                end },
-            } },
-            { text = M.showTitle() and _("✓ 显示书名") or _("显示书名"), callback = function()
-                toggle("home_recent_cards_show_title", M.showTitle)
-            end },
-            { text = M.showAuthor() and _("✓ 显示作者") or _("显示作者"), callback = function()
-                toggle("home_recent_cards_show_author", M.showAuthor)
-            end },
-            { text = M.showProgress() and _("✓ 显示进度") or _("显示进度"), callback = function()
-                toggle("home_recent_cards_show_progress", M.showProgress)
-            end },
-            { text = M.showFirst() and _("✓ 显示第一本") or _("显示第一本"), callback = function()
-                toggle("home_recent_cards_show_first", M.showFirst)
-            end },
-            { text = M.hideFinished() and _("✓ 隐藏已读完") or _("隐藏已读完"), callback = function()
-                M.saveHideFinished(not M.hideFinished())
-                refresh()
-            end },
-        },
+        items = function()
+            return {
+                {
+                    title = _("布局"),
+                    items = {
+                        { value = "stack", text = _("堆叠") },
+                        { value = "stereo", text = _("立体") },
+                    },
+                    current = M.layout(),
+                    on_select = function(value)
+                        M.saveLayout(value)
+                        refresh()
+                    end,
+                },
+                { title = _("显示书名"), toggle = true, checked = M.showTitle(),
+                    callback = function() toggle("home_recent_cards_show_title", M.showTitle) end },
+                { title = _("显示作者"), toggle = true, checked = M.showAuthor(),
+                    callback = function() toggle("home_recent_cards_show_author", M.showAuthor) end },
+                { title = _("显示进度"), toggle = true, checked = M.showProgress(),
+                    callback = function() toggle("home_recent_cards_show_progress", M.showProgress) end },
+                { title = _("显示第一本"), toggle = true, checked = M.showFirst(),
+                    callback = function() toggle("home_recent_cards_show_first", M.showFirst) end },
+                { title = _("隐藏已读完"), toggle = true, checked = M.hideFinished(),
+                    callback = function()
+                        M.saveHideFinished(not M.hideFinished())
+                        refresh()
+                    end },
+            }
+        end,
     }:show()
 end
 

@@ -126,47 +126,57 @@ function M:showSettings(desktop)
     local function refresh()
         desktop:onEvent("home_refresh")
     end
-    ---@param n number
-    local function pickRows(n)
-        if M.rows() == n then return end
-        M.saveRows(n)
-        refresh()
-    end
-    local rows = M.rows()
-    require("ui.themes.widgets.sheet"):new{
+    require("ui.themes.widgets.settings"):new{
         title = M.label,
-        items = {
-            { buttons = {
-                { text = rows == MIN_ROWS and _("✓ 一行") or _("一行"), callback = function() pickRows(MIN_ROWS) end },
-                { text = rows == MAX_ROWS and _("✓ 两行") or _("两行"), callback = function() pickRows(MAX_ROWS) end },
-            } },
-            { text = T(_("每行 %1 本"), M.cols()), callback = function()
-                require("ui.themes.widgets.spin"):new{
-                    title = _("每行数量"),
-                    fields = { { value = M.cols(), min = MIN_COLS, max = MAX_COLS } },
-                    callback = function(value)
-                        M.saveCols(value)
+        items = function(page)
+            return {
+                {
+                    title = _("行数"),
+                    items = {
+                        { value = MIN_ROWS, text = _("一行") },
+                        { value = MAX_ROWS, text = _("两行") },
+                    },
+                    current = M.rows(),
+                    on_select = function(value)
+                        if M.rows() == value then return end
+                        M.saveRows(value)
                         refresh()
                     end,
-                }:show()
-            end },
-            { text = M.showTitle() and _("✓ 显示标题") or _("显示标题"), callback = function()
-                M.saveShowTitle(not M.showTitle())
-                refresh()
-            end },
-            { text = M.showAuthor() and _("✓ 显示作者") or _("显示作者"), callback = function()
-                M.saveShowAuthor(not M.showAuthor())
-                refresh()
-            end },
-            { text = M.showFirst() and _("✓ 显示第一本") or _("显示第一本"), callback = function()
-                M.saveShowFirst(not M.showFirst())
-                refresh()
-            end },
-            { text = M.hideFinished() and _("✓ 隐藏已读完") or _("隐藏已读完"), callback = function()
-                M.saveHideFinished(not M.hideFinished())
-                refresh()
-            end },
-        },
+                },
+                { title = T(_("每行 %1 本"), M.cols()), chevron = true, callback = function()
+                    require("ui.themes.widgets.spin"):new{
+                        title = _("每行数量"),
+                        fields = { { value = M.cols(), min = MIN_COLS, max = MAX_COLS } },
+                        callback = function(value)
+                            M.saveCols(value)
+                            refresh()
+                            page:updateView()
+                        end,
+                    }:show()
+                    return false
+                end },
+                { title = _("显示标题"), toggle = true, checked = M.showTitle(),
+                    callback = function()
+                        M.saveShowTitle(not M.showTitle())
+                        refresh()
+                    end },
+                { title = _("显示作者"), toggle = true, checked = M.showAuthor(),
+                    callback = function()
+                        M.saveShowAuthor(not M.showAuthor())
+                        refresh()
+                    end },
+                { title = _("显示第一本"), toggle = true, checked = M.showFirst(),
+                    callback = function()
+                        M.saveShowFirst(not M.showFirst())
+                        refresh()
+                    end },
+                { title = _("隐藏已读完"), toggle = true, checked = M.hideFinished(),
+                    callback = function()
+                        M.saveHideFinished(not M.hideFinished())
+                        refresh()
+                    end },
+            }
+        end,
     }:show()
 end
 

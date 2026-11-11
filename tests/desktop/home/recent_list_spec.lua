@@ -1,5 +1,5 @@
 --[[--
-最近阅读网格：行列设置夹紧、按行列算高度、分页只重建自己、暂停下发 HomePause、设置 Sheet；
+最近阅读网格：行列设置夹紧、按行列算高度、分页只重建自己、暂停下发 HomePause、设置弹窗；
 分配高度不够两行时压封面，不能往屏幕外画。
 @module tests.desktop.pages.home.recent_list_spec
 --]]
@@ -155,27 +155,33 @@ do -- 空书架：居中提示，不画网格
     shelf = saved
 end
 
-do -- 设置 Sheet：行数按钮行、列数 Spin、标题 / 作者开关，改完通知首页刷新
+do -- 设置弹窗：行数单选、列数 Spin、标题 / 作者开关，改完通知首页刷新、弹窗就地更新
     List.saveRows(2)
     List.saveCols(4)
+    events = {}
     List:showSettings(desktop)
-    local sheet = Themed.last("sheet")
-    Assert.eq(sheet.title, "最近阅读列表")
-    Assert.eq(sheet.items[1].buttons[1].text, "一行")
-    Assert.eq(sheet.items[1].buttons[2].text, "✓ 两行")
-    Assert.eq(sheet.items[2].text, "每行 4 本")
-    Assert.eq(sheet.items[3].text, "✓ 显示标题")
-    Assert.eq(sheet.items[4].text, "显示作者")
-    sheet.items[1].buttons[2].callback()
+    local page = Themed.last("settings")
+    Assert.eq(page.title, "最近阅读列表")
+    local items = page.items(page)
+    Assert.eq(items[1].title, "行数")
+    Assert.eq(items[1].current, 2)
+    Assert.eq(items[1].items[1].text, "一行")
+    Assert.eq(items[1].items[2].text, "两行")
+    Assert.eq(items[2].title, "每行 4 本")
+    Assert.is_true(items[3].checked)
+    Assert.is_false(items[4].checked)
+    items[1].on_select(2)
     Assert.len(events, 0, "选中当前值不刷新")
-    sheet.items[1].buttons[1].callback()
+    items[1].on_select(1)
     Assert.eq(List.rows(), 1)
     Assert.eq(events[1], "home_refresh")
-    sheet.items[3].callback()
+    items = page.items(page)
+    Assert.eq(items[1].current, 1)
+    items[3].callback()
     Assert.is_false(List.showTitle())
-    sheet.items[4].callback()
+    items[4].callback()
     Assert.is_true(List.showAuthor())
-    sheet.items[2].callback()
+    items[2].callback()
     local spin = Themed.last("spin")
     Assert.eq(spin.title, "每行数量")
     Assert.eq(spin.fields[1].value, 4)
@@ -184,15 +190,19 @@ do -- 设置 Sheet：行数按钮行、列数 Spin、标题 / 作者开关，改
     spin.callback(5)
     Assert.eq(List.cols(), 5)
     Assert.len(events, 4)
+    items = page.items(page)
+    Assert.eq(items[2].title, "每行 5 本")
     List.saveShowTitle(true)
     List.saveShowAuthor(false)
-    Assert.eq(sheet.items[5].text, "显示第一本", "缺省不显示第一本")
-    sheet.items[5].callback()
+    items = page.items(page)
+    Assert.is_false(items[5].checked, "缺省不显示第一本")
+    items[5].callback()
     Assert.is_true(List.showFirst())
     Assert.len(events, 5)
     List.saveShowFirst(false)
-    Assert.eq(sheet.items[6].text, "隐藏已读完", "缺省不隐藏已读完")
-    sheet.items[6].callback()
+    items = page.items(page)
+    Assert.is_false(items[6].checked, "缺省不隐藏已读完")
+    items[6].callback()
     Assert.is_true(List.hideFinished())
     Assert.len(events, 6)
     List.saveHideFinished(false)
