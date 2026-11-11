@@ -288,6 +288,26 @@ function Lockscreen:rows(desktop)
             status = preview ~= text and preview .. "…" or preview,
             callback = function() editMessage(desktop) end,
         }
+    elseif component.id == "hitokoto" then
+        local HitokotoSettings = require("ui.hitokoto_settings")
+        rows[#rows + 1] = choiceRow(desktop, {
+            icon = "schedule", title = _("联网刷新"), status = HitokotoSettings.ttlLabel(),
+            items = HitokotoSettings.intervals(), current = HitokotoSettings.ttl(),
+            apply = function(value) HitokotoSettings.setTtl(value) end,
+        })
+        rows[#rows + 1] = navRow{
+            icon = "format_quote", title = _("句子类型"),
+            status = HitokotoSettings.typesStatus(),
+            callback = function()
+                local changed = false
+                HitokotoSettings.showTypes({
+                    on_change = function() changed = true end,
+                    on_close = function()
+                        if changed then refreshAfterChange(desktop) end
+                    end,
+                })
+            end,
+        }
     end
 
     local path = generatedPath()
