@@ -98,8 +98,8 @@ function StatsDB.removeIdentity(source_id, stable_id)
 end
 
 --- 退出登录：删掉这个源的全部阅读统计。
-function StatsDB.removeSource(source_id)
-    return DB.removeSource("reading_stats", source_id)
+function StatsDB.removeSource(source_id, stable_prefix, exclude)
+    return DB.removeSource("reading_stats", source_id, stable_prefix, exclude)
 end
 
 --- 只重推本机采集的历史，云端合成桶和 KOReader 导入记录不能冒充新阅读。

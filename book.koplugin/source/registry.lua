@@ -291,12 +291,15 @@ function Registry.create(id)
     return source, err
 end
 
---- 关闭并丢弃全部缓存实例（下次 resolve / current 按新配置重建）。
-function Registry.invalidate()
-    require("source.auth").reset()
+--- 关闭并丢弃缓存实例；省略 id 时仍清全部（下次 resolve / current 按新配置重建）。
+---@param source_id string|nil
+function Registry.invalidate(source_id)
+    if not source_id then require("source.auth").reset() end
     for id, source in pairs(instances) do
-        instances[id] = nil
-        source:close()
+        if not source_id or id == source_id then
+            instances[id] = nil
+            source:close()
+        end
     end
 end
 

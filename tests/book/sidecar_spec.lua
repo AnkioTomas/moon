@@ -19,6 +19,11 @@ util.splitFileNameSuffix = function(file)
     if string.find(file, "%.") == nil then return file, "" end
     return file:match("(.*)%.(.*)")
 end
+util.splitFilePathName = function(file)
+    if file == nil or file == "" then return "", "" end
+    if not file:find("/", 1, true) then return "", file end
+    return file:match("(.*/)(.*)")
+end
 
 local location = "doc"
 G_reader_settings = {
@@ -33,6 +38,7 @@ G_reader_settings = {
 local calls = {}
 package.loaded["readhistory"] = {
     fileDeleted = function(_, path) calls[#calls + 1] = "history-del:" .. path end,
+    removeItemByPath = function(_, path) calls[#calls + 1] = "history-clear:" .. path end,
     updateItem = function(_, from, to) calls[#calls + 1] = "history-mv:" .. from .. ">" .. to end,
 }
 package.loaded["readcollection"] = {
@@ -121,6 +127,49 @@ do
     Assert.is_true(exists(dir .. "/h.sdr/metadata.epub.lua"))
     Assert.contains(calls, "history-mv:" .. dir .. "/h.epub>" .. dir .. "/科幻/h.epub")
     location = "doc"
+end
+
+-- 清阅读不删原书 / 排版 / 收藏 / 自定义封面，旧格式笔记及备份不能再导回来。
+do
+    calls = {}
+    local book = dir .. "/reading.epub"
+    write(book, "original")
+    write(dir .. "/reading.sdr/cover.png", "cover")
+    local settings = DocSettings:open(book)
+    settings:saveSetting("font_size", 22)
+    settings:saveSetting("last_xpointer", "/body/p[1]")
+    settings:saveSetting("percent_finished", 0.7)
+    settings:saveSetting("annotations", { { text = "笔记" } })
+    settings:saveSetting("bookmarks", { { page = 1 } })
+    settings:saveSetting("annotations_rolling", { { text = "旧笔记" } })
+    settings:saveSetting("book_note_linked", { old = true })
+    settings:saveSetting("book_note_orphans", { { text = "待收线" } })
+    Assert.not_nil(settings:flush())
+    Assert.is_true(Sidecar.clearReading(book))
+    local after = DocSettings:open(book)
+    Assert.eq(after:readSetting("font_size"), 22)
+    Assert.is_nil(after:readSetting("annotations"))
+    Assert.is_nil(after:readSetting("bookmarks"))
+    Assert.is_nil(after:readSetting("annotations_rolling"))
+    Assert.is_nil(after:readSetting("book_note_linked"))
+    Assert.is_nil(after:readSetting("book_note_orphans"))
+    Assert.is_nil(after:readSetting("last_xpointer"))
+    Assert.is_nil(after:readSetting("percent_finished"))
+    Assert.is_true(exists(book))
+    Assert.is_true(exists(dir .. "/reading.sdr/cover.png"))
+    Assert.is_false(exists(dir .. "/reading.sdr/metadata.epub.lua.old"))
+    Assert.contains(calls, "history-clear:" .. book)
+    Assert.is_false(table.concat(calls, ","):find("coll%-del:") ~= nil)
+
+    -- 只剩 .old 的边车同样清理；写盘失败要向调用方报错。
+    write(dir .. "/old.sdr/metadata.epub.lua.old", "return {annotations={{text='old'}},font_size=19}")
+    Assert.is_true(Sidecar.clearReading(dir .. "/old.epub"))
+    Assert.is_nil(DocSettings:open(dir .. "/old.epub"):readSetting("annotations"))
+    Assert.eq(DocSettings:open(dir .. "/old.epub"):readSetting("font_size"), 19)
+    local original_flush = DocSettings.flush
+    DocSettings.flush = function() return nil end
+    Assert.is_false(Sidecar.clearReading(book))
+    DocSettings.flush = original_flush
 end
 
 require("ffi/util").purgeDir(dir)
