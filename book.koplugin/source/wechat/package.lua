@@ -9,6 +9,7 @@
 --]]
 
 local bit = require("bit")
+local ffi = require("ffi")
 local JSON = require("json")
 local Aes = require("crypto.aes")
 local Inflate = require("utils.inflate")
@@ -71,26 +72,23 @@ local function zipDecrypt(data, password)
         k2 = crcUpdate(k2, bit.rshift(k1, 24)) % 4294967296
     end
     for i = 1, #password do update(password:byte(i)) end
-    local out = {}
+    local size = math.max(0, #data - 12)
+    local out = ffi.new("uint8_t[?]", size)
     for i = 1, #data do
         local t = bit.bor(k2, 2) % 65536
         local c = bit.bxor(data:byte(i), bit.band(bit.rshift(t * bit.bxor(t, 1), 8), 0xff))
         update(c)
-        out[i] = c
+        if i > 12 then out[i - 13] = c end
     end
-    local chunks = {}
-    for i = 13, #out, 4096 do
-        chunks[#chunks + 1] = string.char(unpack(out, i, math.min(i + 4095, #out)))
-    end
-    return table.concat(chunks)
+    return ffi.string(out, size)
 end
 
 local function u16(s, p) local a, b = s:byte(p, p + 1) return a + b * 256 end
 local function u32(s, p) local a, b, c, d = s:byte(p, p + 3) return a + b * 256 + c * 65536 + d * 16777216 end
 
---- 解压峰值增量（字节）：中央目录里各文件未压缩大小之和，再加上当前最大压缩块（边解边换）。
+--- 解压峰值增量（字节）：正文分块与拼接各一份；密文切片、解密缓冲与解密字符串各一份最大压缩块。
 --- `data` 已在内存里，MemAvailable 已包含它；预检只问额外还要多少。
---- 解析失败时按 3× 包长估计（解密副本 + 膨胀）。此为根据 Package.unzip 分配行为的假设，已对照实现。
+--- 另留 64KB 给 inflate 输出缓冲；解析失败时沿用 3× 包长估计。
 ---@param data string
 ---@return number
 function Package.unzipNeed(data)
@@ -110,7 +108,7 @@ function Package.unzipNeed(data)
         if csize > max_c then max_c = csize end
         p = p + 46 + nlen + elen + clen
     end
-    return sum_un + max_c
+    return 2 * sum_un + 3 * max_c + 65536
 end
 
 --- 解开整个 zip（走中央目录，数据描述符模式也能用）。

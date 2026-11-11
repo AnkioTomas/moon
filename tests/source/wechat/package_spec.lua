@@ -17,8 +17,8 @@ Assert.eq(files["b.txt"], "second")
 
 local need = Package.unzipNeed(zip)
 local unpacked = #files["a.txt"] + #files["b.txt"]
-Assert.is_true(need >= unpacked, "unzipNeed 至少覆盖解出体积")
-Assert.is_true(need < 3 * #zip, "能解析中央目录时不应退回 3× 包长")
+Assert.eq(need, 2 * unpacked + 3 * 34 + 65536,
+    "预检覆盖正文拼接、最大加密条目的三份临时缓冲与 inflate 输出块")
 Assert.eq(Package.unzipNeed("not a zip"), 3 * #"not a zip")
 
 local bad, err = Package.unzip(zip, "wrong")
