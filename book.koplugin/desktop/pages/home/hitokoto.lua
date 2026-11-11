@@ -123,10 +123,7 @@ end
 
 --- 组件在页上才拉一言；没放一言组件的用户不产生后台任务。
 function M:onActivate()
-    local ttl = MoonSettings.get("desktop.pages.home").home_hitokoto_ttl
-    if ttl == 0 then return end
-    Hitokoto.ttl = ttl
-    Hitokoto:ensure()
+    Hitokoto:ensureConfigured()
 end
 
 function M:onDeactivate()
