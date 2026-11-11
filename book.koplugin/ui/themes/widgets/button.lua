@@ -5,12 +5,13 @@
   [██文案██]   primary  实心反色（确认、选中的筛选 chip）
      文案      ghost    无底无边（标题栏、翻页条图标）
 
-  Button:new{ text = "确定", icon = "check", variant = "primary", width = w, callback = fn }
+  Button:new{ text = "确定", icon = "check", variant = "primary", width = w, callback = fn, hold_callback = fn }
 
 width/height 是物理像素：缺省宽按内容加左右内边距，高取 control.height。
 size = "small"：工具条用的紧凑规格（caption 字号、小图标、小内边距，高见 Button.heightOf）。
 trailing = true：图标放在文字后（下拉 chip：text = "全部", icon = "arrow_drop_down"）。
-enabled=false 时文字与边框改 disabled 色，点按被吞掉不回调。
+enabled=false 时文字与边框改 disabled 色，点按与长按都被吞掉不回调。
+可选 hold_callback：长按走 ges="hold"（与 Tap.wrap / Row 相同），与 callback 互不影响。
 
 @module koplugin.book.ui.themes.widgets.button
 --]]
@@ -33,6 +34,7 @@ local Text = require("ui.themes.widgets.text")
 ---@field width number|nil
 ---@field height number|nil
 ---@field callback fun()|nil
+---@field hold_callback fun()|nil
 local Button = InputContainer:extend{
     text = nil,
     icon = nil,
@@ -43,6 +45,7 @@ local Button = InputContainer:extend{
     width = nil,
     height = nil,
     callback = nil,
+    hold_callback = nil,
 }
 
 --- 按钮内容：图标、文字或两者横排。
@@ -108,11 +111,22 @@ function Button:init()
             GestureRange:new{ ges = "tap", range = function() return self.dimen end },
         },
     }
+    if self.hold_callback then
+        self.ges_events.HoldThemeButton = {
+            GestureRange:new{ ges = "hold", range = function() return self.dimen end },
+        }
+    end
 end
 
 ---@return boolean
 function Button:onTapThemeButton()
     if self.enabled and self.callback then self.callback() end
+    return true
+end
+
+---@return boolean
+function Button:onHoldThemeButton()
+    if self.enabled and self.hold_callback then self.hold_callback() end
     return true
 end
 

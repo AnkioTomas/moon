@@ -174,7 +174,7 @@ do
     webdav = true
 end
 
--- 自动同步（打开桌面）节流：窗口内跳过；失败不占窗口，下次立即重试；force / dirty_only 不受节流
+-- 自动同步（打开桌面）节流：窗口内跳过；失败不占窗口，下次立即重试；force / manual / dirty_only 不受节流
 do
     local real_time, now = os.time, 1000
     os.time = function() return now end
@@ -201,18 +201,41 @@ do
     Assert.eq(runs, 1, "节流窗口内不跑")
     Assert.eq(result.reason, "throttled")
     auto({ force = true })
-    Assert.eq(runs, 2, "手动刷新不节流")
+    Assert.eq(runs, 2, "手动全量刷新不节流")
+    now = 1031
+    auto({ manual = true })
+    Assert.eq(runs, 3, "手动增量刷新不节流")
     now = 1061
     fail = true
     auto()
-    Assert.eq(runs, 3)
+    Assert.eq(runs, 4)
     Assert.eq(err, "WebDAV 认证失败")
     now = 1062
     fail = false
     auto()
-    Assert.eq(runs, 4, "失败后不等节流窗口")
+    Assert.eq(runs, 5, "失败后不等节流窗口")
     Client.scanWebdavAsync = scan
     os.time = real_time
+end
+
+-- 手动增量：跳过自动节流，但 WebDAV 仍走日常同步（不 refresh 另列远端目录）
+do
+    local Client = require("source.local.client")
+    local seen, runs = nil, 0
+    local scan = Client.scanWebdavAsync
+    Client.scanWebdavAsync = function(_, cb, opts)
+        runs = runs + 1
+        seen = opts
+        cb(true)
+        return { cancel = function() end }
+    end
+    local s = Local.new()
+    s._auto_sync_at = os.time()
+    s:syncBooksAsync({ manual = true }, function() end)
+    Stubs.flush()
+    Assert.eq(runs, 1, "manual 跳过自动节流")
+    Assert.is_true(seen.refresh ~= true, "增量不另列远端目录")
+    Client.scanWebdavAsync = scan
 end
 
 -- 手动 force 只跳过节流，不把 retry_covers 传给扫盘（封面另开补齐进程）

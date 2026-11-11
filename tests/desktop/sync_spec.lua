@@ -1,6 +1,6 @@
 ---@diagnostic disable: undefined-field, missing-fields, redundant-parameter, missing-parameter, inject-field, assign-type-mismatch, param-type-mismatch, cast-type-mismatch, return-type-mismatch, cast-local-type
 
---[[-- desktop.sync：桌面可见后台同步、图书馆强制刷新、未配置引导。 --]]
+--[[-- desktop.sync：桌面可见后台同步、图书馆手动刷新（单击增量、长按全量）、未配置引导。 --]]
 
 local Assert = require("support.assert")
 
@@ -395,7 +395,9 @@ source.syncBooksAsync = function(_, opts, cb)
 end
 Sync.refresh(desktop)
 local first = pending[#pending]
-Assert.is_true(first.opts.force)
+Assert.is_nil(first.opts.force, "单击走增量")
+Assert.is_true(first.opts.manual)
+Assert.eq(Tasks.tasks()[1].title, "Test · 增量刷新")
 Assert.eq(#Tasks.tasks(), 1)
 Assert.eq(Tasks.tasks()[1].kind, "sync")
 Assert.len(followed, 1)
@@ -404,31 +406,47 @@ first.opts.on_progress("正在上传 a.epub", 1, 3)
 Assert.eq(Tasks.tasks()[1].text, "正在上传 a.epub")
 Assert.eq(Tasks.tasks()[1].count, 1)
 
--- 刷新中再点：拒绝入队并提示，不取消重来、不叠加、不动在飞状态。
+-- 刷新中再点（含改成长按全量）：拒绝入队并提示，不取消重来、不叠加、不动在飞状态。
 Sync.refresh(desktop)
+Sync.refresh(desktop, true)
 Assert.len(pending, 1)
 Assert.eq(cancels, 0)
 Assert.len(followed, 1)
-Assert.len(rejected, 1)
+Assert.len(rejected, 2)
 Assert.eq(rejected[1].reason, "running")
 Assert.eq(rejected[1].task, followed[1])
+Assert.eq(rejected[2].reason, "running")
 Assert.is_true(desktop._books_sync.test ~= nil)
 first.cb({ skipped = true })
 Assert.is_nil(desktop._books_sync.test)
 Assert.eq(#Tasks.tasks(), 0)
 
--- 自动后台同步在飞时手动刷新：取代它；旧请求迟到的进度与结果丢弃。
+-- 自动后台同步在飞时手动刷新（增量或全量）都取代它；旧请求迟到的进度与结果丢弃。
 Sync.open(desktop)
 local auto = pending[#pending]
 Assert.is_nil(auto.opts.force)
+Assert.is_nil(auto.opts.manual)
 Sync.refresh(desktop)
 Assert.eq(cancels, 1)
-local forced = pending[#pending]
-Assert.is_true(forced.opts.force)
+local incremental = pending[#pending]
+Assert.is_nil(incremental.opts.force)
+Assert.is_true(incremental.opts.manual)
 auto.opts.on_progress("旧请求", 2, 3)
 auto.cb({ skipped = true })
 Assert.is_true(desktop._books_sync.test ~= nil, "旧请求结果不落地")
 Assert.is_nil(Tasks.tasks()[1].text)
+incremental.cb({ skipped = true })
+Assert.is_nil(desktop._books_sync.test)
+Assert.eq(#Tasks.tasks(), 0)
+
+Sync.open(desktop)
+auto = pending[#pending]
+Sync.refresh(desktop, true)
+Assert.eq(cancels, 2)
+local forced = pending[#pending]
+Assert.is_true(forced.opts.force)
+Assert.is_true(forced.opts.manual)
+Assert.eq(Tasks.tasks()[1].title, "Test · 全量刷新")
 forced.cb({ skipped = true })
 Assert.is_nil(desktop._books_sync.test)
 Assert.eq(#Tasks.tasks(), 0)
@@ -518,13 +536,23 @@ do
     holds["local"]({ skipped = true })
     enabled.wechat = true
 
-    -- 手动刷新：多个源一起入队，不逐个弹进度窗，只提示一次。
+    -- 手动增量刷新：多个源一起入队，不逐个弹进度窗，只提示一次。
     for i = #followed, 1, -1 do followed[i] = nil end
     synced = {}
     Sync.refresh(desk)
+    Assert.eq(table.concat(synced, ","), "local,wechat")
+    Assert.len(followed, 0)
+    Assert.eq(Themed.last("toast").text, "正在增量同步 2 个数据源，可在顶栏查看进度")
+    holds["local"]({ skipped = true })
+    holds.wechat({ skipped = true })
+
+    -- 长按全量：同样只提示一次，并带全量标志。
+    Themed.made = {}
+    synced = {}
+    Sync.refresh(desk, true)
     Assert.eq(table.concat(synced, ","), "local:force,wechat:force")
     Assert.len(followed, 0)
-    Assert.eq(Themed.last("toast").text, "正在同步 2 个数据源，可在顶栏查看进度")
+    Assert.eq(Themed.last("toast").text, "正在全量同步 2 个数据源，可在顶栏查看进度")
     holds["local"]({ skipped = true })
     holds.wechat({ skipped = true })
 
@@ -532,7 +560,7 @@ do
     desk.source = pool.moon
     synced = {}
     Sync.refresh(desk)
-    Assert.eq(table.concat(synced, ","), "local:force,wechat:force")
+    Assert.eq(table.concat(synced, ","), "local,wechat")
     holds["local"]({ skipped = true })
     holds.wechat({ skipped = true })
 
