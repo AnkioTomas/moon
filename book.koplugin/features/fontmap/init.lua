@@ -1,5 +1,6 @@
 --[[--
-开书检测缺失字体并提示映射；阅读快捷面板修改映射后自动重载当前书籍。
+开书检测缺失字体并提示映射；已保存的全局映射在文档加载时注入别名，对所有书生效。
+阅读快捷面板修改或清除映射后重载当前书籍一次；扫描结束后不再改已构建的样式，避免反复重载。
 扫描在子进程只读书籍，别名只加在当前文档用户样式中，不改原书或下载缓存。
 
 @module koplugin.book.features.fontmap
@@ -93,10 +94,14 @@ function FontMap.new(ui)
         return self.setStyleSheet(doc, file, appended)
     end
     -- 映射明确要求采用本书字体名；仅覆盖当前文档，不改全局「忽略出版方字体名」设置。
+    -- 必须在首次排版前生效：等扫描后再改会让 CRE DOM 过期，触发部分重排自动化反复 reloadDocument。
     self.setFontFamilyFontFaces = document.setFontFamilyFontFaces
     if self.setFontFamilyFontFaces then
         document.setFontFamilyFontFaces = function(doc, families, ignore)
-            if self.names and next(self.active) and self:stylesEnabled() then ignore = false end
+            if self:stylesEnabled() then
+                self:prepare()
+                if next(self.active) then ignore = false end
+            end
             return self.setFontFamilyFontFaces(doc, families, ignore)
         end
     end
@@ -109,24 +114,6 @@ function FontMap:stylesEnabled()
         and self.ui.document.configurable.embedded_css ~= 0
 end
 
---- 仅应用当前书用到的映射；不存在的目标字体重新列为缺失，不拖累其它书。
-function FontMap:refresh()
-    self:prepare()
-    local active = {}
-    for _idx, name in ipairs(self.names or {}) do
-        if self.active[name] then active[name] = self.active[name] end
-    end
-    self.active = active
-    self.alias_css = FontMap.css(active)
-    if next(active) then
-        self.ui.document.configurable.embedded_fonts = 1
-        self.ui.doc_settings:saveSetting("copt_embedded_fonts", 1)
-        self.ui.document:setEmbeddedFonts(1)
-        if self.ui.font then self.ui.font:updateFontFamilyFonts() end
-        self.ui:handleEvent(require("ui/event"):new("ApplyStyleSheet"))
-    end
-end
-
 ---@return table<string, boolean>
 function FontMap:installed()
     local installed = {}
@@ -137,6 +124,7 @@ end
 
 ---@return string[]
 function FontMap:missing()
+    self:prepare()
     local installed, missing = self:installed(), {}
     for _idx, name in ipairs(self.names or {}) do
         if not installed[name:lower()] and not self.active[name] then missing[#missing + 1] = name end
@@ -238,7 +226,8 @@ function FontMap:start(requested)
             self.job = nil
             if self.closed or not self:stylesEnabled() then return end
             self.names = names
-            if #names > 0 then self:refresh() end
+            -- 只更新扫描结果并决定是否弹窗；样式已在加载时注入，这里再 ApplyStyleSheet 会触发反复重载。
+            self:prepare()
             local show = self.requested and names or self:missing()
             if #show > 0 or self.requested then self:show(show) end
         end),
@@ -272,12 +261,29 @@ function FontMap.onCreate(plugin)
     ui._book_fontmap = FontMap.new(ui)
 end
 
+--- 有可用的全局映射时，在 ReadSettings 之前打开本书内嵌字体，让首次排版就带上别名。
+---@param plugin BookPlugin
+---@param doc_settings table
+function FontMap.onDocSettingsLoad(plugin, doc_settings)
+    local state = plugin.ui and plugin.ui._book_fontmap
+    if not state or not require("utils.settings").get("features.fontmap").enabled then return end
+    local css = doc_settings:readSetting("copt_embedded_css")
+    if css == nil and state.ui.document.configurable then
+        css = state.ui.document.configurable.embedded_css
+    end
+    if css == 0 then return end
+    state:prepare()
+    if next(state.active) then
+        doc_settings:saveSetting("copt_embedded_fonts", 1)
+    end
+end
+
 ---@param plugin BookPlugin
 function FontMap.onExit(plugin)
     local state = plugin.ui and plugin.ui._book_fontmap
     if state then state:close(); plugin.ui._book_fontmap = nil end
 end
 
-FontMap.events = { CloseDocument = FontMap.onExit }
+FontMap.events = { CloseDocument = FontMap.onExit, DocSettingsLoad = FontMap.onDocSettingsLoad }
 
 return FontMap
