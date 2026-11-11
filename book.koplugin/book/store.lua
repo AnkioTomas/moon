@@ -25,6 +25,66 @@ local _ = require("gettext")
 
 local Store = {}
 
+--- 包括已不在书库里的阅读记录；清索引后仍能凭身份找到本地原书与工作目录。
+---@param source_id string
+---@param opts BookDataCleanup
+---@return table<string, boolean>|nil
+local function readingPaths(source_id, opts)
+    for _idx, name in ipairs({ "book.progress_db", "book.note_db", "book.stats_db" }) do require(name) end
+    local paths, ids = {}, {}
+    local where, args = DB.identityClause(source_id, opts.stable_prefix, opts.exclude)
+    local ok = DB.each([[
+        SELECT stable_id, path FROM (
+            SELECT source_id, stable_id, path FROM books
+            UNION SELECT source_id, stable_id, path FROM chapters
+            UNION SELECT source_id, stable_id, NULL FROM pending_progress
+            UNION SELECT source_id, stable_id, NULL FROM notes
+            UNION SELECT source_id, stable_id, NULL FROM reading_stats
+        ) WHERE stable_id<>'' AND ]] .. where .. ";", args, function(row)
+        ids[row[1]] = true
+        if row[2] and row[2] ~= "" then paths[row[2]] = true end
+        if source_id == "local" and row[1]:sub(1, 9) ~= "webdav://" then paths[row[1]] = true end
+    end)
+    if not ok then return nil end
+    local lfs = require("libs/libkoreader-lfs")
+    local function walk(dir)
+        for name in lfs.dir(dir) do
+            if name ~= "." and name ~= ".." then
+                local path = dir .. "/" .. name
+                local mode = lfs.symlinkattributes(path, "mode")
+                if mode == "directory" and name:sub(-4) == ".sdr" then
+                    for file in lfs.dir(path) do
+                        local suffix = file:match("^metadata%.(.+)%.lua$") or file:match("^metadata%.(.+)%.lua%.old$")
+                        if suffix then paths[path:sub(1, -5) .. "." .. suffix] = true end
+                    end
+                elseif mode == "directory" then walk(path)
+                elseif mode == "file" then paths[path] = true end
+            end
+        end
+    end
+    for stable_id in pairs(ids) do
+        local dir = Paths.bookWorkDir(stable_id, source_id)
+        if lfs.symlinkattributes(dir, "mode") == "directory" then walk(dir) end
+    end
+    return paths
+end
+
+--- 只清本机记录，原书和下载文件不动；文件系统失败时不继续删库，调用方提示重试。
+---@param source_id string
+---@param opts BookDataCleanup
+---@return boolean
+function Store.clearSourceData(source_id, opts)
+    assert(opts.books or opts.reading, "no data selected")
+    if opts.reading then
+        local paths = readingPaths(source_id, opts)
+        if not paths then return false end
+        for path in pairs(paths) do
+            if not require("book.sidecar").clearReading(path) then return false end
+        end
+    end
+    return BookDB.clearSourceData(source_id, opts)
+end
+
 --- 保存列表中的书籍元数据；没有身份列的临时条目跳过。
 ---@param books table
 function Store.rememberMany(books)

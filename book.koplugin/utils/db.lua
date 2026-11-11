@@ -361,12 +361,13 @@ function DB.removeIdentity(tbl, source_id, stable_id)
     return DB.exec("DELETE FROM " .. tbl .. " WHERE source_id=? AND stable_id=?;", source_id, stable_id) ~= nil
 end
 
---- 删掉表里某个源的全部行（退出登录清本地记录；不留墓碑，也不上传）。
+--- 删掉表里某个源的本地记录，不留墓碑，也不上传。
 ---@param tbl string 表名（调用方保证可信，不含用户输入）
 ---@param source_id string
 ---@return boolean
-function DB.removeSource(tbl, source_id)
-    return DB.exec("DELETE FROM " .. tbl .. " WHERE source_id=?;", source_id) ~= nil
+function DB.removeSource(tbl, source_id, stable_prefix, exclude)
+    local where, args = DB.identityClause(source_id, stable_prefix, exclude)
+    return DB.exec("DELETE FROM " .. tbl .. " WHERE " .. where .. ";", unpack(args)) ~= nil
 end
 
 --- 把 source_id（单源字符串或多源表）收成 `col=?` / `col IN (…)`，并追加绑定参数。
@@ -391,6 +392,21 @@ function DB.sourceClause(column, source_id, args)
         args[#args + 1] = source_id[i]
     end
     return column .. " IN (" .. table.concat(placeholders, ",") .. ")", args
+end
+
+--- 身份范围，可包含或排除 stable_id 前缀；instr 区分大小写，且不把 % / _ 当通配符。
+---@param source_id string
+---@param stable_prefix string|nil
+---@param exclude boolean|nil
+---@return string
+---@return table
+function DB.identityClause(source_id, stable_prefix, exclude)
+    local where, args = DB.sourceClause("source_id", source_id)
+    if stable_prefix then
+        where = where .. " AND instr(stable_id,?)" .. (exclude and "<>1" or "=1")
+        args[#args + 1] = stable_prefix
+    end
+    return where, args
 end
 
 return DB

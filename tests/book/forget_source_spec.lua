@@ -158,6 +158,133 @@ Assert.is_true(not table.concat(stats_ids, ","):find("/mnt/us/documents/a.epub",
 Assert.is_true(BookDB.forgetOldRoot("local", "/mnt/us/documents", "/mnt/us/documents"), "同根空操作")
 Assert.is_true(BookDB.forgetOldRoot("local", "", "/mnt/us/books"), "无旧根空操作")
 
+-- 主动清理：书库与阅读数据分开选择，不产生远端删除墓碑。
+local cancelled = {}
+package.loaded["workers.tasks"] = { cancelPrefixed = function(key) cancelled[#cancelled + 1] = key end }
+local function seed(source_id, stable_id)
+    Assert.is_true(BookDB.upsert({
+        source_id = source_id, stable_id = stable_id, title = "保留标题", read_at = 123,
+    }))
+    Assert.is_true(ProgressDB.upsert(source_id, stable_id, { fraction = 0.6 }))
+    Assert.is_true(NoteDB.upsert(source_id, stable_id, 0, "{}"))
+    Assert.is_true(StatsDB.add({
+        source_id = source_id, stable_id = stable_id, record_type = "page",
+        page = 1, start_time = 3000, duration = 20, total_pages = 10,
+    }))
+    Assert.is_true(SummaryDB.put(source_id, stable_id, 1, "章", "摘要"))
+    Assert.is_true(XrayDB.upsert(source_id, stable_id, { kind = "character", name = "人物", aliases = {} }))
+    Assert.is_true(ChapterDB.upsert({
+        path = "/cleanup/" .. source_id .. "/" .. stable_id .. ".html",
+        source_id = source_id, stable_id = stable_id, chapter_idx = 1,
+    }))
+end
+seed("clear-books", "one")
+Assert.is_true(BookDB.clearSourceData("clear-books", { books = true }))
+Assert.is_nil(BookDB.get("clear-books", "one"))
+Assert.is_nil(ChapterDB.get("/cleanup/clear-books/one.html"))
+Assert.not_nil(ProgressDB.get("clear-books", "one"))
+Assert.not_nil(NoteDB.get("clear-books", "one", 0))
+Assert.not_nil(SummaryDB.get("clear-books", "one", 1))
+Assert.len(XrayDB.list("clear-books", "one"), 1)
+Assert.eq(tonumber(DB.rowexec("SELECT count(*) FROM reading_stats WHERE source_id=?;", "clear-books")), 1)
+Assert.len(BookDB.pendingDeleteIds("clear-books"), 0)
+
+seed("clear-reading", "one")
+Assert.is_true(DB.exec("UPDATE books SET read_state=1, read_at=123 WHERE source_id=?;", "clear-reading"))
+Assert.is_true(BookDB.clearSourceData("clear-reading", { reading = true }))
+Assert.eq(BookDB.get("clear-reading", "one").title, "保留标题")
+Assert.eq(tonumber(DB.rowexec("SELECT read_at FROM books WHERE source_id=?;", "clear-reading")), 0)
+Assert.eq(BookDB.get("clear-reading", "one").read_state, 0)
+Assert.not_nil(ChapterDB.get("/cleanup/clear-reading/one.html"))
+Assert.is_nil(ProgressDB.get("clear-reading", "one"))
+Assert.is_nil(NoteDB.get("clear-reading", "one", 0))
+Assert.is_nil(SummaryDB.get("clear-reading", "one", 1))
+Assert.len(XrayDB.list("clear-reading", "one"), 0)
+Assert.eq(tonumber(DB.rowexec("SELECT count(*) FROM reading_stats WHERE source_id=?;", "clear-reading")), 0)
+Assert.eq(cancelled[1], "xray\0clear-reading")
+
+-- WebDAV / 本地分开；孤立阅读行也清掉，另一源同名身份不受影响。
+seed("local", "/cleanup-local.epub")
+seed("local", "webdav://cleanup.epub")
+seed("another", "webdav://cleanup.epub")
+Assert.is_true(NoteDB.upsert("local", "webdav://orphan.epub", 0, "{}"))
+Assert.is_true(ProgressDB.upsert("local", "webdav://orphan.epub", { fraction = 0.2 }))
+Assert.is_true(BookDB.clearSourceData("local", {
+    books = true, reading = true, stable_prefix = "webdav://",
+}))
+Assert.is_nil(BookDB.get("local", "webdav://cleanup.epub"))
+Assert.is_nil(NoteDB.get("local", "webdav://orphan.epub", 0))
+Assert.is_nil(ProgressDB.get("local", "webdav://orphan.epub"))
+Assert.not_nil(NoteDB.get("local", "/cleanup-local.epub", 0))
+Assert.not_nil(ProgressDB.get("another", "webdav://cleanup.epub"))
+Assert.len(XrayDB.list("another", "webdav://cleanup.epub"), 1)
+Assert.is_true(NoteDB.upsert("local", "webdav://keep.epub", 0, "{}"))
+Assert.is_true(BookDB.clearSourceData("local", {
+    reading = true, stable_prefix = "webdav://", exclude = true,
+}))
+Assert.not_nil(BookDB.get("local", "/cleanup-local.epub"))
+Assert.is_nil(NoteDB.get("local", "/cleanup-local.epub", 0))
+Assert.not_nil(NoteDB.get("local", "webdav://keep.epub", 0))
+
+-- 某张表拒绝删除时整个库事务回滚，不出现书库清了、笔记清到一半的状态。
+seed("rollback", "one")
+local original_exec = DB.exec
+DB.exec = function(sql, ...)
+    if sql:find("^DELETE FROM notes") then return nil end
+    return original_exec(sql, ...)
+end
+Assert.is_false(BookDB.clearSourceData("rollback", { books = true, reading = true }))
+DB.exec = original_exec
+Assert.not_nil(BookDB.get("rollback", "one"))
+Assert.not_nil(ProgressDB.get("rollback", "one"))
+Assert.not_nil(NoteDB.get("rollback", "one", 0))
+Assert.not_nil(ChapterDB.get("/cleanup/rollback/one.html"))
+Assert.errors(function() BookDB.clearSourceData("rollback", {}) end, "no data selected")
+
+-- Store 收集当前路径、孤立阅读身份及衍生版 / 缺原文件的边车；不删原始文件。
+local original = Config.dir() .. "/cleanup-original.epub"
+local file = assert(io.open(original, "wb"))
+file:write("original")
+file:close()
+Assert.is_true(BookDB.upsert({ source_id = "paths", stable_id = "book", path = original }))
+Assert.is_true(NoteDB.upsert("paths", "orphan", 0, "{}"))
+local root = Config.dir() .. "/cleanup-cache"
+package.loaded["utils.paths"].bookWorkDir = function(id, source_id) return root .. "/" .. source_id .. "/" .. id end
+local dirs = {
+    [root .. "/paths/book"] = { "book.epub", "reflow", "missing.sdr" },
+    [root .. "/paths/book/reflow"] = { "book.epub" },
+    [root .. "/paths/book/missing.sdr"] = { "metadata.epub.lua.old" },
+    [root .. "/paths/orphan"] = { "gone.sdr" },
+    [root .. "/paths/orphan/gone.sdr"] = { "metadata.epub.lua" },
+}
+package.loaded["libs/libkoreader-lfs"] = {
+    symlinkattributes = function(path) return dirs[path] and "directory" or "file" end,
+    dir = function(path)
+        local index = 0
+        return function() index = index + 1; return dirs[path][index] end
+    end,
+}
+local seen, sidecar_ok = {}, false
+package.loaded["book.sidecar"] = { clearReading = function(path)
+    seen[path] = true
+    return sidecar_ok
+end }
+local Store = require("book.store")
+Assert.is_false(Store.clearSourceData("paths", { reading = true }))
+Assert.not_nil(NoteDB.get("paths", "orphan", 0), "边车写失败不继续删库")
+sidecar_ok = true
+Assert.is_true(Store.clearSourceData("paths", { reading = true }))
+Assert.is_true(seen[original])
+Assert.is_true(seen[root .. "/paths/book/reflow/book.epub"])
+Assert.is_true(seen[root .. "/paths/book/missing.epub"])
+Assert.is_true(seen[root .. "/paths/orphan/gone.epub"])
+Assert.is_nil(NoteDB.get("paths", "orphan", 0))
+Assert.not_nil(BookDB.get("paths", "book"))
+file = assert(io.open(original, "rb"))
+Assert.eq(file:read("*a"), "original")
+file:close()
+os.remove(original)
+
 DB.close()
 for _idx, suffix in ipairs({ "", "-wal", "-shm" }) do os.remove(db_path .. suffix) end
 

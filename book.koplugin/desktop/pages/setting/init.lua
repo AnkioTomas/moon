@@ -123,6 +123,16 @@ local function coreEntries(desktop)
             },
         },
         {
+            group = "library", order = 30, id = "source_cleanup",
+            row = function(iw)
+                return Row.widget({
+                    width = iw, kind = "nav", icon = "delete_sweep", title = _("数据清理"),
+                    subtitle = _("选择书源，清理本机书籍或阅读记录"),
+                    callback = function() require("source.cleanup").pick(desktop) end,
+                })
+            end,
+        },
+        {
             group = "appearance", order = 10, id = "appearance", icon = "palette", title = _("主题与字体"),
             subtitle = _("界面风格、字体、缩放"),
             status = string.format("%d%%", Theme.scale()), status_on = true,

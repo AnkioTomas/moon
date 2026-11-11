@@ -1110,6 +1110,40 @@ function BookDB.forgetSource(source_id)
     end) == true
 end
 
+---@class BookDataCleanup
+---@field books boolean|nil 书库索引和目录，不含阅读数据
+---@field reading boolean|nil 进度、统计、笔记及分析数据
+---@field stable_prefix string|nil
+---@field exclude boolean|nil 排除而不是包含前缀
+
+--- 用户主动清理；两类记录独立，不写墓碑，也不把清理标成待同步。
+---@param source_id string
+---@param opts BookDataCleanup
+---@return boolean
+function BookDB.clearSourceData(source_id, opts)
+    assert(opts.books or opts.reading, "no data selected")
+    local prefix, exclude = opts.stable_prefix, opts.exclude
+    return DB.transaction(function()
+        if opts.books then
+            if not DB.removeSource("books", source_id, prefix, exclude)
+                or not require("book.chapters_db").removeSource(source_id, prefix, exclude)
+                or not require("book.toc_db").removeSource(source_id, prefix, exclude) then return false end
+        end
+        if opts.reading then
+            local where, args = DB.identityClause(source_id, prefix, exclude)
+            if not DB.exec("UPDATE books SET read_at=0, read_state=0 WHERE " .. where .. ";",
+                unpack(args)) then return false end
+            for _idx, name in ipairs({
+                "book.progress_db", "book.note_db", "book.stats_db", "book.review_cache", "ai.summary_db",
+            }) do
+                if not require(name).removeSource(source_id, prefix, exclude) then return false end
+            end
+            if not Event.emit("source_reading_cleared", source_id, prefix, exclude) then return false end
+        end
+        return true
+    end) == true
+end
+
 --- 撕掉一本：books 行 + 依附表 + book_removed。不留墓碑。须在调用方事务内。
 ---@param source_id string
 ---@param stable_id string

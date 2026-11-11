@@ -203,8 +203,9 @@ function TocDB.removeIdentity(source_id, stable_id)
     return ok
 end
 
-function TocDB.removeSource(source_id)
-    local ok = DB.removeSource("toc_entries", source_id) and DB.removeSource("toc_snapshots", source_id)
+function TocDB.removeSource(source_id, stable_prefix, exclude)
+    local ok = DB.removeSource("toc_entries", source_id, stable_prefix, exclude)
+        and DB.removeSource("toc_snapshots", source_id, stable_prefix, exclude)
     if ok then require("source.toc").clear() end
     return ok
 end

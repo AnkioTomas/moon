@@ -19,4 +19,11 @@ return {
     source_forgotten = function(source_id)
         return XrayDB.removeSource(source_id)
     end,
+    source_reading_cleared = function(source_id, stable_prefix, exclude)
+        require("workers.tasks").cancelPrefixed("xray\0" .. source_id)
+        local ok = XrayDB.removeSource(source_id, stable_prefix, exclude)
+        local marks = package.loaded["features.xray.marks"]
+        if ok and marks then marks.invalidate() end
+        return ok
+    end,
 }

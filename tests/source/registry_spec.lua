@@ -235,6 +235,13 @@ do
     Assert.eq(closed.moon, 1)
     Assert.is_true(Registry.resolve("wechat") ~= first)
     Assert.eq(created.wechat, 2)
+    local moon = Registry.resolve("moon")
+    local wechat = Registry.resolve("wechat")
+    Registry.invalidate("wechat")
+    Assert.eq(closed.wechat, 2)
+    Assert.eq(closed.moon, 1, "单源清理不关闭其它书源")
+    Assert.eq(Registry.resolve("moon"), moon)
+    Assert.is_true(Registry.resolve("wechat") ~= wechat)
     Registry.invalidate()
     Registry.create = original_create
 
