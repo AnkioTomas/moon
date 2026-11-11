@@ -25,8 +25,10 @@ return {
         home_recent_hide_finished = false,
         -- 一言 / 书摘整个组件是否居中。
         home_hitokoto_center = false,
-        -- 一言联网刷新间隔（秒）；0 = 不联网，只用内置句子与已有缓存。
+        -- 一言联网刷新间隔（秒）；0 = 不联网，有缓存用缓存，没有再用内置句子。
         home_hitokoto_ttl = 3600,
+        -- 一言句子类型（官方字母）；缺省全选。空或脏数据按全部类型处理。
+        home_hitokoto_types = { "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l" },
         home_excerpt_center = false,
         -- 阅读统计卡片底色不透明度（阅读统计、阅读小卡共用；百分比，0 = 全透明，露出壁纸）。
         home_stats_opacity = 100,

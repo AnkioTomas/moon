@@ -83,6 +83,10 @@ package.preload["ui.guard"] = function()
     }
 end
 
+package.preload["utils.settings"] = function()
+    return { get = function() return {} end, save = function() end }
+end
+
 local function ensureAll()
     for _idx, name in ipairs({ "weather", "hitokoto", "myrl", "bing" }) do
         require("online." .. name):ensure()
@@ -91,7 +95,7 @@ end
 ensureAll()
 Assert.eq(#requests, 4)
 Assert.eq(requests[1].url, "https://api.ankio.net/weather?city=")
-Assert.eq(requests[2].url, "https://api.ankio.net/hitokoto")
+Assert.eq(requests[2].url, "https://api.ankio.net/hitokoto?count=20")
 Assert.eq(requests[3].url, "https://api.ankio.net/myrl?type=json")
 Assert.eq(requests[4].url, "https://api.ankio.net/bing?type=json")
 local expected_ua = "Mozilla/5.0 (" .. require("ffi").os .. "; KindlePaperWhite5) Moon/"

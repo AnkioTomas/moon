@@ -43,6 +43,8 @@ function M.plan()
     end
     local wide = component.supports_narrow == false or settings.lock_screen_wide ~= false
     local source_path = Background.resolve(asset)
+    local needs_network = component.needs_network
+    if type(needs_network) == "function" then needs_network = needs_network() end
     return {
         component = component,
         background_mode = background_mode,
@@ -50,7 +52,7 @@ function M.plan()
         position = position,
         wide = wide,
         supports_narrow = component.supports_narrow == true,
-        offline = asset.network ~= true and component.needs_network ~= true,
+        offline = asset.network ~= true and needs_network ~= true,
         source_path = source_path,
         output_path = COMPOSE_PATH,
     }
