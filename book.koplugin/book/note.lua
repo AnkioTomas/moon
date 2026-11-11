@@ -34,10 +34,14 @@ end
 ---@param total_pages integer|nil
 ---@return table[]
 function Note.clean(source, items, total_pages)
+    local cleaned
     if source and type(source.cleanAnnotations) == "function" then
-        return source:cleanAnnotations(items, total_pages)
+        cleaned = source:cleanAnnotations(items, total_pages)
+    else
+        cleaned = Normalize.clean(items, total_pages)
     end
-    return Normalize.clean(items, total_pages)
+    -- 源自己的清洗也可能漏掉历史重复；落库前再折叠一次，避免脏快照被原样写回。
+    return (Normalize.unique(cleaned))
 end
 
 --- 远端注解按 ``chapter_idx`` 分片落库；完整快照状态存于 payload 外层元数据。

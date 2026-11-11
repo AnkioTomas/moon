@@ -39,7 +39,47 @@ function Normalize.clean(items, total_pages)
             }
         end
     end
-    return result
+    return (Normalize.unique(result))
+end
+
+--- 按坐标和内容区分一条注解，供去重使用：同一处划线 / 书签只留一条。
+--- 不含颜色、drawer、时间戳和源私有 id；那些差异不构成「另一条」。
+---@param item table
+---@return string|nil
+function Normalize.contentKey(item)
+    if type(item) ~= "table" or item.page == nil then return nil end
+    local function pos(p)
+        if type(p) == "table" then
+            return tostring(p.page) .. "," .. tostring(p.x) .. "," .. tostring(p.y)
+        end
+        return tostring(p or "")
+    end
+    return table.concat({
+        tostring(item.page), pos(item.pos0), pos(item.pos1),
+        tostring(item.text or ""), tostring(item.note or ""),
+    }, "\31")
+end
+
+--- 完全重复的条目只留第一条。没有 contentKey 的（例如无 page 的删除墓碑）原样保留。
+---@param items table[]|nil
+---@return table[]
+---@return integer deduped 被折叠掉的条数
+function Normalize.unique(items)
+    local out, seen, deduped = {}, {}, 0
+    for _idx, item in ipairs(items or {}) do
+        local key = type(item) == "table" and Normalize.contentKey(item) or nil
+        if key then
+            if seen[key] then
+                deduped = deduped + 1
+            else
+                seen[key] = true
+                out[#out + 1] = item
+            end
+        else
+            out[#out + 1] = item
+        end
+    end
+    return out, deduped
 end
 
 --- 解码 notes.payload：权威快照为 `{ items, authoritative }`，否则为裸数组；非法 JSON / 非表返回 nil。
@@ -99,38 +139,41 @@ end
 ---@param remote table[]
 ---@param local_items table[]
 ---@param paging boolean|nil 目标文档是否分页文档（决定注解形态）
----@return table[]
+---@return table[] merged
+---@return integer dropped 通用合并不解释远端删除，恒为 0
+---@return integer deduped 因内容键重复被折叠的条数（含远端列表内部重复）
 function Normalize.merge(remote, local_items, paging)
-    -- 分页文档的 pos 是 {x,y,page} 表：tostring 只得到地址，远端/本地同一条永远对不上。
-    local function pos(p)
-        if type(p) == "table" then
-            return tostring(p.page) .. "," .. tostring(p.x) .. "," .. tostring(p.y)
-        end
-        return tostring(p or "")
+    ---@param item table
+    ---@return boolean
+    local function usable(item)
+        return type(item) == "table" and Normalize.renderable(item, paging)
     end
-    local function key(item)
-        if item.page == nil then return nil end
-        return table.concat({
-            tostring(item.page), pos(item.pos0), pos(item.pos1),
-            tostring(item.text or ""), tostring(item.note or ""),
-        }, "\31")
-    end
-    local merged, seen = {}, {}
+    -- 远端列表自己也可能带重复（历史合并把同一条又追加进去）。必须先折叠，
+    -- 否则只对「本地对远端」去重时，库里已经膨胀的快照会原样画出来。
+    local merged, seen, deduped = {}, {}, 0
     for _idx, item in ipairs(remote or {}) do
-        if type(item) == "table" and Normalize.renderable(item, paging) then
-            local item_key = key(item)
-            if item_key then seen[item_key] = true end
-            merged[#merged + 1] = item
+        if usable(item) then
+            local item_key = Normalize.contentKey(item)
+            if item_key and seen[item_key] then
+                deduped = deduped + 1
+            else
+                if item_key then seen[item_key] = true end
+                merged[#merged + 1] = item
+            end
         end
     end
     for _idx, item in ipairs(local_items or {}) do
-        local item_key = type(item) == "table" and key(item) or nil
-        if type(item) == "table" and not (item_key and seen[item_key])
-                and Normalize.renderable(item, paging) then
-            merged[#merged + 1] = item
+        if usable(item) then
+            local item_key = Normalize.contentKey(item)
+            if item_key and seen[item_key] then
+                deduped = deduped + 1
+            else
+                if item_key then seen[item_key] = true end
+                merged[#merged + 1] = item
+            end
         end
     end
-    return merged
+    return merged, 0, deduped
 end
 
 return Normalize
