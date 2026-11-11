@@ -101,7 +101,7 @@ function Notes.cleanAnnotations(items, total_pages)
             end
         end
     end
-    return out
+    return (Normalize.unique(out))
 end
 
 ---@param previous table[]|nil
@@ -183,6 +183,25 @@ function Notes.localizeAnnotations(document, annotations, html_path, current)
     if type(annotations) ~= "table" then
         return {}
     end
+    ---@param item table
+    ---@return boolean
+    local function needsLocate(item)
+        if item.pos0 then return false end
+        local text = item.text
+        local range = item.wr_range
+        return (type(text) == "string" and text ~= "")
+            or (type(range) == "string" and range ~= "")
+    end
+    local unresolved = {}
+    for _idx, item in ipairs(annotations) do
+        if type(item) == "table" and needsLocate(item) then
+            unresolved[#unresolved + 1] = item
+        end
+    end
+    -- 没有待定位的划线就不必读整章 HTML；开书若再 apply 一次，已定位条目会走这条快路径。
+    if #unresolved == 0 then
+        return annotations
+    end
     local html
     if type(html_path) == "string" and html_path ~= "" then
         local f = io.open(html_path, "rb")
@@ -201,12 +220,6 @@ function Notes.localizeAnnotations(document, annotations, html_path, current)
     for _idx, item in ipairs(current or {}) do
         if type(item) == "table" and item.wr_bookmark_id and item.pos0 and item.pos1 then
             positioned[tostring(item.wr_bookmark_id)] = item
-        end
-    end
-    local unresolved = {}
-    for _idx, item in ipairs(annotations) do
-        if type(item) == "table" and not item.pos0 then
-            unresolved[#unresolved + 1] = item
         end
     end
     local located = Annotations.locateBatch(flow, unresolved)
@@ -248,7 +261,9 @@ end
 ---@param local_items table[]
 ---@param paging boolean|nil
 ---@param authoritative boolean|nil
----@return table[]
+---@return table[] merged
+---@return integer dropped 权威快照里远端已不存在的本地条目数
+---@return integer deduped 因 id / range / 坐标 / 内容键重复被折叠的条数
 function Notes.mergeAnnotations(remote, local_items, paging, authoritative)
     local function rangeKey(item)
         if type(item.text) ~= "string" or item.text == "" then return nil end
@@ -266,40 +281,64 @@ function Notes.mergeAnnotations(remote, local_items, paging, authoritative)
         if type(item.pos0) ~= "string" or type(item.pos1) ~= "string" then return nil end
         return table.concat({ item.pos0, item.pos1 }, "\31")
     end
+    ---@param item table
+    ---@param seen table<string, boolean>
+    local function mark(item, seen)
+        if item.wr_bookmark_id then seen["bookmark:" .. tostring(item.wr_bookmark_id)] = true end
+        if item.wr_review_id then seen["review:" .. tostring(item.wr_review_id)] = true end
+        local range_key, note_key, pos_key = rangeKey(item), noteKey(item), posKey(item)
+        if range_key then seen["range:" .. range_key] = true end
+        if note_key then seen["note:" .. note_key] = true end
+        if pos_key then seen["pos:" .. pos_key] = true end
+        -- 没有 id / 原文的位置记录（纯书签或误写入的进度残片）只能靠坐标内容去重；
+        -- 漏掉这一层时，历史快照里的几千份拷贝会在每次开书合并时再翻倍。
+        local content_key = Normalize.contentKey(item)
+        if content_key then seen["content:" .. content_key] = true end
+    end
+    ---@param item table
+    ---@param seen table<string, boolean>
+    ---@return boolean
+    local function isDup(item, seen)
+        local range_key, note_key, pos_key = rangeKey(item), noteKey(item), posKey(item)
+        local content_key = Normalize.contentKey(item)
+        return (item.wr_bookmark_id and seen["bookmark:" .. tostring(item.wr_bookmark_id)])
+            or (item.wr_review_id and seen["review:" .. tostring(item.wr_review_id)])
+            or (range_key and seen["range:" .. range_key])
+            or (note_key and seen["note:" .. note_key])
+            or (not item.wr_bookmark_id and pos_key and seen["pos:" .. pos_key])
+            or (content_key and seen["content:" .. content_key])
+            or false
+    end
     authoritative = authoritative == true
-    local merged, seen = {}, {}
+    local merged, seen, dropped, deduped = {}, {}, 0, 0
     for _idx, item in ipairs(remote or {}) do
         if type(item) == "table"
                 and Normalize.renderable(item, paging) then
-            if item.wr_bookmark_id then seen["bookmark:" .. tostring(item.wr_bookmark_id)] = true end
-            if item.wr_review_id then seen["review:" .. tostring(item.wr_review_id)] = true end
-            local range_key, note_key = rangeKey(item), noteKey(item)
             -- 同文同 range 的多条远端划线是同一处（重复上传留下的），手机端也只显示一条。
-            local twin = item.wr_range and range_key and seen["range:" .. range_key]
-            if range_key then seen["range:" .. range_key] = true end
-            if note_key then seen["note:" .. note_key] = true end
-            local pos_key = posKey(item)
-            if pos_key then seen["pos:" .. pos_key] = true end
-            if not twin then merged[#merged + 1] = item end
-        end
-    end
-    for _idx, item in ipairs(local_items or {}) do
-        if type(item) == "table" then
-            local range_key, note_key, pos_key = rangeKey(item), noteKey(item), posKey(item)
-            local duplicate = item.wr_bookmark_id
-                    and seen["bookmark:" .. tostring(item.wr_bookmark_id)]
-                or item.wr_review_id and seen["review:" .. tostring(item.wr_review_id)]
-                or range_key and seen["range:" .. range_key]
-                or note_key and seen["note:" .. note_key]
-                or not item.wr_bookmark_id and pos_key and seen["pos:" .. pos_key]
-            local deleted_remote = authoritative and not duplicate
-                and (item.wr_bookmark_id or item.wr_review_id)
-            if not duplicate and not deleted_remote and Normalize.renderable(item, paging) then
+            if isDup(item, seen) then
+                deduped = deduped + 1
+            else
+                mark(item, seen)
                 merged[#merged + 1] = item
             end
         end
     end
-    return merged
+    for _idx, item in ipairs(local_items or {}) do
+        if type(item) == "table" then
+            local duplicate = isDup(item, seen)
+            local deleted_remote = authoritative and not duplicate
+                and (item.wr_bookmark_id or item.wr_review_id)
+            if deleted_remote then
+                dropped = dropped + 1
+            elseif duplicate then
+                deduped = deduped + 1
+            elseif Normalize.renderable(item, paging) then
+                mark(item, seen)
+                merged[#merged + 1] = item
+            end
+        end
+    end
+    return merged, dropped, deduped
 end
 
 --- bookmarklist 的 markText 可能是 base64。

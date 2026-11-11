@@ -427,3 +427,59 @@ do -- 想法列表没拿到：本地已有的想法接回拉下来的划线，re
     Assert.eq(#out, 3)
     Assert.eq(out[3].wr_review_id, "r2")
 end
+
+do -- 无 text/range 的位置记录：合并时按内容键去重，不能在开书时再翻倍
+    local marker = {
+        datetime = "2026-11-03 14:54:54",
+        page = "/html/body/div[2]/p[431]/text()[1].37",
+        pageno = 45,
+        total_pages = 448,
+    }
+    local highlight = {
+        datetime = "2026-11-04 10:00:00",
+        page = "/html/body/div[2]/p[2]/text()[1].0",
+        pos0 = "/html/body/div[2]/p[2]/text()[1].0",
+        pos1 = "/html/body/div[2]/p[2]/text()[1].6",
+        drawer = "lighten",
+        text = "合法高亮",
+        wr_range = "10-20",
+        wr_bookmark_id = "bm-keep",
+    }
+    local review = {
+        datetime = "2026-11-04 10:01:00",
+        page = "/html/body/div[2]/p[3]/text()[1].0",
+        pos0 = "/html/body/div[2]/p[3]/text()[1].0",
+        pos1 = "/html/body/div[2]/p[3]/text()[1].4",
+        drawer = "lighten",
+        text = "带想法的原文",
+        note = "一条想法",
+        wr_range = "30-40",
+        wr_review_id = "rv-keep",
+        wr_review_only = true,
+    }
+    local bloated = {}
+    for _i = 1, 4096 do bloated[#bloated + 1] = marker end
+    bloated[#bloated + 1] = highlight
+    bloated[#bloated + 1] = review
+
+    local cleaned = Notes.cleanAnnotations(bloated, 448)
+    Assert.len(cleaned, 3, "清洗后应只剩 1 条位置记录 + 高亮 + 想法")
+    local texts = {}
+    for _idx, item in ipairs(cleaned) do texts[item.text or ""] = true end
+    Assert.is_true(texts["合法高亮"])
+    Assert.is_true(texts["带想法的原文"])
+
+    local merged, dropped, deduped = Notes.mergeAnnotations(bloated, bloated, false, false)
+    Assert.eq(dropped, 0)
+    Assert.len(merged, 3, "远端和本地各有 4096 份拷贝时合并不得膨胀")
+    Assert.is_true(deduped >= 4096)
+    local again = Notes.mergeAnnotations(merged, merged, false, false)
+    Assert.len(again, 3, "再合并一次仍是 3 条")
+    local kept = {}
+    for _idx, item in ipairs(merged) do
+        if item.wr_bookmark_id then kept.highlight = item end
+        if item.wr_review_id then kept.review = item end
+    end
+    Assert.eq(kept.highlight.wr_bookmark_id, "bm-keep")
+    Assert.eq(kept.review.wr_review_id, "rv-keep")
+end

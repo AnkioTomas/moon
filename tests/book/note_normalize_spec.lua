@@ -159,3 +159,40 @@ do -- 分页文档：远端与本地是两份不同的 pos 表，内容相同即
     local moved = hl(); moved.pos1.x = 31
     Assert.len(Normalize.merge({ hl() }, { moved }, true), 2)
 end
+
+-- ── 历史膨胀：同一条无文本位置记录重复数千次，清洗和合并都要压回去 ──
+do
+    local marker = {
+        datetime = "2026-11-03 14:54:54",
+        page = "/html/body/div[2]/p[431]/text()[1].37",
+        pageno = 45,
+        total_pages = 448,
+    }
+    local highlight = {
+        datetime = "2026-11-03 15:00:00",
+        page = "/html/body/div[2]/p[10]/text()[1].0",
+        pos0 = "/html/body/div[2]/p[10]/text()[1].0",
+        pos1 = "/html/body/div[2]/p[10]/text()[1].8",
+        drawer = "lighten",
+        text = "真正的高亮",
+    }
+    local bloated = {}
+    for _i = 1, 4096 do bloated[#bloated + 1] = marker end
+    bloated[#bloated + 1] = highlight
+    bloated[#bloated + 1] = highlight
+
+    local cleaned = Normalize.clean(bloated)
+    Assert.len(cleaned, 2, "4096 份重复位置记录应压成 1 条，高亮保留")
+    local _kept, cleaned_dups = Normalize.unique(bloated)
+    Assert.eq(cleaned_dups, 4096, "4096 份位置拷贝 + 1 份重复高亮都应计入")
+    Assert.len(_kept, 2)
+    Assert.eq(cleaned[1].page, marker.page)
+    Assert.eq(cleaned[2].text, "真正的高亮")
+
+    local merged, dropped, deduped = Normalize.merge(bloated, bloated, false)
+    Assert.eq(dropped, 0)
+    Assert.len(merged, 2, "合并两侧各有一份膨胀拷贝时不能再翻倍")
+    Assert.is_true(deduped >= 4096, "两侧重复都应计入 deduped，守卫才能放行清理")
+    local again = Normalize.merge(merged, merged, false)
+    Assert.len(again, 2, "把合并结果再合并一次不得膨胀")
+end

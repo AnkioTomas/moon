@@ -770,4 +770,89 @@ do
     Assert.eq(#seen, 3)
 end
 
+
+-- 已膨胀的章节快照：applyLocal 去重后只留下有效条目；再 apply / pull 无新笔记时不再全量重写。
+do
+    local JSON = require("json")
+    local marker = {
+        datetime = "2026-11-03 14:54:54",
+        page = "/html/body/div[2]/p[431]/text()[1].37",
+        pageno = 45,
+        total_pages = 448,
+    }
+    local highlight = {
+        datetime = "2026-11-04 10:00:00",
+        page = "/html/body/div[2]/p[2]/text()[1].0",
+        pos0 = "/html/body/div[2]/p[2]/text()[1].0",
+        pos1 = "/html/body/div[2]/p[2]/text()[1].6",
+        drawer = "lighten",
+        text = "合法高亮",
+    }
+    local bloated = {}
+    for _i = 1, 4096 do bloated[#bloated + 1] = marker end
+    bloated[#bloated + 1] = highlight
+
+    open_files["/b10.epub"] = { source_id = "bloat", stable_id = "book10.epub" }
+    rows["bloat:book10.epub:0"] = {
+        source_id = "bloat", stable_id = "book10.epub", chapter_idx = 0,
+        payload = JSON.encode(bloated), updated_at = 11, sync_status = 1,
+    }
+
+    local current_annotations = bloated
+    local updates, writes = 0, 0
+    local ui10 = {
+        document = { file = "/b10.epub", getPageCount = function() return 448 end },
+        annotation = {
+            annotations = current_annotations,
+            updateAnnotations = function(self)
+                updates = updates + 1
+                current_annotations = self.annotations
+            end,
+        },
+        doc_settings = {
+            flush = function() end,
+            readSetting = function(_, name)
+                if name == "annotations" then return current_annotations end
+            end,
+            saveSetting = function(_, name, value)
+                if name == "annotations" then
+                    writes = writes + 1
+                    current_annotations = value
+                end
+            end,
+        },
+    }
+    local identity10 = { source_id = "bloat", stable_id = "book10.epub" }
+    Assert.eq(SessionNote.applyLocal(ui10, identity10), 2,
+        "apply 后应只剩 1 条位置记录 + 1 条高亮")
+    Assert.eq(#current_annotations, 2)
+    Assert.eq(current_annotations[2].text, "合法高亮", "合法高亮必须保留")
+    Assert.eq(writes, 1)
+    Assert.eq(updates, 1, "清理脏数据时需要写回并刷新绘制")
+
+    Assert.eq(SessionNote.applyLocal(ui10, identity10), 2)
+    Assert.eq(writes, 1, "内容没变就不要再写 sidecar")
+    Assert.eq(updates, 1, "无新笔记时不要再全量 updateAnnotations")
+
+    local pull_applies = 0
+    identity10.source = {
+        id = "bloat",
+        syncNotesAsync = function(_, _opts, cb)
+            cb({ pulled = 1, pushed = 0 })
+        end,
+    }
+    local real_apply = SessionNote.applyLocal
+    SessionNote.applyLocal = function(...)
+        pull_applies = pull_applies + 1
+        return real_apply(...)
+    end
+    SessionNote.pull(ui10, identity10)
+    Stubs.flush()
+    SessionNote.applyLocal = real_apply
+    Assert.eq(pull_applies, 0, "pull 后快照修订号没变就不要再 apply")
+    Assert.eq(updates, 1)
+    Assert.eq(#current_annotations, 2)
+end
+
+
 _G.G_reader_settings = previous_settings

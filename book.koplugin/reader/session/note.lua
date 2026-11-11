@@ -163,6 +163,29 @@ function SessionNote.save(ui, identity, changed, done)
     if done then done(saved, saved and updated_at or nil) end
 end
 
+--- 合并结果是否与阅读器现有列表同一批内容（条数、坐标、样式、源侧 id）。
+---@param left table[]
+---@param right table[]
+---@return boolean
+local function sameAnnotations(left, right)
+    if #left ~= #right then return false end
+    for i = 1, #left do
+        local a, b = left[i], right[i]
+        if a ~= b then
+            if type(a) ~= "table" or type(b) ~= "table" then return false end
+            if Normalize.contentKey(a) ~= Normalize.contentKey(b) then return false end
+            if a.drawer ~= b.drawer or a.color ~= b.color or a.note ~= b.note then
+                return false
+            end
+            if a.wr_bookmark_id ~= b.wr_bookmark_id or a.wr_review_id ~= b.wr_review_id
+                    or a.kavita_id ~= b.kavita_id then
+                return false
+            end
+        end
+    end
+    return true
+end
+
 ---@param ui table
 ---@param identity BookIdentity
 ---@return integer applied
@@ -176,9 +199,12 @@ local function applySnapshot(ui, identity)
     -- 库里可能已有 PHP/JSON 写进来的 note="" / drawer=""；先洗成 nil，否则高亮会被当成笔记。
     annotations = Note.clean(source, annotations)
     local current = ui.doc_settings:readSetting("annotations") or {}
+    -- 换号清洗可能就地改 current；即使和合并结果看起来一样，也必须写回 sidecar。
+    local account_reset = false
     if row and (row.account_pending or 0) > 0 and source
         and type(source.resetAccountAnnotations) == "function" then
         current = source:resetAccountAnnotations(current)
+        account_reset = true
     end
     if source and type(source.localizeAnnotations) == "function" then
         annotations = source:localizeAnnotations(
@@ -189,7 +215,7 @@ local function applySnapshot(ui, identity)
         return 0
     end
     -- 注解形态跟文档走：ReaderUI 只会挂 rolling 或 paging 其中之一。
-    -- dropped = 源主动判定为「远端已删」的条数；deduped = 远端同键重复被抑制（不画）的条数。
+    -- dropped = 源主动判定为「远端已删」的条数；deduped = 同键重复被抑制（不画）的条数。
     -- 两者都是「合并后条数变少」的正当原因（老源不返回第二 / 第三值 ⇒ nil）。
     local dropped, deduped
     if source and type(source.mergeAnnotations) == "function" then
@@ -197,7 +223,9 @@ local function applySnapshot(ui, identity)
             annotations, current, ui.paging ~= nil, authoritative
         )
     else
-        annotations = Normalize.merge(annotations, current, ui.paging ~= nil)
+        annotations, dropped, deduped = Normalize.merge(
+            annotations, current, ui.paging ~= nil
+        )
     end
     -- 合并结果条数少于阅读器现有条数，说明本地有条目被判成不可渲染而被丢弃。
     -- 这里是整体覆盖 doc_settings，写下去就是永久删除用户划线：宁可这次不显示
@@ -211,6 +239,11 @@ local function applySnapshot(ui, identity)
     end
     if #annotations == 0 and #current == 0 then
         return 0
+    end
+    -- 内容没变就不要整表重写、更不要 updateAnnotations：那会按条数去解析 xpointer，
+    -- 脏数据膨胀后一次就能卡几十秒到几分钟。
+    if not account_reset and sameAnnotations(annotations, current) then
+        return #annotations
     end
     ui.doc_settings:saveSetting("annotations", annotations)
     ui.doc_settings:flush()
@@ -288,10 +321,18 @@ function SessionNote.pull(ui, identity)
     end
     --- 走属主源做一次注解同步，成功后在下一 tick 应用到阅读器。
     --- 同步失败只记日志：注解拉不下来不该影响正在进行的阅读。
+    --- 这一章的快照修订号没变就不再全量 apply：开书路径已经 apply 过一次，
+    --- 再跑一遍只会把同一批条目重新定位、排序，脏数据时能再卡几分钟。
     local function syncAndApply()
+        local row = NoteDB.get(identity.source_id, identity.stable_id, identity.chapter_idx)
+        local stamp = row and row.updated_at or nil
         source:syncNotesAsync({ identity = identity }, function(result, err)
             if not result then
                 logger.warn("book.note pull failed", identity.stable_id, err)
+                return
+            end
+            local after = NoteDB.get(identity.source_id, identity.stable_id, identity.chapter_idx)
+            if after and stamp and after.updated_at == stamp then
                 return
             end
             UIManager:nextTick(require("ui.guard").wrap("notes apply", applyFromDb))
