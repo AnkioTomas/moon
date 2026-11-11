@@ -2,6 +2,8 @@
 @module koplugin.book.desktop.detail.cache
 --]]
 
+require("l10n").apply()
+
 local Toast = require("ui.themes.widgets.toast")
 local bookOwnerSource = require("desktop.detail.common").bookOwnerSource
 local _ = require("gettext")
@@ -52,42 +54,78 @@ function Cache.supported(book, fallback_source)
         and type(source.cacheAllChaptersAsync) == "function"
 end
 
---- 选择缓存范围：全本 / 当前进度到结尾 / 当前进度往后 N 章（当前章取本地进度，无进度即第 1 章）。
---- 源支持段评时多一个开关：同时缓存段评（每句只缓存前 10 条评论，请求频繁有封号风险）。
+--- 从表单选项得到 cacheAll 的 range。全本是 nil；到结尾不带 count；往后 N 章带 count。
+---@param kind "all"|"end"|"5"|"10"|"50"|"100"|"200"
+---@param pos { chapter_idx?: integer, fraction?: number }|nil
+---@return ChapterCacheRange|nil
+function Cache.rangeOf(kind, pos)
+    if kind == "all" then return nil end
+    local range = {
+        chapter_idx = pos and pos.chapter_idx,
+        fraction = pos and pos.fraction,
+    }
+    if kind ~= "end" then range.count = tonumber(kind) end
+    return range
+end
+
+local NEXT_COUNTS = { 5, 10, 50, 100, 200 }
+
+--- 选择缓存范围：居中表单，选好后点「开始」才入队。
+--- 源支持段评时多一个开关；打开后在开关下给一句风控说明。
 ---@param book table
 ---@param fallback_source table|nil
 ---@param with_reviews boolean|nil
 function Cache.chooseRange(book, fallback_source, with_reviews)
     local pos = require("book.progress_db").get(book.source_id, book.stable_id) or {}
-    local function from(count)
-        return function()
-            Cache.cacheAll(book, fallback_source,
-                { chapter_idx = pos.chapter_idx, fraction = pos.fraction, count = count }, with_reviews)
-        end
-    end
-    local function ahead(count)
-        return { text = T(_("往后 %1 章"), count), callback = from(count) }
-    end
-    local items = {
-        { text = _("全本缓存"), callback = function() Cache.cacheAll(book, fallback_source, nil, with_reviews) end },
-        { text = _("从当前进度缓存到结尾"), callback = from(nil) },
-        { buttons = { ahead(10), ahead(20) } },
-        { buttons = { ahead(50), ahead(100) } },
-    }
-    local Prefetch = require("book.review_prefetch")
-    if Prefetch.supported(bookOwnerSource(book, fallback_source)) then
-        table.insert(items, 1, {
-            text = (with_reviews and "[✓] " or "[  ] ") .. _("同时缓存段评（每句前 10 条）"),
-            callback = function() Cache.chooseRange(book, fallback_source, not with_reviews) end,
-        })
-        if with_reviews then
-            table.insert(items, 2, { widget = function(width)
-                return require("ui.themes.widgets.text").box("body", _("段评请求频繁，可能导致账号被风控封号，请谨慎使用。"), width,
-                    { bg = require("ui.themes").current().dialog.bg })
-            end })
-        end
-    end
-    require("ui.themes.widgets.sheet"):new{ title = _("缓存章节"), items = items }:show()
+    local reviews = with_reviews == true
+    local can_reviews = require("book.review_prefetch").supported(bookOwnerSource(book, fallback_source))
+    local kind = "all"
+    require("ui.themes.widgets.settings"):new{
+        title = _("缓存章节"),
+        items = function()
+            local items = {}
+            if can_reviews then
+                items[#items + 1] = {
+                    title = _("缓存段评"),
+                    toggle = true,
+                    checked = reviews,
+                    callback = function()
+                        reviews = not reviews
+                    end,
+                }
+                if reviews then
+                    items[#items + 1] = {
+                        note = _("每句只缓存前 10 条。请求频繁可能被风控封号，请谨慎。"),
+                    }
+                end
+            end
+            local ranges = {
+                { value = "all", text = _("全本") },
+                { value = "end", text = _("到结尾") },
+            }
+            for _i, n in ipairs(NEXT_COUNTS) do
+                ranges[#ranges + 1] = { value = tostring(n), text = T(_("往后 %1 章"), n) }
+            end
+            items[#items + 1] = {
+                title = _("缓存范围"),
+                items = ranges,
+                current = kind,
+                on_select = function(value)
+                    kind = value
+                end,
+            }
+            return items
+        end,
+        buttons = function(page)
+            return {
+                { text = _("取消"), callback = function() page:close() end },
+                { text = _("开始"), variant = "primary", callback = function()
+                    page:close()
+                    Cache.cacheAll(book, fallback_source, Cache.rangeOf(kind, pos), reviews)
+                end },
+            }
+        end,
+    }:show()
 end
 
 --- 缓存章节正文（可带段评）：入队并前台显示进度（同一本书已在缓存时拒绝并提示）。

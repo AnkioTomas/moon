@@ -251,7 +251,12 @@ return {
     ["缓存完成："] = "Cached: ",
     ["缓存部分完成："] = "Partially cached: ",
     ["缓存章节"] = "Cache chapters",
-    ["从当前进度缓存到结尾"] = "From current position to the end",
+
+    ["缓存范围"] = "Cache range",
+    ["全本"] = "Whole book",
+    ["到结尾"] = "To the end",
+    ["开始"] = "Start",
+    ["每句只缓存前 10 条。请求频繁可能被风控封号，请谨慎。"] = "Only the first 10 comments per sentence are cached. Frequent requests may get your account banned. Use with caution.",
     ["往后 %1 章"] = "Next %1 chapters",
     ["全部语言…"] = "All languages…",
     ["六"] = "Sa",
