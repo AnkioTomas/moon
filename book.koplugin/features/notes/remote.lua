@@ -22,11 +22,15 @@ local Remote = {}
 local GET, POST = {}, {}
 
 function GET.list(q, cb)
-    cb(200, Query.list(q))
+    local result = Query.list(q)
+    if not result then return cb(500, { error = _("加载失败") }) end
+    cb(200, result)
 end
 
 function GET.books(q, cb)
-    cb(200, Query.books(q))
+    local result = Query.books(q)
+    if not result then return cb(500, { error = _("加载失败") }) end
+    cb(200, result)
 end
 
 function GET.item(q, cb)
@@ -108,7 +112,7 @@ function Remote.download(action)
     if action ~= "export" then
         return nil
     end
-    local path, err = Query.exportFile()
+    local path = Query.exportFile()
     if not path then
         return nil
     end

@@ -495,6 +495,86 @@ end
 -- 单文件夹列举失败不中止整轮，其它书照收。
 do
     local dav = fakeDav()
+    dav.infinity_shallow = true
+    dav.dir_mtime = 1700000001
+    dav:put(ROOT .. "/重试/旧书.epub", "x")
+    dav:put(ROOT .. "/重试/新书.epub", "x")
+    books["webdav://重试/旧书.epub"] = { stable_id = "webdav://重试/旧书.epub", deleted = 0, sync_status = 1 }
+    dav.fail = { [ROOT .. "/重试"] = "timeout" }
+    local c = client(dav)
+    Assert.is_true(refresh(c))
+    Assert.eq(books["webdav://重试/旧书.epub"].deleted, 0)
+    Assert.is_nil(books["webdav://重试/新书.epub"])
+    local first = dav:count("PROPFIND " .. ROOT .. "/重试")
+    dav.fail = nil
+    Assert.is_true(refresh(c))
+    Assert.eq(dav:count("PROPFIND " .. ROOT .. "/重试"), first + 1, "失败目录同 mtime 仍需重试")
+    Assert.not_nil(books["webdav://重试/新书.epub"])
+    books = {}
+end
+
+-- 下级目录失败时，父目录也不能被当成完整扫描而跳过。
+do
+    local dav = fakeDav()
+    dav.infinity_shallow = true
+    dav.dir_mtime = 1700000002
+    dav:put(ROOT .. "/父目录/旧书.epub", "x")
+    dav:put(ROOT .. "/父目录/子目录/新书.epub", "x")
+    books["webdav://父目录/旧书.epub"] = { stable_id = "webdav://父目录/旧书.epub", deleted = 0, sync_status = 1 }
+    dav.fail = { [ROOT .. "/父目录/子目录"] = "timeout" }
+    local c = client(dav)
+    Assert.is_true(refresh(c))
+    Assert.is_nil(books["webdav://父目录/子目录/新书.epub"])
+    dav.fail = nil
+    Assert.is_true(refresh(c))
+    Assert.not_nil(books["webdav://父目录/子目录/新书.epub"])
+    books = {}
+end
+
+-- 真正异步的并发目录请求：取消整轮取消全部在飞请求，不取消已完成的子请求。
+do
+    local dav = fakeDav()
+    local list = dav.listAsync
+    local pending, jobs = {}, {}
+    local c = client(dav)
+    local completed
+    function dav:listAsync(path, cb, opts)
+        local job = { cancelled = 0 }
+        function job:cancel() self.cancelled = self.cancelled + 1 end
+        jobs[path] = job
+        pending[path] = function()
+            if path == ROOT then
+                cb({
+                    { name = "a", path = ROOT .. "/a", is_dir = true },
+                    { name = "b", path = ROOT .. "/b", is_dir = true },
+                    { name = "c", path = ROOT .. "/c", is_dir = true },
+                })
+            else
+                list(self, path, cb, opts)
+            end
+        end
+        return job
+    end
+    local handle = c:scanWebdavAsync(function() completed = true end, { refresh = true })
+    pending[ROOT]()
+    Assert.not_nil(jobs[ROOT .. "/a"])
+    Assert.not_nil(jobs[ROOT .. "/b"])
+    Assert.not_nil(jobs[ROOT .. "/c"])
+    pending[ROOT .. "/a"]()
+    handle:cancel()
+    Assert.eq(jobs[ROOT .. "/a"].cancelled, 0, "已完成句柄应移除")
+    Assert.eq(jobs[ROOT .. "/b"].cancelled, 1)
+    Assert.eq(jobs[ROOT .. "/c"].cancelled, 1)
+    pending[ROOT .. "/b"]()
+    pending[ROOT .. "/c"]()
+    Assert.is_nil(completed, "取消后的迟到回调不得完成同步")
+    dav.listAsync = list
+    Assert.is_true(scan(c), "取消后书目串行队列必须放行")
+    books = {}
+end
+
+do
+    local dav = fakeDav()
     dav.infinity_error = "WebDAV 请求失败（HTTP 403）"
     dav.fail = { [ROOT .. "/坏掉的书"] = "Request timed out after 45 secs" }
     dav:put(ROOT .. "/坏掉的书/坏掉的书.epub", "x")

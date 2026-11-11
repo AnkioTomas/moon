@@ -11,7 +11,7 @@ Kit.sections.home = {}
 local quote_text = "old"
 package.preload["online.hitokoto"] = function()
     return {
-        ensure = function() end,
+        ensureConfigured = function() end,
         random = function() return { text = quote_text, author = "who", title = "work" } end,
     }
 end

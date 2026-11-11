@@ -25,6 +25,7 @@ require("l10n").apply()
 local DerivedNote = require("reader.session.derived_note")
 local JSON = require("json")
 local Markup = require("features.translate.markup")
+local Text = require("utils.text")
 local readMeta = DerivedNote.readMeta
 local T = require("ffi/util").template
 local _ = require("gettext")
@@ -50,7 +51,7 @@ end
 ---@return string|nil
 local function trimAiText(value)
     if type(value) ~= "string" then return nil end
-    local text = value:match("^%s*(.-)%s*$")
+    local text = Text.trim(value)
     if text == "" then return nil end
     return text
 end
@@ -80,31 +81,22 @@ local function alignAiItems(requested, items)
     for _idx, item in ipairs(requested) do
         by_id[item.id] = item
     end
-    local rows, as_objects, as_strings = {}, false, false
-    for _idx, item in ipairs(items) do
+    local as_strings = #items == #requested
+    for index = 1, #items do
+        local item = items[index]
         if type(item) == "table" then
-            as_objects = true
-            rows[#rows + 1] = { id = parseAiId(item.id), text = trimAiText(item.text) }
-        elseif type(item) == "string" then
-            as_strings = true
-            rows[#rows + 1] = { text = trimAiText(item) }
-        end
-    end
-    if as_objects then
-        local used = false
-        for _idx, row in ipairs(rows) do
-            if row.id and row.text and by_id[row.id] and not out[row.id] then
-                out[row.id] = row.text
-                used = true
+            as_strings = false
+            local id, text = parseAiId(item.id), trimAiText(item.text)
+            if id and text and by_id[id] and not out[id] then
+                out[id] = text
             end
+        elseif type(item) ~= "string" then
+            as_strings = false
         end
-        if used or #items ~= #requested then return out end
-    elseif not as_strings or #items ~= #requested then
-        return out
     end
+    if not as_strings then return out end
     for i, item in ipairs(requested) do
-        local text = rows[i] and rows[i].text
-        if text and not out[item.id] then out[item.id] = text end
+        out[item.id] = trimAiText(items[i])
     end
     return out
 end
