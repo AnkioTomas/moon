@@ -12,8 +12,13 @@ end)
 
 Stubs.install()
 
+local warnings = {}
 package.preload["utils.log"] = function()
-    return { dbg = function() end, warn = function() end }
+    return { dbg = function() end, flushSync = function() end, warn = function(...)
+        local parts = {}
+        for i = 1, select("#", ...) do parts[i] = tostring(select(i, ...)) end
+        warnings[#warnings + 1] = table.concat(parts, " ")
+    end }
 end
 package.loaded["utils.log"] = nil
 
@@ -148,6 +153,20 @@ local util = {
         return false, "fork failed"
     end,
 }
+local real_c = ffi.C
+ffi.C = setmetatable({
+    WNOHANG = 1, EINTR = 4,
+    waitpid = function(pid, status)
+        if util.wait_errno then
+            ffi.errno(util.wait_errno)
+            return -1
+        end
+        if util.alive then return 0 end
+        status[0] = util.exit_status or 0
+        if util.on_collect then util.on_collect() end
+        return pid
+    end,
+}, { __index = real_c })
 package.preload["ffi/util"] = function()
     return {
         runInSubProcess = function(...)
@@ -168,6 +187,7 @@ package.loaded["ffi/util"] = nil
 
 package.preload["ffi/posix"] = function()
     return {
+        strerror = function() return "No child processes" end,
         read = function(_, buffer, size)
             local n = math.min(#util.pending, size)
             if n > 0 then
@@ -349,3 +369,41 @@ Assert.eq(second.state, "cancelled")
 Stubs.flush()
 Assert.eq(first.state, "done")
 Assert.eq(second.state, "cancelled")
+
+-- 同样的「没有结果」必须区分信号、退出码和状态已被别处回收，不能一律猜 OOM。
+for _idx, case in ipairs({
+    { status = 9, expected = "signal=9" },
+    { status = 11, expected = "signal=11" },
+    { status = 7 * 256, expected = "exit=7" },
+    { status = 0, expected = "exit=0" },
+    { errno = 10, expected = "job waitpid failed: No child processes" },
+}) do
+    util.pending, util.alive = "", false
+    util.exit_status, util.wait_errno = case.status, case.errno
+    local missing = Job.run(function() end, { name = "test.no-result", kind = "light" })
+    Stubs.flush()
+    Assert.eq(missing.state, "failed")
+    Assert.matches(missing.error, case.expected)
+    Assert.matches(warnings[#warnings], case.expected)
+end
+util.wait_errno, util.exit_status = 4, nil
+local interrupted = Job.run(function() end, { name = "test.wait-interrupted", kind = "light" })
+interrupted:_poll()
+Assert.is_false(interrupted.settled, "waitpid 被信号打断不等于子进程退出")
+util.wait_errno = nil
+Stubs.flush()
+Assert.eq(interrupted.state, "failed")
+Assert.eq(interrupted.exit_status, "exit=0")
+
+-- 第一次读管道后到 waitpid 之间完成：补读得到 done 就结束，不能再误报无结果退出。
+util.pending, util.alive = "", false
+util.on_collect = function()
+    util.pending = Protocol.encode({ type = "done", result = { n = 2 } })
+end
+local warnings_before = #warnings
+local raced = Job.run(function() end, { name = "test.exit-race", kind = "light" })
+Stubs.flush()
+Assert.eq(raced.state, "done")
+Assert.eq(#warnings, warnings_before)
+util.on_collect = nil
+ffi.C = real_c
