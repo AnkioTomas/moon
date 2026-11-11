@@ -32,6 +32,29 @@ Assert.eq(off[1][1].fgcolor, 0xAA)
 Assert.is_true(off:onTapThemeButton())
 Assert.eq(hits, 1)
 
+-- 长按：走 hold_callback，与点击互不影响；禁用时长按同样吞掉。
+local held = 0
+local holdable = Button:new{
+    text = "刷新",
+    callback = function() hits = hits + 1 end,
+    hold_callback = function() held = held + 1 end,
+}
+Assert.not_nil(holdable.ges_events.HoldThemeButton)
+Assert.is_true(holdable:onTapThemeButton())
+Assert.eq(hits, 2)
+Assert.eq(held, 0)
+Assert.is_true(holdable:onHoldThemeButton())
+Assert.eq(hits, 2)
+Assert.eq(held, 1)
+local held_off = Button:new{
+    text = "刷新", enabled = false,
+    callback = function() hits = hits + 1 end,
+    hold_callback = function() held = held + 1 end,
+}
+Assert.is_true(held_off:onHoldThemeButton())
+Assert.eq(held, 1)
+Assert.is_nil(Button:new{ text = "确定" }.ges_events.HoldThemeButton)
+
 -- ghost：无底无边；primary：实心反色。
 local ghost = Button:new{ icon = "close", variant = "ghost" }
 Assert.eq(ghost[1].style.border, 0)

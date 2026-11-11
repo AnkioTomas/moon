@@ -139,15 +139,16 @@ local AUTO_SYNC_INTERVAL = 60
 
 --- 书架同步。WebDAV：force=刷新（另列远端目录）、dirty_only=只推本地删除与书目改动、否则日常同步；
 --- 有本地改动没推上去时整轮仍算成功，原因放在 push_error。纯本地目录：轻扫盘（不开文档）+ 后台补齐封面。
---- force 只跳过 AUTO_SYNC_INTERVAL，不重提封面；失败不占节流窗口，下次打开桌面就重试。
----@param opts { force?: boolean, dirty_only?: boolean, on_progress?: fun(text: string|nil, done: integer|nil, total: integer|nil), on_background?: fun(start: function) }|nil on_background=后台上传交给调用方排队、展示进度
+--- AUTO_SYNC_INTERVAL 只约束打开桌面的自动同步；force / manual / dirty_only 都跳过，不重提封面。
+--- 失败不占节流窗口，下次打开桌面就重试。
+---@param opts { force?: boolean, dirty_only?: boolean, manual?: boolean, on_progress?: fun(text: string|nil, done: integer|nil, total: integer|nil), on_background?: fun(start: function) }|nil on_background=后台上传交给调用方排队、展示进度
 ---@param cb fun(result: SyncResult|nil, err: any)
 ---@return { cancel: fun() }|nil
 function Source:syncBooksAsync(opts, cb)
     opts = opts or {}
     local webdav = self._client:isWebdav()
     if opts.dirty_only and not webdav then return skipped(cb, "local dirty_only") end
-    local auto = not opts.force and not opts.dirty_only
+    local auto = not opts.force and not opts.dirty_only and not opts.manual
     if auto then
         if self._auto_sync_at and os.time() - self._auto_sync_at < AUTO_SYNC_INTERVAL then
             return skipped(cb, "throttled")

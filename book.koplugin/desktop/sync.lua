@@ -1,5 +1,5 @@
 --[[--
-桌面驱动的书架 / 统计同步：桌面可见时后台同步，图书馆刷新时强制同步。
+桌面驱动的书架 / 统计同步：桌面可见时后台同步，图书馆单击增量刷新、长按全量刷新。
 什么时候同步、在飞状态、过期结果丢弃、刷新哪个页签都归桌面；源只提供
 ``syncBooksAsync`` / ``syncStatsAsync``。同步范围跟图书馆展示范围一致：混合模式是全部已启用源，
 否则只有活跃源。在飞状态按源 id 挂在桌面实例上，统计节流按源 id 记时间戳。
@@ -127,18 +127,18 @@ local function scheduleRetry(desktop)
     require("ui/uimanager"):scheduleIn(delay, retry_tick)
 end
 
---- 书架同步出错的提示：手动刷新每次都提示；后台同步只在联网且是对端/配置问题时提示
+--- 书架同步出错的提示：手动刷新（增量与全量）每次都提示；后台同步只在联网且是对端/配置问题时提示
 --- （离线、唤醒半联网是常态，不打扰），同一源同一条错误本次运行只提示一次。
 --- err 为 nil 表示这轮干净成功。
 ---@param source BookSource
----@param force boolean|nil
+---@param manual boolean|nil
 ---@param err any
-local function report(source, force, err)
+local function report(source, manual, err)
     if not err then reported[source.id] = nil; return end
     -- 登录失效由 Sync.promptLogin 的弹窗负责，后台不再叠加 toast。
-    if not force and Auth.expired(source.id) then return end
+    if not manual and Auth.expired(source.id) then return end
     err = tostring(err)
-    if not force and (reported[source.id] == err
+    if not manual and (reported[source.id] == err
             or not require("ui/network/manager"):isConnected()
             or localNetDown(err)) then
         return
@@ -152,10 +152,10 @@ end
 ---@param desktop table
 ---@param source BookSource
 ---@param flight table 发起时的在飞记录
----@param force boolean|nil 手动刷新
+---@param manual boolean|nil 手动刷新（增量与全量）：每次都提示错误
 ---@param result SyncResult|nil
 ---@param err any
-local function onBooksSynced(desktop, source, flight, force, result, err)
+local function onBooksSynced(desktop, source, flight, manual, result, err)
     if desktop._books_sync[source.id] ~= flight then
         logger.dbg("book shelf refresh result dropped", source.id, "stale")
         return
@@ -164,15 +164,15 @@ local function onBooksSynced(desktop, source, flight, force, result, err)
     if not inScope(desktop, source) then return end
     if not result then
         logger.warn("book shelf sync failed", source.id, err)
-        report(source, force, err or _("同步失败"))
-        if not force and localNetDown(err) then
+        report(source, manual, err or _("同步失败"))
+        if not manual and localNetDown(err) then
             books_at[source.id] = nil
             scheduleRetry(desktop)
         end
         return
     end
-    report(source, force, result.push_error)
-    if not force and result.push_error and localNetDown(result.push_error) then
+    report(source, manual, result.push_error)
+    if not manual and result.push_error and localNetDown(result.push_error) then
         books_at[source.id] = nil
         scheduleRetry(desktop)
     end
@@ -189,21 +189,25 @@ local function onBooksSynced(desktop, source, flight, force, result, err)
     if desktop.tab == "library" then desktop:updateView() end
 end
 
---- 同步书架。手动刷新（force）进任务队列，follow 时前台跟随；自动后台同步不入队，免得每次开桌面都弹窗。
+--- 同步书架。queued 时入任务队列，follow 时前台跟随；force 为源级全量。
+--- 自动后台同步不入队，免得每次开桌面都弹窗。
 ---@param desktop table
 ---@param source BookSource
----@param force boolean|nil
----@param follow boolean|nil 手动刷新时弹前台进度窗
-local function syncBooks(desktop, source, force, follow)
+---@param opts { force?: boolean, follow?: boolean, queued?: boolean, title?: string }|nil
+local function syncBooks(desktop, source, opts)
+    opts = opts or {}
+    local force = opts.force == true
+    local follow = opts.follow == true
+    local queued = opts.queued == true
     local current = desktop._books_sync[source.id]
-    if current and not force then
+    if current and not queued then
         logger.dbg("book shelf refresh skipped", source.id, "pending")
         return
     end
     local key = "books\0" .. tostring(source.id)
     -- 同源手动刷新已在执行：按队列规则拒绝。必须在改在飞状态之前判断，否则执行中那条的结果会被当成过期丢弃。
     -- 还在排队的那条就是 current.cancel，取消后重新入队即替换。
-    local existing = force and Tasks.get(key)
+    local existing = queued and Tasks.get(key)
     if existing and existing.state ~= "queued" then
         require("workers.ui.task_dialog").rejected("running", existing)
         return
@@ -212,12 +216,14 @@ local function syncBooks(desktop, source, force, follow)
         logger.dbg("book shelf refresh cancel previous", source.id)
         current.cancel:cancel()
     end
-    logger.dbg("book shelf refresh start", source.id, force and "forced" or "background")
+    local mode = force and "forced" or (queued and "incremental" or "background")
+    logger.dbg("book shelf refresh start", source.id, mode)
     local flight = {}
     desktop._books_sync[source.id] = flight
     local function run(progress, finish)
         return source:syncBooksAsync({
-            force = force,
+            force = force or nil,
+            manual = queued or nil,
             on_changed = function()
                 -- 补全 / 对齐写库后首页要重读；桌面已关（人在阅读器里）就等下一次自然事件。
                 if desktop.closed then return end
@@ -251,11 +257,11 @@ local function syncBooks(desktop, source, force, follow)
             end,
         }, function(result, err)
             finish({ ok = result ~= nil, err = err })
-            onBooksSynced(desktop, source, flight, force, result, err)
+            onBooksSynced(desktop, source, flight, queued, result, err)
         end)
     end
     -- 队列满时退回直接跑。
-    local job = force and Tasks.enqueue{ key = key, kind = "sync", title = source.name, run = run }
+    local job = queued and Tasks.enqueue{ key = key, kind = "sync", title = opts.title or source.name, run = run }
     if job then
         if follow then require("workers.ui.task_dialog").follow(job) end
     else
@@ -345,16 +351,21 @@ function Sync.rescan(desktop)
     for _idx, source in ipairs(targets(desktop)) do
         if source.id == "local" then
             local running = Tasks.get("books\0local")
-            if not (running and running.state ~= "queued") then syncBooks(desktop, source, true) end
+            if not (running and running.state ~= "queued") then
+                syncBooks(desktop, source, { force = true, queued = true })
+            end
         end
     end
 end
 
---- 图书馆手动刷新：强制同步。单源模式下源未配置时说明原因，源有设置入口就提供直达按钮；
---- 混合模式只刷已配置的源，多个源一起刷时不逐个弹进度窗，进度看顶栏任务。
+--- 图书馆手动刷新。force 为真时全量（覆盖缓存 / 走全量快照），否则增量。
+--- 二者都是用户发起：进任务队列、提示错误、不受后台节流。单源模式下源未配置时说明原因，
+--- 源有设置入口就提供直达按钮；混合模式只刷已配置的源，多个源一起刷时不逐个弹进度窗，进度看顶栏任务。
 ---@param desktop table
-function Sync.refresh(desktop)
+---@param force boolean|nil
+function Sync.refresh(desktop, force)
     cancelRetry()
+    force = force == true
     local source = desktop.source
     if not source then return end
     if not mixed() and not source:configured() then
@@ -379,14 +390,22 @@ function Sync.refresh(desktop)
         }:show()
         return
     end
+    local label = force and _("全量刷新") or _("增量刷新")
     for _idx, target in ipairs(list) do
         syncStats(desktop, target, true)
         books_at[target.id] = os.time()
-        syncBooks(desktop, target, true, #list == 1)
+        syncBooks(desktop, target, {
+            force = force,
+            queued = true,
+            follow = #list == 1,
+            title = target.name .. " · " .. label,
+        })
     end
     if #list > 1 then
+        local toast = force and _("正在全量同步 %1 个数据源，可在顶栏查看进度")
+            or _("正在增量同步 %1 个数据源，可在顶栏查看进度")
         require("ui.themes.widgets.toast"):new{
-            text = T(_("正在同步 %1 个数据源，可在顶栏查看进度"), #list), timeout = 2,
+            text = T(toast, #list), timeout = 2,
         }:show()
     end
 end

@@ -401,18 +401,42 @@ Assert.is_nil(requested)
 desktop.closed = nil
 
 -- 手动刷新：交给 desktop.sync（进度弹窗归任务队列，由它前台跟随），自己不弹窗。
+-- 单击 / rescan(false) 走增量，长按 / rescan(true) 走全量。
 source.syncBooksAsync = function() end
-local emitted = 0
+local emitted = {}
 package.loaded["desktop.sync"] = {
-    refresh = function(desk)
+    refresh = function(desk, force)
         Assert.eq(desk, desktop)
-        emitted = emitted + 1
+        emitted[#emitted + 1] = force
     end,
 }
 view_updates = 0
-library:rescan()
-Assert.eq(emitted, 1)
+library:rescan(false)
+Assert.len(emitted, 1)
+Assert.is_false(emitted[1])
 Assert.len(Themed.all("progress_dialog"), 0)
+library:rescan(true)
+Assert.len(emitted, 2)
+Assert.is_true(emitted[2])
+local refresh_page = render({ book }, 1)
+button(refresh_page, "refresh"):onTapThemeButton()
+Assert.len(emitted, 3)
+Assert.is_false(emitted[3], "单击增量刷新")
+button(refresh_page, "refresh"):onHoldThemeButton()
+Assert.len(emitted, 4)
+Assert.is_true(emitted[4], "长按全量刷新")
+local saved_group, saved_groups = library.group, library.groups
+library.group = "author"
+library.groups = { rows = { { value = "刘慈欣", count = 1 } } }
+local group_page = library:buildPage(ctx)
+group_page:paintTo(Kit.canvas(), 0, 0)
+button(group_page, "refresh"):onTapThemeButton()
+Assert.len(emitted, 5)
+Assert.is_false(emitted[5], "分组列表单击也是增量")
+button(group_page, "refresh"):onHoldThemeButton()
+Assert.len(emitted, 6)
+Assert.is_true(emitted[6], "分组列表长按也是全量")
+library.group, library.groups = saved_group, saved_groups
 
 -- 刷新同时后台校验已下载标记：范围跟书库一致；在飞时不重复起。
 Assert.len(verifies, 1)
@@ -435,10 +459,13 @@ verifies[3].cb(2)
 Assert.is_nil(library.state, "撤掉登记后重拉当前页")
 Assert.eq(view_updates, 1)
 
--- 源不支持同步：不发请求。
+-- 源不支持同步：点击 / 长按都不发请求。
 source.syncBooksAsync = nil
-library:rescan()
-Assert.eq(emitted, 1)
+library:rescan(false)
+library:rescan(true)
+button(render({ book }, 1), "refresh"):onTapThemeButton()
+button(render({ book }, 1), "refresh"):onHoldThemeButton()
+Assert.len(emitted, 6)
 
 -- 随机一本：有书才出骰子；按总数随机一页、每页一本，沿用当前筛选排序，取到即开书。
 local dice_page = render({ book }, 0)
