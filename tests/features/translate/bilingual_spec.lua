@@ -278,6 +278,169 @@ Assert.eq(last, "Paragraph 200 says something distinct.")
 Assert.is_true(results_b[1].ok)
 Assert.is_nil(read(big.cache .. ".pending"))
 
+-- AI 对齐：按 id 对齐，不少返回就按短数组顺序填入；条数一致的纯字符串仍按序。
+do
+    local align = Bilingual._alignAiItems
+    local req = { { id = 1, text = "Hello" }, { id = 2, text = "World" }, { id = 3, text = "Foo" } }
+    local by_id = align(req, { { id = 3, text = "福" }, { id = 1, text = "你好" } })
+    Assert.eq(by_id[1], "你好")
+    Assert.is_nil(by_id[2], "缺的不能靠顺序补上")
+    Assert.eq(by_id[3], "福")
+    local by_str_id = align(req, { { id = "2", text = " 世界 " } })
+    Assert.eq(by_str_id[2], "世界", "字符串 id 与首尾空白")
+    local short = align(req, { "错位甲", "错位乙" })
+    Assert.is_nil(short[1], "短数组不能按顺序对齐")
+    Assert.is_nil(short[2])
+    Assert.is_nil(short[3])
+    local ordered = align(req, { "你好", "世界", "福" })
+    Assert.eq(ordered[1], "你好")
+    Assert.eq(ordered[2], "世界")
+    Assert.eq(ordered[3], "福")
+    local skipped = align(req, { { id = 2, text = "世界" }, { id = 99, text = "x" } })
+    Assert.is_nil(skipped[1])
+    Assert.eq(skipped[2], "世界")
+    Assert.is_nil(skipped[99], "请求里没有的 id 不能写入")
+end
+
+-- AI 翻译：少返回时保留已译、只补缺的；完全没有可用译文才失败。
+do
+    local saved_ai = package.loaded["ai"]
+    local saved_lang = package.loaded["features.translate.languages"]
+    local saved_tr = package.loaded["ui/translator"]
+    local replies, calls = {}, {}
+    package.loaded["features.translate.languages"] = {
+        displayName = function() return "Chinese (Simplified)" end,
+    }
+    package.loaded["ui/translator"] = {}
+    package.loaded["ai"] = {
+        jsonExtract = function(messages, _opts, cb)
+            calls[#calls + 1] = require("support.json_stub").decode(messages[2].content).items
+            local reply = table.remove(replies, 1)
+            if reply == nil then
+                cb(nil, "unexpected extra request")
+            elseif reply.err and reply.items == nil then
+                cb(nil, reply.err)
+            else
+                cb({ items = reply.items }, reply.err)
+            end
+            return { cancel = function() end }
+        end,
+    }
+
+    -- 少返回且乱序：先留下已对齐的，第二次只补缺的，且不覆盖已成功的。
+    replies = {
+        { items = { { id = 3, text = "福" }, { id = 1, text = "你好" } } },
+        { items = { { id = 1, text = "覆盖" }, { id = 2, text = "世界" } } },
+    }
+    calls = {}
+    local got, err
+    Bilingual.ENGINES.ai.translate({ "Hello", "World", "Foo" }, "zh", function(list, e)
+        got, err = list, e
+    end)
+    Assert.is_nil(err)
+    Assert.eq(got[1], "你好", "补缺不得覆盖已译")
+    Assert.eq(got[2], "世界")
+    Assert.eq(got[3], "福")
+    Assert.len(calls, 2)
+    Assert.len(calls[1], 3)
+    Assert.len(calls[2], 1)
+    Assert.eq(calls[2][1].id, 2)
+    Assert.eq(calls[2][1].text, "World")
+
+    -- 短数组不按顺序填入，整批再补一次。
+    replies = {
+        { items = { "错位甲", "错位乙" } },
+        { items = { { id = 1, text = "你好" }, { id = 2, text = "世界" }, { id = 3, text = "福" } } },
+    }
+    calls = {}
+    got, err = nil, nil
+    Bilingual.ENGINES.ai.translate({ "Hello", "World", "Foo" }, "zh", function(list, e)
+        got, err = list, e
+    end)
+    Assert.is_nil(err)
+    Assert.eq(got[1], "你好")
+    Assert.eq(got[2], "世界")
+    Assert.eq(got[3], "福")
+    Assert.len(calls, 2)
+    Assert.len(calls[2], 3, "第一次对不上，补请求仍是全部")
+
+    -- 第一次部分成功，补缺仍空：保留已译，不失败。
+    replies = {
+        { items = { { id = 1, text = "你好" } } },
+        { items = {} },
+    }
+    calls = {}
+    got, err = nil, nil
+    Bilingual.ENGINES.ai.translate({ "Hello", "World" }, "zh", function(list, e)
+        got, err = list, e
+    end)
+    Assert.is_nil(err)
+    Assert.eq(got[1], "你好")
+    Assert.is_nil(got[2])
+    Assert.len(calls, 2)
+    Assert.eq(calls[2][1].id, 2)
+
+    -- 两次都没有可用译文才失败，不再抛内部英文错误。
+    replies = {
+        { items = { "only-one" } },
+        { items = {} },
+    }
+    calls = {}
+    got, err = nil, nil
+    Bilingual.ENGINES.ai.translate({ "Hello", "World" }, "zh", function(list, e)
+        got, err = list, e
+    end)
+    Assert.is_nil(got)
+    Assert.eq(err, "AI 没有返回可用译文")
+
+    -- 请求本身失败：把已有的中文错误传出去。
+    replies = {
+        { err = "AI 没有返回内容" },
+        { err = "AI 没有返回内容" },
+    }
+    got, err = nil, nil
+    Bilingual.ENGINES.ai.translate({ "Hello" }, "zh", function(list, e)
+        got, err = list, e
+    end)
+    Assert.is_nil(got)
+    Assert.eq(err, "AI 没有返回内容")
+
+    -- 任务：部分成功仍生成双语版，未译段落不写入缓存，不把整页标失败。
+    replies = {
+        { items = { { id = 1, text = "章" }, { id = 2, text = "你好" } } },
+        { items = {} },
+    }
+    local partial = input("ai_partial")
+    partial.engine = "ai"
+    local _hp, _rp, results_p = start(partial)
+    Assert.is_true(results_p[1].ok)
+    local body = read(partial.dest)
+    has(body, ">章<")
+    has(body, ">你好<")
+    has(body, "<p>World</p>")
+    Assert.is_true(body:find("World<br/>", 1, true) == nil, "World 未译不插入")
+    local cache = read(partial.cache)
+    has(cache, "[\"Chapter\",\"章\"]")
+    has(cache, "[\"Hello\",\"你好\"]")
+    Assert.is_true(cache:find("[\"World\"", 1, true) == nil, "未译不进缓存")
+
+    -- 任务：完全没有可用译文才失败。
+    replies = {
+        { items = {} },
+        { items = {} },
+    }
+    local none = input("ai_none")
+    none.engine = "ai"
+    local _hn, _rn, results_n = start(none)
+    Assert.is_false(results_n[1].ok)
+    Assert.eq(results_n[1].err, "AI 没有返回可用译文")
+    Assert.is_nil(read(none.dest))
+
+    package.loaded["ai"] = saved_ai
+    package.loaded["features.translate.languages"] = saved_lang
+    package.loaded["ui/translator"] = saved_tr
+end
+
 -- 入口：入后台任务队列（每本书一个 key，可取消、可转后台）；正在跑时再点入口只跟随进度
 do
     local Themed = require("support.theme_stubs")
