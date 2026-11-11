@@ -47,14 +47,19 @@ do
     Assert.eq(result.groups[1].title, "男生分类")
     Assert.eq(result.groups[2].title, "女生分类")
     Assert.eq(result.groups[3].title, "出版分类")
+    Assert.eq(result.groups[4].title, "筛选")
     local found = false
-    for _idx, chip in ipairs(result.groups[4].chips) do
-        if chip.title == "属性：付费" then
-            found = true
-            Assert.eq(chip.id, "cate:20001-0-0-3-0-0-0-1")
+    for _idx, group in ipairs(result.groups) do
+        if group.title == "属性" then
+            for _i, chip in ipairs(group.chips) do
+                if chip.title == "付费" then
+                    found = true
+                    Assert.eq(chip.id, "cate:20001-0-0-3-0-0-0-1")
+                end
+            end
         end
     end
-    Assert.is_true(found)
+    Assert.is_true(found, "属性筛选项单独成组，标题不再拼选中标记")
 end
 
 do

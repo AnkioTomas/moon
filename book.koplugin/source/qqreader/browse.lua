@@ -38,21 +38,26 @@ local function groups(data)
         group.title = _(category.name) .. _("分类")
         out[#out + 1] = group
     end
-    local filters = { { id = "rank:male-sell", title = _("排行榜") }, { id = "cate:0", title = _("全部") } }
+    local nav = Browse.group({
+        { id = "rank:male-sell", title = _("排行榜") },
+        { id = "cate:0", title = _("全部") },
+    }, current)
+    nav.title = _("筛选")
+    out[#out + 1] = nav
     for _idx, key in ipairs({ "categoryId3", "finishStatus", "priceStatus", "words", "updateTime", "orderBy" }) do
         local filter = data[key]
         if type(filter) ~= "table" or type(filter.items) ~= "table" then return nil end
+        local chips = {}
         for _item, item in ipairs(filter.items) do
-            filters[#filters + 1] = {
+            chips[#chips + 1] = {
                 id = change(params, key, item.value),
-                title = (key == "orderBy" and _("排序") or _(filter.title)) .. "：" .. _(item.text)
-                    .. (item.value == params[key] and " ✓" or ""),
+                title = _(item.text),
             }
         end
+        local group = Browse.group(chips, current)
+        group.title = key == "orderBy" and _("排序") or _(filter.title)
+        out[#out + 1] = group
     end
-    local group = Browse.group(filters, current)
-    group.title = _("筛选")
-    out[#out + 1] = group
     return out
 end
 

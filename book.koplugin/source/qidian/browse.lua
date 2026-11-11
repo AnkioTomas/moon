@@ -72,29 +72,20 @@ local function groups(params, categories, data)
     local sort = Browse.group(sorts, current)
     sort.title = _("排序")
     out[#out + 1] = sort
-    local filters = {}
     for _idx, filter in ipairs(data.filters) do
         local chips = {}
         for _item, item in ipairs(filter.items) do
             local value = tostring(item.value)
             chips[#chips + 1] = {
                 id = change(params, filter.key, value),
-                title = filter.key == "subCatId" and (LABELS[item.text] or _(item.text))
-                    or ((LABELS[filter.title] or _(filter.title)) .. "：" .. (LABELS[item.text] or _(item.text))
-                        .. (value == (params[filter.key] or "") and " ✓" or "")),
+                title = LABELS[item.text] or _(item.text),
             }
         end
-        if filter.key == "subCatId" then
-            local sub = Browse.group(chips, current)
-            sub.title = _("子分类")
-            out[#out + 1] = sub
-        else
-            for _item, chip in ipairs(chips) do filters[#filters + 1] = chip end
-        end
+        local group = Browse.group(chips, current)
+        group.title = filter.key == "subCatId" and _("子分类")
+            or (LABELS[filter.title] or _(filter.title))
+        out[#out + 1] = group
     end
-    local filter = Browse.group(filters, current)
-    filter.title = _("筛选")
-    out[#out + 1] = filter
     return out
 end
 

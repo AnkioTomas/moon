@@ -47,8 +47,11 @@ do
     Assert.eq(requests[2], "21")
     Assert.eq(requests[5].pageNum, 3)
     Assert.len(source.category_info, 2, "动态分类归源实例所有")
-    Assert.len(result.groups, 5, "排序、子分类与筛选复用两行折叠菜单")
-    Assert.eq(result.groups[5].title, "筛选")
+    Assert.len(result.groups, 6, "资费、状态各自成组，不再把选中标记写进标题")
+    Assert.eq(result.groups[4].title, "子分类")
+    Assert.eq(result.groups[5].title, "资费")
+    Assert.eq(result.groups[6].title, "状态")
+    Assert.eq(result.groups[5].chips[2].title, "VIP")
     Assert.eq(result.groups[1].chips[3].id, "yuepiao:-1", "分类页仍可进入原榜单")
     Assert.matches(result.groups[2].chips[2].id, "catId=22")
 end
@@ -66,6 +69,10 @@ do
     Assert.eq(result.groups[2].chips[1].title, "古代言情")
     Assert.matches(result.groups[1].chips[1].id, "catId=21")
     Assert.matches(result.groups[1].chips[1].id, "isvip=1", "跨频道保留兼容条件")
+    Assert.eq(result.groups[5].chips[2].title, "VIP")
+    Assert.eq(result.groups[5].active, result.groups[5].chips[2].id, "资费用 group.active 标选中")
+    Assert.eq(result.groups[6].chips[2].title, "完本")
+    Assert.eq(result.groups[6].active, result.groups[6].chips[2].id)
 end
 
 do
