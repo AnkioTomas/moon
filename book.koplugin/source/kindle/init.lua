@@ -187,6 +187,39 @@ local function convertible(row)
     return nil
 end
 
+--- 还没加载到 kindle.koplugin 时，直接进入账号 → Kindle，并用提示引导下一步。
+---@param cb fun(path: string|nil, err: string|nil, meta: table|nil)
+---@return table handle
+local function promptMissingHelper(cb)
+    pcall(function()
+        local function instance(name)
+            local ok, mod = pcall(require, name)
+            return ok and mod and mod.instance or nil
+        end
+        local ui = instance("apps/filemanager/filemanager") or instance("apps/reader/readerui")
+        local plugin = ui and not ui.tearing_down and ui.book or nil
+        require("desktop.pages.setting.source").openAccount(
+            require("desktop.pages.setting").host(plugin), "kindle")
+    end)
+    local version = require("source.kindle.plugin_update").target.installed()
+    local text
+    if not version then
+        text = _("请点按「kindle.koplugin」那一行安装")
+    else
+        local disabled
+        local settings = rawget(_G, "G_reader_settings")
+        if settings and settings.readSetting then
+            local list = settings:readSetting("plugins_disabled")
+            disabled = type(list) == "table" and list.kindle
+        end
+        text = disabled
+            and T(_("已安装 kindle.koplugin %1，请到 KOReader「工具 → 插件管理」里启用它，然后重启。"), version)
+            or T(_("已安装 kindle.koplugin %1，请重启 KOReader 后再打开这本书。"), version)
+    end
+    require("ui.themes.widgets.toast"):new{ text = text, timeout = 4 }:show()
+    return SourceBase.defer(cb, nil, nil, { cancelled = true })
+end
+
 --- 开书：按 uuid 查原文件交给 kindle.koplugin，拿到真实路径再走我们的阅读器。
 --- KFX 首次要转换（kindle-helper 要几分钟）：放进 fork 子进程当后台任务，UI 不卡、可取消、可转后台；
 --- 转换完时用户还在等才继续开，转了后台只提示。相对可用内存偏大的 KFX 先确认再入队，避免默默 OOM。
@@ -195,7 +228,7 @@ function Source:openBookAsync(identity, _opts, cb)
     local row = rows and rows[1]
     if not row then return SourceBase.defer(cb, nil, err or _("Kindle 书库里找不到这本书")) end
     local helper = Kindle.helper()
-    if not helper then return SourceBase.defer(cb, nil, _("需要先安装并启用 kindle.koplugin")) end
+    if not helper then return promptMissingHelper(cb) end
     local cancelled = false
     local handle = { cancel = function() cancelled = true end }
     local function open()

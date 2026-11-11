@@ -76,6 +76,68 @@ Assert.is_true(Kindle.supported())
 Assert.is_false(Kindle.available())
 Assert.is_true(Kindle.new():configured())
 
+-- 开书不再只丢错误：直接进入账号 → Kindle，并用提示引导安装 / 启用 / 重启
+local accounts, toast_texts = {}, {}
+package.loaded["desktop.pages.setting"] = { host = function(plugin) return { plugin = plugin } end }
+package.loaded["desktop.pages.setting.source"] = {
+    openAccount = function(desktop, source_id)
+        accounts[#accounts + 1] = { desktop = desktop, source_id = source_id }
+    end,
+}
+package.loaded["ui.themes.widgets.toast"] = {
+    new = function(_self, opts)
+        return { show = function()
+            toasts = toasts + 1
+            toast_texts[#toast_texts + 1] = opts.text
+        end }
+    end,
+}
+package.loaded["source.kindle.plugin_update"] = {
+    target = { installed = function() return nil end },
+}
+local path, err, meta
+Kindle.new():openBookAsync({ source_id = "kindle", stable_id = "u1" }, nil, function(p, e, m)
+    path, err, meta = p, e, m
+end)
+Assert.eq(#accounts, 1)
+Assert.eq(accounts[1].source_id, "kindle")
+Assert.matches(toast_texts[1], "点按")
+Assert.matches(toast_texts[1], "安装")
+Assert.is_nil(path)
+Assert.is_nil(err)
+Assert.is_true(meta.cancelled)
+
+accounts, toast_texts, path, err, meta = {}, {}, nil, nil, nil
+package.loaded["source.kindle.plugin_update"].target.installed = function() return "0.0.11" end
+local previous_settings = rawget(_G, "G_reader_settings")
+_G.G_reader_settings = { readSetting = function() return { kindle = true } end }
+Kindle.new():openBookAsync({ source_id = "kindle", stable_id = "u1" }, nil, function(p, e, m)
+    path, err, meta = p, e, m
+end)
+Assert.eq(#accounts, 1)
+Assert.eq(accounts[1].source_id, "kindle")
+Assert.matches(toast_texts[1], "插件管理")
+Assert.matches(toast_texts[1], "0.0.11")
+Assert.is_true(meta.cancelled)
+
+accounts, toast_texts, path, err, meta = {}, {}, nil, nil, nil
+_G.G_reader_settings = { readSetting = function() return {} end }
+Kindle.new():openBookAsync({ source_id = "kindle", stable_id = "u1" }, nil, function(p, e, m)
+    path, err, meta = p, e, m
+end)
+Assert.eq(#accounts, 1)
+Assert.matches(toast_texts[1], "重启 KOReader")
+Assert.is_nil(toast_texts[1]:find("插件管理", 1, true))
+Assert.is_true(meta.cancelled)
+_G.G_reader_settings = previous_settings
+package.loaded["source.kindle.plugin_update"] = nil
+package.loaded["desktop.pages.setting"] = nil
+package.loaded["desktop.pages.setting.source"] = nil
+package.loaded["ui.themes.widgets.toast"] = {
+    new = function() return { show = function() toasts = toasts + 1 end } end,
+}
+toasts = 0
+
 local prepared, epub_exists = {}, false
 local ofe = {
     cache_manager = { getCachePaths = function(_self, book)
