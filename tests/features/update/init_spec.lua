@@ -87,12 +87,16 @@ end
 package.preload["utils.paths"] = function()
     return { ensureDir = function() return true end, root = function() return "/tmp" end }
 end
+local update_saves = 0
 package.preload["utils.settings"] = function()
-    local update = { update_last_checked_at = 0 }
+    local update = { auto_check = true, update_last_checked_at = 0 }
     local http = { mirror_dead = {} }
     return {
         get = function(name) assert(name == "features.update" or name == "http"); return name == "http" and http or update end,
-        save = function(name) assert(name == "features.update" or name == "http") end,
+        save = function(name)
+            assert(name == "features.update" or name == "http")
+            if name == "features.update" then update_saves = update_saves + 1 end
+        end,
     }
 end
 local job_opts, job_worker
@@ -408,6 +412,45 @@ connected = true
 Update.autoCheck("/plugins/book.koplugin")
 Assert.eq(gets, before + 1)
 check_cb(release("v1.2.3"))
+
+-- 关闭自动检查不发请求，也不影响版本行的手动检查。
+settings.auto_check = false
+settings.update_last_checked_at = 0
+before = gets
+Update.autoCheck("/plugins/book.koplugin")
+Assert.eq(gets, before)
+Update:manualCheck("/plugins/book.koplugin")
+Assert.eq(gets, before + 1)
+check_cb(release("v1.2.3"))
+
+-- 检查途中关闭开关，迟到的新版本响应也不弹窗。
+settings.auto_check = true
+settings.update_last_checked_at = 0
+Update.autoCheck("/plugins/book.koplugin")
+local shown_before = #shown
+settings.auto_check = false
+check_cb(release("v1.2.4"))
+Assert.len(shown, shown_before)
+
+-- 我的设备里的开关落盘，并随重建显示最新状态。
+package.loaded["ui.themes.widgets.row"] = { widget = function(opts) return opts end }
+local refreshed = 0
+local entry = require("features.update.setting").entries({
+    updateView = function() refreshed = refreshed + 1 end,
+})[1]
+Assert.eq(entry.parent, "my_device")
+local toggle = entry.sections()[1].rows[1](400)
+Assert.is_false(toggle.status_on)
+local saves_before = update_saves
+toggle.callback()
+Assert.is_true(settings.auto_check)
+Assert.eq(update_saves, saves_before + 1)
+toggle = entry.sections()[1].rows[1](400)
+Assert.is_true(toggle.status_on)
+toggle.callback()
+Assert.is_false(settings.auto_check)
+Assert.eq(update_saves, saves_before + 2)
+Assert.eq(refreshed, 2)
 
 -- 远程上传的包：不带校验值装包，成败都删包；错误只留首行。
 local function tempArchive()

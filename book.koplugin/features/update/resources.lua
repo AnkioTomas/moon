@@ -109,6 +109,7 @@ end
 --- 按天静默检查；有更新才弹确认。没连网 / 正在下载不查。
 function Resources.autoCheck()
     local settings = MoonSettings.get("features.update")
+    if not settings.auto_check then return end
     if os.time() - settings.resource_last_checked_at < CHECK_INTERVAL then return end
     if not require("ui/network/manager"):isConnected() then return end
     if require("features.ime.download").downloading() then return end
@@ -117,7 +118,7 @@ function Resources.autoCheck()
     MoonSettings.save("features.update", settings)
     if #items == 0 then return end
     Resources.findStale(items, function(stale)
-        if #stale == 0 then return end
+        if not settings.auto_check or #stale == 0 then return end
         local names = {}
         for _idx, item in ipairs(stale) do names[#names + 1] = item.label end
         require("ui.themes.widgets.confirm"):new{
