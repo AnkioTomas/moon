@@ -14,21 +14,16 @@ local OWNER = "features.share"
 --- 把当前编辑页选项立刻落到磁盘。
 ---@param state table|nil
 function Settings.write(state)
-    state = state or {}
-    local font_id = state.font_id
-    if type(font_id) ~= "string" or font_id == "" then font_id = nil end
-    local font_name = font_id and state.font_name or nil
-    if type(font_name) ~= "string" or font_name == "" then font_name = nil end
+    state = Setting.normalize(state)
     local c = MoonSettings.get(OWNER)
-    local theme, swatch = Setting.migrateTheme(state.theme, state.swatch)
-    c.share_theme = theme
-    c.share_font = font_id
-    c.share_font_name = font_name
-    c.share_swatch = swatch
+    c.share_theme = state.theme
+    c.share_font = state.font_id
+    c.share_font_name = state.font_name
+    c.share_swatch = state.swatch
     c.share_art = state.art
     -- 长卡片已下线，清掉旧值以免下次读到 true。
     c.share_long = false
-    c.share_show_logo = state.show_logo ~= false
+    c.share_show_logo = state.show_logo
     MoonSettings.save(OWNER)
 end
 

@@ -339,7 +339,38 @@ editor.preview_busy = true
 Assert.eq(editor:preview(560).text, "生成中…")
 editor.preview_busy = false
 
--- 关窗清临时文件并回写 close_callback（Dialog 靠它记住上次选项）。
+do -- 已保存导出只在选项不变时复用；预览变化后分享必须重新导出。
+    local shared = {}
+    package.loaded["features.remote.screenshot"] = {
+        share = function(path) shared[#shared + 1] = path end,
+    }
+    editor.screenshotDir = function() return "/audit-shared" end
+    editor:saveImage()
+    local saved_path = editor.saved_path
+    local count = #writes
+    editor:shareImage()
+    Assert.eq(shared[#shared], saved_path)
+    Assert.eq(#writes, count, "选项没变时复用已保存导出")
+    local changes = {
+        function() editor.state.theme = "classic" end,
+        function() editor.state.font_id, editor.state.font_name = "Song", "宋体" end,
+        function() editor.state.show_logo = not editor.state.show_logo end,
+    }
+    for _idx, change in ipairs(changes) do
+        editor:saveImage()
+        editor:apply(change)
+        Assert.is_nil(editor.saved_path)
+        editor:shareImage()
+        local export = writes[#writes]
+        Assert.eq(export.width, 1125, "分享重新生成完整尺寸")
+        Assert.eq(export.theme, editor.state.theme)
+        Assert.eq(export.opts.font_id, editor.state.font_id)
+        Assert.eq(export.opts.show_logo, editor.state.show_logo)
+        Assert.eq(shared[#shared], export.path)
+    end
+end
+
+-- 关窗清临时文件，并调用调用方提供的关闭回调。
 editor:close()
 Assert.is_true(overlay.closed)
 Assert.is_true(editor.closed)

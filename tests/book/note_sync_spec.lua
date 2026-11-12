@@ -855,4 +855,43 @@ do
 end
 
 
+do -- 微信同文异位的离线笔记不能在开书时丢失，也不能落库成少一条的快照。
+    local JSON = require("json")
+    local Notes = require("source.wechat.notes")
+    local current = {
+        { datetime = "2026-11-12 10:00:00", page = "/p[1]", pos0 = "/p[1].0", pos1 = "/p[1].4",
+            drawer = "lighten", text = "重复原文", note = "想法一" },
+        { datetime = "2026-11-12 10:01:00", page = "/p[8]", pos0 = "/p[8].0", pos1 = "/p[8].4",
+            drawer = "lighten", text = "重复原文", note = "想法二" },
+    }
+    local wechat = {
+        id = "wechat",
+        cleanAnnotations = function(_self, items, total) return Notes.cleanAnnotations(items, total) end,
+        mergeAnnotations = function(_self, remote, live, paging, authoritative)
+            return Notes.mergeAnnotations(remote, live, paging, authoritative)
+        end,
+    }
+    local ref = { source_id = "wechat", stable_id = "offline-notes", source = wechat }
+    open_files["/offline-notes.epub"] = ref
+    rows["wechat:offline-notes:0"] = { payload = JSON.encode({}), updated_at = 1, sync_status = 0 }
+    local flushed = 0
+    local reader = {
+        document = { file = "/offline-notes.epub", getPageCount = function() return 10 end },
+        doc_settings = {
+            readSetting = function(_self, key) if key == "annotations" then return current end end,
+            saveSetting = function(_self, key, value) if key == "annotations" then current = value end end,
+            flush = function() flushed = flushed + 1 end,
+        },
+    }
+    Assert.eq(SessionNote.applyLocal(reader, ref), 2)
+    Assert.len(current, 2)
+    Assert.eq(current[2].note, "想法二")
+    Assert.eq(flushed, 0, "不能把误判为重复的丢线结果刷新到 sidecar")
+    SessionNote.save(reader, ref)
+    local stored = JSON.decode(rows["wechat:offline-notes:0"].payload)
+    Assert.len(stored, 2)
+    Assert.eq(stored[1].note, "想法一")
+    Assert.eq(stored[2].note, "想法二")
+end
+
 _G.G_reader_settings = previous_settings

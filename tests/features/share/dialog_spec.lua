@@ -24,18 +24,6 @@ package.loaded["features.share.setting"] = nil
 local opened
 package.preload["features.share.editor"] = function()
     return {
-        mergeState = function(state)
-            state = state or {}
-            return {
-                theme = state.theme or "calendar",
-                font = state.font or "song",
-                font_id = state.font_id,
-                font_name = state.font_name,
-                swatch = state.swatch or "default",
-                art = state.art,
-                show_logo = state.show_logo ~= false,
-            }
-        end,
         new = function(_, opts)
             opts = opts or {}
             opts.show = function(self)
@@ -74,13 +62,14 @@ opened.state.art = "window"
 opened.state.show_logo = false
 opened.state.font_id = "KingHwa_OldSong"
 opened.state.font_name = "京华老宋体"
-opened.state.show_logo = false
+local Settings = require("features.share.settings")
+Settings.write(opened.state)
+local saved = Settings.read()
+Assert.eq(saved.theme, "scenic")
+Assert.eq(saved.art, "window")
+Assert.is_false(saved.show_logo)
+Assert.eq(saved.font_id, "KingHwa_OldSong")
 opened:close()
-Assert.eq(Dialog.last.theme, "scenic")
-Assert.eq(Dialog.last.art, "window")
-Assert.is_false(Dialog.last.show_logo)
-Assert.eq(Dialog.last.font_id, "KingHwa_OldSong")
-Assert.is_false(Dialog.last.show_logo)
 
 -- 丢掉进程内配置缓存，模拟下次打开。
 package.loaded["utils.settings"] = nil
@@ -93,7 +82,6 @@ Assert.eq(opened.state.art, "window")
 Assert.is_false(opened.state.show_logo)
 Assert.eq(opened.state.font_id, "KingHwa_OldSong")
 Assert.eq(opened.state.font_name, "京华老宋体")
-Assert.is_false(opened.state.show_logo)
 
 os.remove(Paths.sectionPath("share"))
 return true

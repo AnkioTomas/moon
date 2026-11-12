@@ -266,8 +266,9 @@ end
 ---@return integer deduped 因 id / range / 坐标 / 内容键重复被折叠的条数
 function Notes.mergeAnnotations(remote, local_items, paging, authoritative)
     local function rangeKey(item)
-        if type(item.text) ~= "string" or item.text == "" then return nil end
-        return table.concat({ item.text, tostring(item.wr_range or "") }, "\31")
+        if type(item.text) ~= "string" or item.text == ""
+                or not item.wr_range or item.wr_range == "" then return nil end
+        return table.concat({ item.text, tostring(item.wr_range) }, "\31")
     end
     local function noteKey(item)
         if type(item.text) ~= "string" or item.text == ""
@@ -281,32 +282,38 @@ function Notes.mergeAnnotations(remote, local_items, paging, authoritative)
         if type(item.pos0) ~= "string" or type(item.pos1) ~= "string" then return nil end
         return table.concat({ item.pos0, item.pos1 }, "\31")
     end
+    local function samePosition(item, other)
+        if not other then return false end
+        local pos, other_pos = posKey(item), posKey(other)
+        if pos or other_pos then return pos ~= nil and pos == other_pos end
+        return item.page == other.page
+    end
     ---@param item table
-    ---@param seen table<string, boolean>
+    ---@param seen table<string, table>
     local function mark(item, seen)
-        if item.wr_bookmark_id then seen["bookmark:" .. tostring(item.wr_bookmark_id)] = true end
-        if item.wr_review_id then seen["review:" .. tostring(item.wr_review_id)] = true end
+        if item.wr_bookmark_id then seen["bookmark:" .. tostring(item.wr_bookmark_id)] = item end
+        if item.wr_review_id then seen["review:" .. tostring(item.wr_review_id)] = item end
         local range_key, note_key, pos_key = rangeKey(item), noteKey(item), posKey(item)
-        if range_key then seen["range:" .. range_key] = true end
-        if note_key then seen["note:" .. note_key] = true end
-        if pos_key then seen["pos:" .. pos_key] = true end
+        if range_key then seen["range:" .. range_key] = item end
+        if note_key then seen["note:" .. note_key] = item end
+        if pos_key then seen["pos:" .. pos_key] = item end
         -- 没有 id / 原文的位置记录（纯书签或误写入的进度残片）只能靠坐标内容去重；
         -- 漏掉这一层时，历史快照里的几千份拷贝会在每次开书合并时再翻倍。
         local content_key = Normalize.contentKey(item)
-        if content_key then seen["content:" .. content_key] = true end
+        if content_key then seen["content:" .. content_key] = item end
     end
     ---@param item table
-    ---@param seen table<string, boolean>
+    ---@param seen table<string, table>
     ---@return boolean
     local function isDup(item, seen)
         local range_key, note_key, pos_key = rangeKey(item), noteKey(item), posKey(item)
         local content_key = Normalize.contentKey(item)
-        return (item.wr_bookmark_id and seen["bookmark:" .. tostring(item.wr_bookmark_id)])
-            or (item.wr_review_id and seen["review:" .. tostring(item.wr_review_id)])
-            or (range_key and seen["range:" .. range_key])
-            or (note_key and seen["note:" .. note_key])
-            or (not item.wr_bookmark_id and pos_key and seen["pos:" .. pos_key])
-            or (content_key and seen["content:" .. content_key])
+        return (item.wr_bookmark_id and seen["bookmark:" .. tostring(item.wr_bookmark_id)] ~= nil)
+            or (item.wr_review_id and seen["review:" .. tostring(item.wr_review_id)] ~= nil)
+            or (range_key and samePosition(item, seen["range:" .. range_key]))
+            or (note_key and samePosition(item, seen["note:" .. note_key]))
+            or (not item.wr_bookmark_id and pos_key and seen["pos:" .. pos_key] ~= nil)
+            or (content_key and seen["content:" .. content_key] ~= nil)
             or false
     end
     authoritative = authoritative == true

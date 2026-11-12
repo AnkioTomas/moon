@@ -14,6 +14,7 @@ local Blitbuffer = require("ffi/blitbuffer")
 local Device = require("device")
 local Theme = require("ui.themes")
 local Text = require("utils.text")
+local Setting = require("features.share.setting")
 local _ = require("gettext")
 
 local Card = {}
@@ -55,13 +56,13 @@ Card.FONTS = {
 --- 排版主题的底色色板（画境 / 远山不用这些，改走插画）。
 Card.SWATCHES = {
     { id = "default", label = _("默认") },
-    { id = "paper", label = _("米白"), hex = 0xF6F1E8 },
-    { id = "white", label = _("纯白"), hex = 0xFFFFFF },
-    { id = "night", label = _("夜色"), hex = 0x161513 },
-    { id = "ink", label = _("淡墨"), hex = 0x2A2A28 },
-    { id = "slate", label = _("青灰"), hex = 0xD8DEDC },
-    { id = "blush", label = _("浅胭脂"), hex = 0xF3E4E1 },
-    { id = "blue", label = _("素蓝"), hex = 0xE6EEF4 },
+    { id = "paper", label = _("米白") },
+    { id = "white", label = _("纯白") },
+    { id = "night", label = _("夜色") },
+    { id = "ink", label = _("淡墨") },
+    { id = "slate", label = _("青灰") },
+    { id = "blush", label = _("浅胭脂") },
+    { id = "blue", label = _("素蓝") },
 }
 
 --- 画境插画：tone / foot_light / quote 对应设计稿叠字区域。
@@ -91,9 +92,9 @@ for _idx, style in ipairs(Card.STYLES) do STYLE_IDS[style.id] = true end
 
 local DARK_THEMES = { cinema = true }
 local DARK_SWATCHES = { night = true, ink = true }
-local SWATCH_HEX = {}
+local SWATCH_HEX = Setting.SWATCH_HEX
 for _idx, item in ipairs(Card.SWATCHES) do
-    if item.hex then SWATCH_HEX[item.id] = item.hex end
+    item.hex = SWATCH_HEX[item.id]
 end
 
 ---@param id string
@@ -116,20 +117,7 @@ function Card.hasSwatch(id)
 end
 
 --- 已下线主题的迁移：夜读并入纸页的夜色色板；公众号长图改走纸页。
----@param theme string|nil
----@param swatch string|nil
----@return string|nil, string
-function Card.migrate(theme, swatch)
-    if type(swatch) ~= "string" or swatch == "" then swatch = "default" end
-    if swatch ~= "default" and not SWATCH_HEX[swatch] then swatch = "default" end
-    if theme == "night" then
-        if swatch == "default" then swatch = "night" end
-        theme = "paper"
-    elseif theme == "official" then
-        theme = "paper"
-    end
-    return theme, swatch
-end
+Card.migrate = Setting.migrateTheme
 
 --- 书名加上书名号（已有《「『 则不重复）。
 ---@param name string|nil
@@ -137,7 +125,8 @@ end
 function Card.bookTitle(name)
     name = Text.trim(tostring(name or ""))
     if name == "" then return "" end
-    if name:match("^[《「『]") then return name end
+    local prefix = name:sub(1, 3)
+    if prefix == "《" or prefix == "「" or prefix == "『" then return name end
     return "《" .. name .. "》"
 end
 
@@ -232,10 +221,8 @@ end
 ---@return table
 function Card.normalize(opts)
     opts = opts or {}
-    local font = opts.font or "song"
-    if font ~= "song" and font ~= "hei" and font ~= "kai" and font ~= "fang" then font = "song" end
-    local theme, swatch = Card.migrate(opts.theme, opts.swatch)
-    local art = opts.art
+    local state = Setting.normalize(opts)
+    local theme, art = state.theme, state.art
     if theme == "scenic" then
         if not (art and Card.SCENIC[art]) then art = "sunset" end
     elseif theme == "vista" then
@@ -245,22 +232,15 @@ function Card.normalize(opts)
     elseif art and not (Card.SCENIC[art] or Card.VISTA[art]) then
         art = nil
     end
-    local show_logo = opts.show_logo
-    if show_logo == nil then show_logo = true end
-    local font_id = opts.font_id
-    if type(font_id) ~= "string" or font_id == "" then font_id = nil end
-    local font_name = opts.font_name
-    if type(font_name) ~= "string" or font_name == "" then font_name = nil end
-    if not font_id then font_name = nil end
     return {
         theme = theme,
-        font = font,
-        font_id = font_id,
-        font_name = font_name,
-        swatch = swatch,
+        font = state.font,
+        font_id = state.font_id,
+        font_name = state.font_name,
+        swatch = state.swatch,
         art = art,
         long = false,
-        show_logo = show_logo == true,
+        show_logo = state.show_logo,
         now = opts.now,
         art_path = opts.art_path,
     }
@@ -518,12 +498,8 @@ function Card.fontDirs()
     if ok_list and type(FontList.fontdir) == "string" then
         dirs[#dirs + 1] = FontList.fontdir
     end
-    local ok_paths, Paths = pcall(require, "utils.paths")
-    if ok_paths then dirs[#dirs + 1] = Paths.fontsDir() end
-    local ok_fonts, Fonts = pcall(require, "ui.fonts")
-    if ok_fonts and Fonts.settingsFontsDir then
-        dirs[#dirs + 1] = Fonts.settingsFontsDir()
-    end
+    dirs[#dirs + 1] = require("utils.paths").fontsDir()
+    dirs[#dirs + 1] = require("ui.fonts").settingsFontsDir()
     local home = os.getenv("HOME") or ""
     local extra = {
         "/System/Library/Fonts",
@@ -606,14 +582,12 @@ function Card.bundledFont(name)
     return nil
 end
 
---- Font:getFace 能否打开该文件（含可选 TTC faceindex）。测试桩没有 getFace 时视为可用。
+--- Font:getFace 能否打开该文件（含可选 TTC faceindex）。
 ---@param path string
 ---@param faceindex number|nil
 ---@return boolean
 function Card.fontWorks(path, faceindex)
-    local ok, Font = pcall(require, "ui/font")
-    if not ok or not Font.getFace then return type(path) == "string" and path ~= "" end
-    return Font:getFace(path, 16, faceindex) ~= nil
+    return require("ui/font"):getFace(path, 16, faceindex) ~= nil
 end
 
 --- 打开一个可用字体：先试指定文件（TTC 会选面，失败再试默认面），再试自带 Noto Sans CJK SC，

@@ -17,12 +17,16 @@ local Overlay = require("desktop.pages.setting.overlay")
 local Row = require("ui.themes.widgets.row")
 local Toast = require("ui.themes.widgets.toast")
 local Card = require("features.share.card")
+local Setting = require("features.share.setting")
 local Paths = require("utils.paths")
 local Guard = require("ui.guard")
 local T = require("ffi/util").template
 local _ = require("gettext")
 
 ---@class BookShareEditor
+---@field payload table
+---@field preview_width number
+---@field close_callback fun()|nil
 local Editor = {}
 Editor.__index = Editor
 
@@ -32,28 +36,14 @@ Editor.PREVIEW_HEIGHT = 144
 ---@param state table|nil
 ---@return table
 function Editor.mergeState(state)
-    state = state or {}
-    local theme, swatch = Card.migrate(state.theme, state.swatch or "default")
+    state = Setting.normalize(state)
+    local theme = state.theme
     theme = Card.isStyle(theme) and theme or "calendar"
     local art = state.art
     if theme == "scenic" and not (art and Card.SCENIC[art]) then art = "sunset" end
     if theme == "vista" and not (art and Card.VISTA[art]) then art = "dawn" end
-    local font = state.font
-    if font ~= "song" and font ~= "hei" and font ~= "kai" and font ~= "fang" then font = "song" end
-    local font_id = state.font_id
-    if type(font_id) ~= "string" or font_id == "" then font_id = nil end
-    local font_name = state.font_name
-    if type(font_name) ~= "string" or font_name == "" then font_name = nil end
-    if not font_id then font_name = nil end
-    return {
-        theme = theme,
-        font = font,
-        font_id = font_id,
-        font_name = font_name,
-        swatch = swatch,
-        art = art,
-        show_logo = state.show_logo ~= false,
-    }
+    state.theme, state.art = theme, art
+    return state
 end
 
 ---@param opts { payload: table, state?: table, close_callback?: fun() }
@@ -83,13 +73,14 @@ end
 
 --- 改一项立刻落盘，不等自动保存间隔，也不等「保存图片」。
 function Editor:persist()
-    require("features.share.settings").write(Editor.mergeState(self.state))
+    require("features.share.settings").write(self.state)
 end
 
 --- 更新选项、立刻记住，并刷新预览。
 ---@param mut fun()
 function Editor:apply(mut)
     mut()
+    self.saved_path = nil
     self.state = Editor.mergeState(self.state)
     self:persist()
     self:refreshPreview()

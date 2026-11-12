@@ -411,6 +411,27 @@ do
     Assert.eq(version, 123)
 end
 
+do -- 同文、同备注或同范围不能覆盖不同位置的真实划线。
+    local first = {
+        page = "/p[1]", pos0 = "/p[1].0", pos1 = "/p[1].4",
+        text = "重复原文", note = "想法一", drawer = "lighten",
+    }
+    local second = {
+        page = "/p[8]", pos0 = "/p[8].0", pos1 = "/p[8].4",
+        text = first.text, note = "想法二", drawer = "lighten",
+    }
+    local merged, dropped, deduped = Notes.mergeAnnotations({}, { first, second }, false, false)
+    Assert.len(merged, 2)
+    Assert.eq(dropped, 0)
+    Assert.eq(deduped, 0)
+    Assert.eq(merged[2].note, "想法二")
+    second.note = first.note
+    Assert.len(Notes.mergeAnnotations({ first }, { second }, false, false), 2)
+    first.wr_range, second.wr_range = "0-4", "0-4"
+    Assert.len(Notes.mergeAnnotations({ first, second }, {}, false, false), 2)
+    Assert.len(Notes.mergeAnnotations({ first, second }, { first, second }, false, false), 2)
+end
+
 do -- 想法列表没拿到：本地已有的想法接回拉下来的划线，review-only 条目保留
     local anns = {
         { text = "a", wr_bookmark_id = "b1" },

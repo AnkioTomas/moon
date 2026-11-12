@@ -42,6 +42,20 @@ local function isImageEntry(name)
     return Image.suffix(base) ~= nil
 end
 
+---@param reader table
+---@return { path: string, size: integer }[]
+local function imageEntries(reader)
+    ---@type { path: string, size: integer }[]
+    local entries = {}
+    for entry in reader:iterate() do
+        if entry and entry.mode == "file" and isImageEntry(entry.path) then
+            entries[#entries + 1] = { path = entry.path, size = tonumber(entry.size) or 0 }
+        end
+    end
+    table.sort(entries, function(a, b) return a.path < b.path end)
+    return entries
+end
+
 --- 按文件名列出压缩包里的页图（与阅读器按名排序一致）。
 ---@param archive_path string
 ---@return { path: string, size: integer }[]|nil entries
@@ -55,15 +69,8 @@ function Cbz.listImages(archive_path)
     if not reader:open(archive_path) then
         return nil, reader.err or _("无法读取漫画图片")
     end
-    ---@type { path: string, size: integer }[]
-    local entries = {}
-    for entry in reader:iterate() do
-        if entry and entry.mode == "file" and isImageEntry(entry.path) then
-            entries[#entries + 1] = { path = entry.path, size = tonumber(entry.size) or 0 }
-        end
-    end
+    local entries = imageEntries(reader)
     reader:close()
-    table.sort(entries, function(a, b) return a.path < b.path end)
     return entries
 end
 
@@ -75,14 +82,13 @@ end
 ---@return integer page_count
 function Cbz.needsFit(archive_path, screen_w, screen_h)
     screen_w, screen_h = screen_w or select(1, Fit.screen()), screen_h or select(2, Fit.screen())
-    local entries = Cbz.listImages(archive_path)
-    if not entries or #entries == 0 then return false, entries and #entries or 0 end
     local ok, Reader = pcall(function()
         return require("ffi/archiver").Reader
     end)
-    if not ok or not Reader then return false, #entries end
+    if not ok or not Reader then return false, 0 end
     local reader = Reader:new()
-    if not reader:open(archive_path) then return false, #entries end
+    if not reader:open(archive_path) then return false, 0 end
+    local entries = imageEntries(reader)
     local needed = false
     for _idx, entry in ipairs(entries) do
         local data = reader:extractToMemory(entry.path)
@@ -100,7 +106,7 @@ function Cbz.needsFit(archive_path, screen_w, screen_h)
     return needed, #entries
 end
 
----@param settings table
+---@param archive_path string
 ---@param old_pages integer
 ---@param new_pages integer
 local function remapSidecar(archive_path, old_pages, new_pages)
@@ -236,9 +242,22 @@ end
 function Cbz.rebuild(archive_path, state, cb, screen_w, screen_h)
     screen_w = screen_w or select(1, Fit.screen())
     screen_h = screen_h or select(2, Fit.screen())
-    local entries, list_err = Cbz.listImages(archive_path)
-    if not entries or #entries == 0 then
-        cb(nil, list_err or _("无法读取漫画图片"))
+    local reader_ok, Reader = pcall(function()
+        return require("ffi/archiver").Reader
+    end)
+    if not reader_ok or not Reader then
+        cb(nil, _("无法读取漫画图片"))
+        return
+    end
+    local reader = Reader:new()
+    if not reader:open(archive_path) then
+        cb(nil, reader.err or _("无法读取漫画图片"))
+        return
+    end
+    local entries = imageEntries(reader)
+    if #entries == 0 then
+        reader:close()
+        cb(nil, _("无法读取漫画图片"))
         return
     end
     local old_pages = #entries
@@ -265,10 +284,9 @@ function Cbz.rebuild(archive_path, state, cb, screen_w, screen_h)
         end)
     end
     local function fail(err)
-        if state.writer then
-            writer:close()
-            state.writer = nil
-        end
+        reader:close()
+        writer:close()
+        state.writer = nil
         os.remove(tmp)
         clearWork()
         cb(nil, err)
@@ -281,18 +299,6 @@ function Cbz.rebuild(archive_path, state, cb, screen_w, screen_h)
     local ok_dir, dir_err = require("utils.paths").ensureDir(extract_dir)
     if not ok_dir then
         fail(dir_err)
-        return
-    end
-    local reader_ok, Reader = pcall(function()
-        return require("ffi/archiver").Reader
-    end)
-    if not reader_ok or not Reader then
-        fail(_("无法读取漫画图片"))
-        return
-    end
-    local reader = Reader:new()
-    if not reader:open(archive_path) then
-        fail(reader.err or _("无法读取漫画图片"))
         return
     end
     local entry_index, page_index = 1, 1

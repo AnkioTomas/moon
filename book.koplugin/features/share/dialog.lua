@@ -13,15 +13,6 @@ local _ = require("gettext")
 
 local Dialog = {}
 
---- 进程内缓存上次选项；真正的来源是 features.share.settings（落盘）。
-Dialog.last = {
-    theme = "calendar",
-    font = "song",
-    swatch = "default",
-    art = "sunset",
-    show_logo = true,
-}
-
 --- 打开书摘编辑页。
 ---@param payload table
 function Dialog.open(payload)
@@ -32,18 +23,9 @@ function Dialog.open(payload)
     payload.text = require("utils.text").trim(payload.text)
     local Editor = require("features.share.editor")
     local Settings = require("features.share.settings")
-    local state = Editor.mergeState(Settings.read())
-    Dialog.last = state
-    local editor
-    editor = Editor:new{
+    local editor = Editor:new{
         payload = payload,
-        state = state,
-        close_callback = function()
-            if editor and editor.state then
-                Dialog.last = Editor.mergeState(editor.state)
-                Settings.write(Dialog.last)
-            end
-        end,
+        state = Settings.read(),
     }
     editor:show()
 end

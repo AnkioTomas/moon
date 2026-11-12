@@ -24,6 +24,14 @@ end
 package.preload["ui.themes"] = function()
     return { color = function(v) return { rgb = v } end }
 end
+package.preload["ui/font"] = function()
+    return { getFace = function(_self, name)
+        if name == "cfont" then return { name = name } end
+    end }
+end
+package.preload["ui.fonts"] = function()
+    return { settingsFontsDir = function() return require("support.config").dir() .. "/fonts" end }
+end
 
 package.loaded["features.share.card"] = nil
 local Card = require("features.share.card")
@@ -97,6 +105,9 @@ Assert.is_false(Card.isArtTheme("paper"))
 Assert.eq(Card.bookTitle("东坡乐府"), "《东坡乐府》")
 Assert.eq(Card.bookTitle("《东坡乐府》"), "《东坡乐府》")
 Assert.eq(Card.bookTitle("「已有」"), "「已有」")
+Assert.eq(Card.bookTitle("『已有』"), "『已有』")
+Assert.eq(Card.bookTitle("こころ"), "《こころ》")
+Assert.eq(Card.bookTitle("コンビニ人間"), "《コンビニ人間》")
 Assert.eq(Card.bookTitle("  "), "")
 -- 书名号必须整字去掉：Lua 的 [] 会按字节删，把「，与化危」拆成缺字。
 local classic_title = "爱，鸡尾酒与生化危机 2023-09-01"
@@ -512,6 +523,7 @@ do
         dbg = function() end,
     }
     package.loaded["ui.fonts"] = {
+        settingsFontsDir = function() return require("support.config").dir() .. "/fonts" end,
         pathForId = function(id)
             if id == "KingHwa_OldSong" then return "/fonts/KingHwa_OldSong.ttf" end
             return nil, "字体文件不存在"
