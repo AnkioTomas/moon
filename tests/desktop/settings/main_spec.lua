@@ -274,7 +274,10 @@ end
 built_rows[2].callback()
 Assert.eq(opened.id, "my_device")
 Assert.eq(opened.title, "我的设备")
-Assert.eq(sectionTitles(opened), "本机,月读")
+Assert.eq(sectionTitles(opened), "本机,月读,更新")
+local auto_update_row = opened.sections()[3].rows[1](600)
+Assert.eq(auto_update_row.title, "自动检查更新")
+Assert.is_true(auto_update_row.status_on)
 
 -- 书库组：启用的书源（多选）/ 当前书库 / 账号（书架显示已迁到桌面 → 图书馆）
 local library = openRoot("书库")

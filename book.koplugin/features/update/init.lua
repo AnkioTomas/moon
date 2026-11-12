@@ -63,10 +63,11 @@ Update.onExit = function() Update:cancel() end
 ---@param plugin_root string
 function Update.autoCheck(plugin_root)
     local settings = MoonSettings.get("features.update")
+    if not settings.auto_check then return end
     if os.time() - settings.update_last_checked_at < CHECK_INTERVAL then return end
     if not require("ui/network/manager"):isConnected() then return end
     Update:check(function(release)
-        if release and release.available then Update:prompt(release, plugin_root) end
+        if settings.auto_check and release and release.available then Update:prompt(release, plugin_root) end
     end)
 end
 
