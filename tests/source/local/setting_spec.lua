@@ -14,8 +14,9 @@ local cleared = false
 local rescanned = false
 local painted = 0
 local forgotten = {}
-local forget_ok = true
+local stash_ok = true
 local last_toast
+local last_confirm
 local list
 
 package.preload["utils.settings"] = function()
@@ -35,9 +36,9 @@ package.preload["book.books_db"] = function()
 end
 package.preload["book.store"] = function()
     return {
-        forgetOldRoot = function(old_root, new_root)
+        stashOldRoot = function(old_root, new_root)
             forgotten[#forgotten + 1] = { old_root, new_root }
-            return forget_ok
+            return stash_ok
         end,
     }
 end
@@ -49,6 +50,7 @@ package.preload["ui.themes.widgets.toast"] = function()
 end
 package.preload["ui.themes.widgets.confirm"] = function()
     return { new = function(_, opts)
+        last_confirm = opts.text
         return { show = function() if opts.ok_callback then opts.ok_callback() end end }
     end }
 end
@@ -142,9 +144,9 @@ Assert.eq(row(3).status, "关")
 Assert.eq(painted, 3)
 Assert.is_true(not reloaded)
 
--- 换书库目录：进子目录确认 → 整本撕旧根书 + 强制重扫，不 reload
+-- 换书库目录：进子目录确认 → 先收成待重匹配 + 强制重扫，不 reload；并提醒用当前根下的文件夹分类
 cfg.path = "/mnt/us/documents"
-forgotten, rescanned, reloaded = {}, false, false
+forgotten, rescanned, reloaded, last_confirm = {}, false, false, nil
 row(1).callback()
 Assert.not_nil(list)
 item("books").callback()
@@ -157,6 +159,8 @@ Assert.eq(forgotten[1][2], "/mnt/us/documents/books")
 Assert.is_true(rescanned)
 Assert.is_true(not reloaded)
 Assert.eq(painted, 4)
+Assert.is_true(last_confirm:find("只是给书分类的话", 1, true) ~= nil)
+Assert.is_true(last_confirm:find("按文件夹分类", 1, true) ~= nil)
 
 -- 无桌面（书城引导）：走 reload
 cfg.path = "/mnt/us/documents"
@@ -168,8 +172,8 @@ Assert.len(forgotten, 1)
 Assert.is_true(reloaded)
 Assert.is_true(not rescanned)
 
--- 清理失败不保存新根、不扫描或重载，也不能执行成功回调。
-cfg.path, forget_ok = "/mnt/us/documents", false
+-- 准备失败不保存新根、不扫描或重载，也不能执行成功回调。
+cfg.path, stash_ok = "/mnt/us/documents", false
 rescanned, reloaded = false, false
 local saved_before, completed = saved, false
 Setting.open(function() completed = true end, plugin.desktop)
@@ -177,7 +181,7 @@ item("books").callback()
 item("使用此目录").callback()
 Assert.eq(cfg.path, "/mnt/us/documents")
 Assert.eq(saved, saved_before)
-Assert.eq(last_toast, "清除本地记录失败")
+Assert.eq(last_toast, "准备书库记录失败")
 Assert.is_false(rescanned)
 Assert.is_false(reloaded)
 Assert.is_false(completed)

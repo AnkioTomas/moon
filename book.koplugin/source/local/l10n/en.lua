@@ -82,6 +82,8 @@ return {
     ["这个路径含有英文和数字以外的字符。建议换成只含英文和数字的目录。"] = "This path contains characters other than English letters and digits. Choose a folder that uses only those.",
     ["仍然使用"] = "Use anyway",
     ["重新选择"] = "Pick again",
+    ["准备书库记录失败"] = "Could not prepare library records",
+    ["只是给书分类的话，请留在当前书库目录下建文件夹（最多两层，并打开「按文件夹分类」）。换目录后，把同一本书移进新目录再扫描，阅读记录会跟过来。"] = "To organize books into categories, create folders under the current library folder (up to two levels, with “Categorize by folder” on). After you change this folder, move the same files into the new one and scan again — reading records will follow.",
     ["上传本地书到 WebDAV"] = "Upload local books to WebDAV",
     ["关闭后只同步进度、笔记和统计，不上传本地书籍文件"] = "When off, only progress, notes and stats sync; local book files are not uploaded",
     ["WebDAV 同步"] = "WebDAV sync",

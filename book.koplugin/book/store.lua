@@ -248,12 +248,31 @@ function Store.forgetWebdav()
     return true
 end
 
---- 换本地书库目录：旧根下、新根外的纯本地书整本撕掉（书架 / 进度 / 笔记 / 统计 / 缓存）。
+--- 换本地书库目录：旧根下、新根外的纯本地书先收成待重匹配；无法再匹配的墓碑整本撕掉并清缓存。
 ---@param old_root string|nil
 ---@param new_root string|nil
 ---@return boolean
-function Store.forgetOldRoot(old_root, new_root)
-    local ok, ids = BookDB.forgetOldRoot("local", old_root, new_root)
+function Store.stashOldRoot(old_root, new_root)
+    local ok, ids = BookDB.stashOldRoot("local", old_root, new_root)
+    if not ok then return false end
+    purgeForgotten("local", ids)
+    return true
+end
+
+--- 扫盘后：待重匹配行里文件已经不在盘上、且没被 md5 收编的，整本撕掉并清缓存。
+---@return boolean
+function Store.forgetUnmatchedRelocated()
+    local lfs = require("libs/libkoreader-lfs")
+    local gone = {}
+    for _idx, stable_id in ipairs(BookDB.relocatingIds("local")) do
+        local row = BookDB.get("local", stable_id)
+        local path = row and (row.path or row.stable_id)
+        if not path or not lfs.attributes(path, "mode") then
+            gone[#gone + 1] = stable_id
+        end
+    end
+    if #gone == 0 then return true end
+    local ok, ids = BookDB.forgetMany("local", gone)
     if not ok then return false end
     purgeForgotten("local", ids)
     return true

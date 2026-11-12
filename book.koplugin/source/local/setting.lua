@@ -182,7 +182,7 @@ end
 
 --- 目录选择列表：逐层浏览（原地换项），首行「使用此目录」确认当前目录。
 ---@param on_saved fun()|nil 保存目录后回调（书城下载前引导配置用）
----@param desktop table|nil 有桌面时换目录立刻下架旧根书并强制重扫；没有则 Registry.reload
+---@param desktop table|nil 有桌面时换目录先收成待重匹配并强制重扫；没有则 Registry.reload
 function Setting.open(on_saved, desktop)
     local lfs = require("libs/libkoreader-lfs")
     local Text = require("utils.text")
@@ -223,9 +223,10 @@ function Setting.open(on_saved, desktop)
         end
         local function save()
             local next_path = Text.rtrimSlashes(Text.rtrim(path))
-            -- 换目录 = 换库：旧根书连同进度 / 笔记 / 统计整本撕掉（软下架会留在「最近阅读」里）。
-            if previous ~= next_path and not require("book.store").forgetOldRoot(previous, next_path) then
-                require("ui.themes.widgets.toast"):new{ text = _("清除本地记录失败"), timeout = 3 }:show()
+            -- 换目录：旧根书先下架但保留记录，随后扫描按 md5 迁到新路径；无法再匹配的墓碑才撕掉。
+            if previous ~= next_path and previous ~= ""
+                and not require("book.store").stashOldRoot(previous, next_path) then
+                require("ui.themes.widgets.toast"):new{ text = _("准备书库记录失败"), timeout = 3 }:show()
                 return
             end
             cfg.path = path
@@ -244,6 +245,11 @@ function Setting.open(on_saved, desktop)
             warning = _("这是 Kindle 的 documents 目录，里面有系统文件、.sdr 边车和 Kindle 书库的书，扫描会慢且杂。建议在里面新建一个子文件夹专门放书。")
         elseif Setting.hasNonAlnum(path) then
             warning = _("这个路径含有英文和数字以外的字符。建议换成只含英文和数字的目录。")
+        end
+        -- 只是分类的话不必换根；换根后同一本书移进新目录再扫，阅读记录会跟过来。
+        if previous ~= next_path and previous ~= "" then
+            local relocate = _("只是给书分类的话，请留在当前书库目录下建文件夹（最多两层，并打开「按文件夹分类」）。换目录后，把同一本书移进新目录再扫描，阅读记录会跟过来。")
+            warning = warning and (warning .. "\n\n" .. relocate) or relocate
         end
         local items = { { text = _("使用此目录"), icon = "check", keep_open = warning ~= nil, callback = function()
             if not warning then return save() end

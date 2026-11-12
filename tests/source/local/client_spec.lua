@@ -253,6 +253,19 @@ package.preload["book.books_db"] = function()
             table.sort(out)
             return out
         end,
+        moveCandidatesByMd5 = function(source_id, md5)
+            local out = {}
+            for _, row in pairs(db_rows) do
+                local relocating = (row.deleted or 0) == 1 and row.path
+                    and tostring(row.stable_id):sub(1, 9) ~= "webdav://"
+                if row.source_id == source_id and row.md5 == md5
+                    and ((row.deleted or 0) == 0 or relocating) then
+                    out[#out + 1] = row.stable_id
+                end
+            end
+            table.sort(out)
+            return out
+        end,
         renameStableId = function(source_id, old_stable_id, new_stable_id, category, series)
             renames[#renames + 1] = { source_id, old_stable_id, new_stable_id }
             -- 与真实 sqlite 一致：新 stable_id 已有行（含墓碑）时主键冲突，整笔回滚
@@ -260,12 +273,49 @@ package.preload["book.books_db"] = function()
             local row = db_rows[rowKey(source_id, old_stable_id)]
             if row then
                 db_rows[rowKey(source_id, old_stable_id)] = nil
+                if (row.deleted or 0) == 1 and row.path then
+                    row.deleted = 0
+                end
                 row.stable_id = new_stable_id
                 row.category = category
                 row.series = series
+                row.path = new_stable_id
                 db_rows[rowKey(source_id, new_stable_id)] = row
             end
             return true
+        end,
+        stashSyncedOutsideRoot = function(source_id, root)
+            root = (root or ""):gsub("/+$", "")
+            if root == "" then return true end
+            for _, row in pairs(db_rows) do
+                local id = row.stable_id
+                if row.source_id == source_id and (row.deleted or 0) == 0 and row.sync_status == 1
+                    and tostring(id):sub(1, 9) ~= "webdav://"
+                    and id ~= root and id:sub(1, #root + 1) ~= root .. "/" then
+                    row.deleted = 1
+                end
+            end
+            return true
+        end,
+        relocatingIds = function(source_id)
+            local out = {}
+            for _, row in pairs(db_rows) do
+                if row.source_id == source_id and (row.deleted or 0) == 1 and row.path
+                    and tostring(row.stable_id):sub(1, 9) ~= "webdav://" then
+                    out[#out + 1] = row.stable_id
+                end
+            end
+            table.sort(out)
+            return out
+        end,
+        forgetMany = function(source_id, ids)
+            local forgotten = {}
+            for _, stable_id in ipairs(ids) do
+                db_rows[rowKey(source_id, stable_id)] = nil
+                removed[#removed + 1] = stable_id
+                forgotten[#forgotten + 1] = stable_id
+            end
+            return true, forgotten
         end,
         upsert = function(row)
             upserts[#upserts + 1] = row
@@ -321,8 +371,10 @@ package.preload["book.books_db"] = function()
                 db_rows[rowKey(source_id, row.stable_id)] = old
                 upserts[#upserts + 1] = row
             end
+            -- 与真实 reconcile 一致：只下架已同步的在架行；待重匹配（已 deleted=1）不动 path。
             for _, row in pairs(db_rows) do
-                if row.source_id == source_id and not keep[row.stable_id] then
+                if row.source_id == source_id and not keep[row.stable_id]
+                    and (row.deleted or 0) == 0 and row.sync_status == 1 then
                     row.deleted = 1
                     if opts and opts.clear_missing_paths then row.path = nil end
                     removed[#removed + 1] = row.stable_id
@@ -338,12 +390,30 @@ package.preload["book.books_db"] = function()
         end,
     }
 end
+package.preload["book.store"] = function()
+    return {
+        forgetUnmatchedRelocated = function()
+            local BookDB = require("book.books_db")
+            local lfs = require("libs/libkoreader-lfs")
+            local gone = {}
+            for _, stable_id in ipairs(BookDB.relocatingIds("local")) do
+                local row = BookDB.get("local", stable_id)
+                local path = row and (row.path or row.stable_id)
+                if not path or not lfs.attributes(path, "mode") then
+                    gone[#gone + 1] = stable_id
+                end
+            end
+            return BookDB.forgetMany("local", gone)
+        end,
+    }
+end
 for _, name in ipairs({
     "libs/libkoreader-lfs",
     "utils.paths",
     "document/documentregistry",
     "utils.task",
     "book.books_db",
+    "book.store",
     "source.local.scan_db",
     "source.local.client",
 }) do
@@ -479,7 +549,10 @@ end
 -- ── 扫盘 → 解析写库（失败回退文件名）→ 清失效 ──────
 do
     reset()
-    db_rows[rowKey("local", "/books/gone.epub")] = { source_id = "local", stable_id = "/books/gone.epub", title = "gone" }
+    db_rows[rowKey("local", "/books/gone.epub")] = {
+        source_id = "local", stable_id = "/books/gone.epub", title = "gone",
+        path = "/books/gone.epub", deleted = 0, sync_status = 1,
+    }
 
     local ok, err
     Client.new({ path = "/books" }):scanAsync(function(o, e)
@@ -530,14 +603,147 @@ do
     -- 封面：解析成功的 5 本都尝试提取（bad.epub 无引擎不提取）
     Assert.len(covers_saved, 5)
 
-    -- 换书库根到子目录：旧根下不在新根内的书应被 reconcile 下架（documents → documents/books）
+    -- 换书库根到子目录：还在旧位置的书下架但保留 path / 记录，不立刻撕掉
     removed, upserts = {}, {}
     Client.new({ path = "/books/sub" }):scanAsync(function(o, e) ok, err = o, e end)
     flushScan()
     Assert.is_true(ok)
-    Assert.eq(db_rows[rowKey("local", "/books/a.epub")].deleted, 1, "旧根书下架")
+    Assert.eq(db_rows[rowKey("local", "/books/a.epub")].deleted, 1, "旧根书下架待重匹配")
+    Assert.eq(db_rows[rowKey("local", "/books/a.epub")].path, "/books/a.epub")
     Assert.eq(db_rows[rowKey("local", "/books/sub/c.pdf")].deleted, 0, "新根内保留")
-    Assert.is_true(hasValue(removed, "/books/a.epub"))
+    Assert.is_false(hasValue(removed, "/books/a.epub"), "文件还在旧位置，不能忘掉")
+end
+
+-- ── 换书库根后按 md5 迁身份：先改目录再搬家、文件已在新根、删掉未匹配、同内容副本 ──
+do
+    local util = require("util")
+    local real_md5 = util.partialMD5
+    local function scan(path)
+        local ok, err
+        Client.new({ path = path }):scanAsync(function(o, e) ok, err = o, e end)
+        flushScan()
+        return ok, err
+    end
+    local function addFile(dir, name)
+        local entries = TREE[dir]
+        if not entries then
+            TREE[dir], DIRS[dir] = { name }, true
+            return
+        end
+        for _, existing in ipairs(entries) do
+            if existing == name then return end
+        end
+        entries[#entries + 1] = name
+    end
+    local function removeFile(dir, name)
+        local entries = TREE[dir]
+        if not entries then return end
+        for i, existing in ipairs(entries) do
+            if existing == name then
+                table.remove(entries, i)
+                return
+            end
+        end
+    end
+    local function restoreTree()
+        removeFile("/books/sub", "a.epub")
+        addFile("/books", "a.epub")
+    end
+
+    -- 换根时文件已经在新目录里：当次扫描按 md5 迁走身份，不当新书
+    reset()
+    util.partialMD5 = function(path) return path:find("a%.epub") and "digest-a" or "other:" .. path end
+    db_rows[rowKey("local", "/books/a.epub")] = {
+        source_id = "local", stable_id = "/books/a.epub", md5 = "digest-a", title = "旧身份",
+        path = "/books/a.epub", deleted = 0, sync_status = 1, inserted_at = 11,
+    }
+    db_rows[rowKey("local", "/books/sub/c.pdf")] = {
+        source_id = "local", stable_id = "/books/sub/c.pdf", md5 = "other:/books/sub/c.pdf",
+        title = "c", path = "/books/sub/c.pdf", deleted = 0, sync_status = 1,
+    }
+    removeFile("/books", "a.epub")
+    addFile("/books/sub", "a.epub")
+    Assert.is_true(scan("/books/sub"))
+    Assert.len(renames, 1)
+    Assert.eq(renames[1][2], "/books/a.epub")
+    Assert.eq(renames[1][3], "/books/sub/a.epub")
+    Assert.is_nil(db_rows[rowKey("local", "/books/a.epub")])
+    local already = db_rows[rowKey("local", "/books/sub/a.epub")]
+    Assert.eq(already.md5, "digest-a")
+    Assert.eq(already.inserted_at, 11)
+    Assert.eq(already.deleted, 0)
+    Assert.is_nil(already.category, "新根就是 /books/sub，书在根层没有分类")
+    Assert.eq(sidecar_moves[#sidecar_moves][1], "/books/a.epub")
+    Assert.eq(sidecar_moves[#sidecar_moves][2], "/books/sub/a.epub")
+    restoreTree()
+
+    -- 先换根、后在文件管理器搬书再扫：第一次留下待重匹配，第二次迁走记录
+    reset()
+    util.partialMD5 = function(path) return path:find("a%.epub") and "digest-a" or "other:" .. path end
+    db_rows[rowKey("local", "/books/a.epub")] = {
+        source_id = "local", stable_id = "/books/a.epub", md5 = "digest-a", title = "稍后搬",
+        path = "/books/a.epub", deleted = 0, sync_status = 1, inserted_at = 22,
+    }
+    db_rows[rowKey("local", "/books/sub/c.pdf")] = {
+        source_id = "local", stable_id = "/books/sub/c.pdf", md5 = "other:/books/sub/c.pdf",
+        title = "c", path = "/books/sub/c.pdf", deleted = 0, sync_status = 1,
+    }
+    Assert.is_true(scan("/books/sub"))
+    Assert.len(renames, 0)
+    local pending = db_rows[rowKey("local", "/books/a.epub")]
+    Assert.eq(pending.deleted, 1)
+    Assert.eq(pending.path, "/books/a.epub")
+    Assert.eq(pending.inserted_at, 22)
+    removeFile("/books", "a.epub")
+    addFile("/books/sub", "a.epub")
+    Assert.is_true(scan("/books/sub"))
+    Assert.len(renames, 1)
+    Assert.eq(renames[1][2], "/books/a.epub")
+    Assert.eq(renames[1][3], "/books/sub/a.epub")
+    Assert.is_nil(db_rows[rowKey("local", "/books/a.epub")])
+    local later = db_rows[rowKey("local", "/books/sub/a.epub")]
+    Assert.eq(later.md5, "digest-a")
+    Assert.eq(later.inserted_at, 22)
+    Assert.eq(later.deleted, 0)
+    Assert.eq(sidecar_moves[#sidecar_moves][1], "/books/a.epub")
+    Assert.eq(sidecar_moves[#sidecar_moves][2], "/books/sub/a.epub")
+    restoreTree()
+
+    -- 文件已经不在、新根里也没有同 md5：整本忘掉，不能留在书架/最近阅读
+    reset()
+    util.partialMD5 = function(path) return "other:" .. path end
+    db_rows[rowKey("local", "/books/missing.epub")] = {
+        source_id = "local", stable_id = "/books/missing.epub", md5 = "gone", title = "已删",
+        path = "/books/missing.epub", deleted = 0, sync_status = 1, inserted_at = 33,
+    }
+    db_rows[rowKey("local", "/books/sub/c.pdf")] = {
+        source_id = "local", stable_id = "/books/sub/c.pdf", md5 = "other:/books/sub/c.pdf",
+        title = "c", path = "/books/sub/c.pdf", deleted = 0, sync_status = 1,
+    }
+    Assert.is_true(scan("/books/sub"))
+    Assert.is_nil(db_rows[rowKey("local", "/books/missing.epub")])
+    Assert.is_true(hasValue(removed, "/books/missing.epub"))
+    Assert.eq(db_rows[rowKey("local", "/books/sub/c.pdf")].deleted, 0)
+
+    -- 同内容两份都还在：各是一本书，换根后仍在新根内的那本不动，旧根那本待重匹配
+    reset()
+    util.partialMD5 = function() return "dup" end
+    db_rows[rowKey("local", "/books/a.epub")] = {
+        source_id = "local", stable_id = "/books/a.epub", md5 = "dup", title = "根上",
+        path = "/books/a.epub", deleted = 0, sync_status = 1, inserted_at = 1,
+    }
+    db_rows[rowKey("local", "/books/sub/c.pdf")] = {
+        source_id = "local", stable_id = "/books/sub/c.pdf", md5 = "dup", title = "目录里",
+        path = "/books/sub/c.pdf", deleted = 0, sync_status = 1, inserted_at = 2,
+    }
+    Assert.is_true(scan("/books/sub"))
+    Assert.len(renames, 0)
+    Assert.eq(db_rows[rowKey("local", "/books/a.epub")].deleted, 1)
+    Assert.eq(db_rows[rowKey("local", "/books/a.epub")].title, "根上")
+    Assert.eq(db_rows[rowKey("local", "/books/sub/c.pdf")].deleted, 0)
+    Assert.eq(db_rows[rowKey("local", "/books/sub/c.pdf")].title, "目录里")
+
+    util.partialMD5 = real_md5
 end
 
 -- ── 已有行缺少作者/简介时，扫描必须补齐元数据，不能被 title 命中永久冻结 ──
