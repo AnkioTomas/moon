@@ -17,7 +17,6 @@ local Assets = {}
 local WEB = "https://weread.qq.com"
 local DIR = debug.getinfo(1, "S").source:match("^@(.*)/[^/]+$")
 -- 原书脚注图只在 EPUB 里，服务端不给；网页端换成「注」图标，这里用插件自带的同一张。
-local FOOTNOTE_SRC = "../Images/note.png"
 local STYLE_NAME = "stylesheets.css"
 
 -- 原书样式拉不到时的兜底：微信 EPUB 正文几乎都靠 .content 的 text-indent:2em。
@@ -26,6 +25,16 @@ local FALLBACK_STYLE = "<style type=\"text/css\">"
     .. ".content,.content1{text-indent:2em;text-align:justify}"
     .. ".bold,.firstTitle,.secondTitle,.thirdTitle,.contentCR,.contentCR1,.contentCR2{text-indent:0}"
     .. "</style>"
+
+--- 官方章 HTML 里脚注图标路径不统一（``note.png`` / ``Images/note.png`` / ``../Images/note.png``）。
+--- 服务端 tar 通常不含这张图；正文带 qqreader-footnote 或任意 note.png 引用时，
+--- 把插件自带的「注」图标按 basename 挂进 src_map，rewriteImageSources 即可命中所有变体。
+---@param html string
+---@return boolean
+local function needsBundledFootnote(html)
+    return html:find("qqreader-footnote", 1, true) ~= nil
+        or html:find("[\"'/]note%.png") ~= nil
+end
 
 --- 脚注图标落到 images/，返回相对 href。
 ---@param images_dir string
@@ -325,8 +334,11 @@ function Assets.localizeAsync(book_id, chapter, html, referer, fetch_style, cb)
     ---@param src_map table<string, string> 原始 src → 本地相对路径
     local function afterTar(src_map)
         if cancelled then return end
-        if not src_map["note.png"] and html:find(FOOTNOTE_SRC, 1, true) then
-            src_map[FOOTNOTE_SRC] = footnoteHref(images_dir)
+        if not src_map["note.png"] and needsBundledFootnote(html) then
+            local href = footnoteHref(images_dir)
+            if href then
+                src_map["note.png"] = href
+            end
         end
         local rewritten = Shared.rewriteImageSources(html, src_map)
         local job = Shared.localizeAsync(rewritten, images_dir, function(url, done)

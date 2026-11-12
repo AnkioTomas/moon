@@ -196,3 +196,41 @@ do
     Assert.eq(f:read("*a"), "a{background:url(images/bq.jpg)}")
     f:close()
 end
+
+-- 脚注图标路径不统一：qqreader-footnote 或任意 note.png 都注入自带「注」标，不要求写成 ../Images/note.png
+do
+    local Paths = require("utils.paths")
+    local cases = {
+        { book = "book-fn-bare", src = "note.png" },
+        { book = "book-fn-images", src = "Images/note.png" },
+        { book = "book-fn-parent", src = "../Images/note.png" },
+        { book = "book-fn-noclass", src = "note.png", plain = true },
+    }
+    local icons = {}
+    for _, case in ipairs(cases) do
+        local html
+        if case.plain then
+            html = string.format('<p><img alt="注文" src="%s" /></p>', case.src)
+        else
+            html = string.format(
+                '<p><img class="qqreader-footnote" alt="注文" src="%s" /></p>',
+                case.src
+            )
+        end
+        local out
+        Assets.localizeAsync(case.book, { uid = "u" }, html, nil, noStyle, function(result)
+            out = result
+        end)
+        local icon = out:match('src="(images/[0-9a-f]+%.png)"')
+        Assert.is_true(icon ~= nil, "脚注图标落地: " .. case.src)
+        Assert.is_nil(out:find(case.src, 1, true), "原路径被改写: " .. case.src)
+        local work_dir = Paths.bookWorkDir(case.book, "wechat")
+        local f = assert(io.open(work_dir .. "/" .. icon, "rb"))
+        Assert.eq(f:read(4), "\137PNG")
+        f:close()
+        icons[#icons + 1] = icon
+    end
+    for i = 2, #icons do
+        Assert.eq(icons[i], icons[1], "同一自带图标，内容寻址复用")
+    end
+end
