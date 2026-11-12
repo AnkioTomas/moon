@@ -137,7 +137,7 @@ local skipped = SourceBase.skipped
 --- 桌面打开触发的自动同步节流（秒）：反复开桌面不重复扫盘、不重复跑整轮 WebDAV。
 local AUTO_SYNC_INTERVAL = 60
 
---- 书架同步。WebDAV：force=刷新（另列远端目录）、dirty_only=只推本地删除与书目改动、否则日常同步；
+--- 书架同步。WebDAV：force=逐目录核对远端文件、dirty_only=只推本地删除与书目改动、否则日常同步；
 --- 有本地改动没推上去时整轮仍算成功，原因放在 push_error。纯本地目录：轻扫盘（不开文档）+ 后台补齐封面。
 --- AUTO_SYNC_INTERVAL 只约束打开桌面的自动同步；force / manual / dirty_only 都跳过，不重提封面。
 --- 失败不占节流窗口，下次打开桌面就重试。

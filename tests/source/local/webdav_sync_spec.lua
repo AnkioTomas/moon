@@ -8,6 +8,8 @@
 local Assert = require("support.assert")
 local Stubs = require("support.stubs")
 local Json = require("support.json_stub")
+local Themed = require("support.theme_stubs")
+Themed.install()
 
 package.preload["json"] = function()
     return { encode = Json.encode, decode = Json.decode, util = { InitArray = function(t) return t end } }
@@ -425,7 +427,7 @@ do
     books = {}
 end
 
--- 硬刷新优先一次 Depth:infinity 列出整库；Calibre 式「一文件夹一本书」不必再逐本 PROPFIND。
+-- 强制刷新逐目录检查文件，不依赖服务器对 Depth:infinity 的实现。
 do
     local dav = fakeDav()
     dav:put(ROOT .. "/第三牧场/第三牧场.epub", "x")
@@ -438,14 +440,13 @@ do
         if c == "PROPFIND " .. ROOT then root_lists = root_lists + 1 end
     end
     Assert.eq(root_lists, 1, "只列一次书库根")
-    Assert.eq(dav:count("PROPFIND " .. ROOT .. "/第三牧场"), 0, "不进书文件夹")
-    local saw_infinity = false
-    for _idx, d in ipairs(dav.depths) do if d == "infinity" then saw_infinity = true end end
-    Assert.is_true(saw_infinity, "硬刷新先试 Depth:infinity")
+    Assert.eq(dav:count("PROPFIND " .. ROOT .. "/第三牧场"), 1)
+    Assert.eq(dav:count("PROPFIND " .. ROOT .. "/分类/系列"), 1, "分类下的系列目录也要检查")
+    for _idx, depth in ipairs(dav.depths) do Assert.eq(depth, "1") end
     local Timeout = require("http.timeout")
     local root_opt
     for _idx, o in ipairs(dav.list_opts or {}) do
-        if o.path == ROOT and o.depth == "infinity" then root_opt = o; break end
+        if o.path == ROOT then root_opt = o; break end
     end
     Assert.not_nil(root_opt)
     Assert.eq(root_opt.timeout, Timeout.net(10), "根目录整包超时是网络超时×10")
@@ -453,21 +454,24 @@ do
     books = {}
 end
 
--- 服务器拒绝 / 忽略 Depth:infinity 时降级为并发下钻，仍能收书。
+-- 目录失败不能删除仅存在于远端书目、尚未同步到本地的成员。
 do
     local dav = fakeDav()
-    dav.infinity_error = "WebDAV 请求失败（HTTP 403）"
-    dav.infinity_code = 403
-    dav:put(ROOT .. "/第三牧场/第三牧场.epub", "x")
-    dav:put(ROOT .. "/另一本/另一本.epub", "x")
+    dav:put(ROOT .. "/暂时失败/书.epub", "x")
+    dav:put(ROOT .. "/暂时失败2/已删除.epub", "x")
+    putSync(dav, {
+        { filename = "暂时失败/书.epub", bookName = "保留这本书" },
+        { filename = "暂时失败2/缺失.epub", bookName = "应当剔除" },
+    })
+    dav.fail = { [ROOT .. "/暂时失败"] = "timeout" }
     Assert.is_true(refresh(client(dav)))
-    Assert.not_nil(books["webdav://第三牧场/第三牧场.epub"])
-    Assert.not_nil(books["webdav://另一本/另一本.epub"])
-    Assert.is_true(dav:count("PROPFIND " .. ROOT .. "/第三牧场") >= 1)
+    Assert.eq(books["webdav://暂时失败/书.epub"].deleted, 0)
+    Assert.not_nil(remoteEntries(dav)["暂时失败/书.epub"])
+    Assert.is_nil(remoteEntries(dav)["暂时失败2/缺失.epub"], "失败目录前缀不能保护名字相近的其它目录")
     books = {}
 end
 
--- 本地书架已有、目录 mtime 未变：降级下钻时跳过该文件夹，不再打探。
+-- 已有成员和旧版 mtime 缓存都不能短路强制刷新，目录时间没变也要查新增、删除。
 do
     local dav = fakeDav()
     dav.infinity_error = "WebDAV 请求失败（HTTP 403）"
@@ -484,11 +488,77 @@ do
     Assert.is_true(first_new >= 1)
     dav.calls = {}
     dav.depths = {}
-    -- 新书已在书架且文件夹 mtime 不变，不应再进文件夹；根目录仍会列一次。
+    local old_cache = assert(io.open(cache .. "/dir_mtimes", "w"))
+    old_cache:write("第三牧场\t1700000000\n新书\t1700000000")
+    old_cache:close()
+    dav.files[ROOT .. "/第三牧场/第三牧场.epub"] = nil
+    dav:put(ROOT .. "/第三牧场/新增.epub", "x")
     Assert.is_true(refresh(c))
-    Assert.eq(dav:count("PROPFIND " .. ROOT .. "/第三牧场"), 0, "已有且未改动则跳过")
-    Assert.eq(dav:count("PROPFIND " .. ROOT .. "/新书"), 0, "已有且未改动则跳过")
+    Assert.eq(dav:count("PROPFIND " .. ROOT .. "/第三牧场"), 1)
+    Assert.eq(dav:count("PROPFIND " .. ROOT .. "/新书"), 1)
+    Assert.eq(books["webdav://第三牧场/第三牧场.epub"].deleted, 1)
+    Assert.not_nil(books["webdav://第三牧场/新增.epub"])
+    Assert.is_nil(remoteEntries(dav)["第三牧场/第三牧场.epub"])
+    Assert.not_nil(remoteEntries(dav)["第三牧场/新增.epub"])
     Assert.is_true(dav:count("PROPFIND " .. ROOT) >= 1)
+    books = {}
+end
+
+-- 部署建议持久化一次，重新创建客户端也不再提示；大库扫描不截断、不递归耗尽栈。
+do
+    local Settings = require("support.config").settings()
+    local cfg = Settings.getSource("local")
+    local previously_warned = cfg.webdav_large_library_warned
+    cfg.webdav_large_library_warned = nil
+    local dav = fakeDav()
+    local list = dav.listAsync
+    function dav:listAsync(path, cb, opts)
+        if path ~= ROOT and path:sub(1, #ROOT + 2) ~= ROOT .. "/d" then
+            return list(self, path, cb, opts)
+        end
+        self.calls[#self.calls + 1] = "PROPFIND " .. path
+        if path == ROOT then
+            local dirs = {}
+            for i = 1, 1001 do
+                dirs[i] = { name = "d" .. i, path = ROOT .. "/d" .. i, is_dir = true }
+            end
+            cb(dirs)
+        else
+            cb({ { name = "book.epub", path = path .. "/book.epub", is_dir = false } })
+        end
+    end
+    local before = #Themed.all("toast")
+    Assert.is_true(refresh(client(dav)))
+    Assert.not_nil(books["webdav://d1/book.epub"])
+    Assert.not_nil(books["webdav://d1001/book.epub"], "不限制大库的成员数量")
+    Assert.eq(#Themed.all("toast"), before + 1)
+    Assert.matches(Themed.last("toast").text, "月读服务")
+    Assert.matches(Themed.last("toast").text, "https://github%.com/AnkioTomas/book")
+    Assert.is_true(Themed.last("toast").shown)
+    Settings.reload()
+    Assert.is_true(Settings.getSource("local").webdav_large_library_warned)
+    Assert.is_true(refresh(client(dav)), "重建客户端后仍可继续全量刷新")
+    Assert.eq(#Themed.all("toast"), before + 1, "配置重读后也不重复提醒")
+    cfg.webdav_large_library_warned = previously_warned
+    Settings.saveSource("local")
+    books = {}
+end
+
+-- 小库不弹部署建议；日常同步即使书目很大，也不逐目录检查、不反复提示。
+do
+    local before = #Themed.all("toast")
+    local dav = fakeDav()
+    dav:put(ROOT .. "/小库/书.epub", "x")
+    Assert.is_true(refresh(client(dav)))
+    Assert.eq(#Themed.all("toast"), before)
+    books = {}
+    local entries = {}
+    for i = 1, 1001 do entries[i] = { filename = "d" .. i .. "/book.epub" } end
+    putSync(dav, entries)
+    dav.calls = {}
+    Assert.is_true(scan(client(dav)))
+    Assert.eq(dav:count("PROPFIND " .. ROOT .. "/d"), 0)
+    Assert.eq(#Themed.all("toast"), before)
     books = {}
 end
 
@@ -597,16 +667,22 @@ do
     books = {}
 end
 
--- 刷新时列目录失败：整轮中止，不动书架。
+-- 根目录超时、服务端出错或列表不完整：整轮中止，不动书架、不回写书目。
 do
-    local dav = fakeDav()
-    books["webdav://keep.epub"] = { stable_id = "webdav://keep.epub", deleted = 0, sync_status = 1 }
-    function dav:listAsync(_, cb) cb(nil, "HTTP 500") end
-    local ok, err = refresh(client(dav))
-    Assert.is_false(ok)
-    Assert.eq(err, "HTTP 500")
-    Assert.eq(books["webdav://keep.epub"].deleted, 0)
-    books = {}
+    for _idx, list_err in ipairs({ "HTTP 500", "request timed out", "WebDAV 返回了不完整的目录列表" }) do
+        local dav = fakeDav()
+        books["webdav://keep.epub"] = { stable_id = "webdav://keep.epub", deleted = 0, sync_status = 1 }
+        putSync(dav, { { filename = "keep.epub" } })
+        local original = dav.files[SYNC].data
+        function dav:listAsync(_path, cb) cb(nil, list_err) end
+        local ok, err = refresh(client(dav))
+        Assert.is_false(ok)
+        Assert.eq(err, list_err)
+        Assert.eq(books["webdav://keep.epub"].deleted, 0)
+        Assert.eq(dav.files[SYNC].data, original)
+        Assert.eq(dav:count("PUT"), 0)
+        books = {}
+    end
 end
 
 -- 日常 / 推脏拉书目就被拒（密码错、没权限、连不上）：整轮中止并报原因，不当成书目损坏继续跑、不上传。

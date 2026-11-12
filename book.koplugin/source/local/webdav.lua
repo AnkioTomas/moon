@@ -161,7 +161,7 @@ end
 ---@field entries table<string, table> books.sync 条目，按 filename
 ---@field version integer|nil 拉到的书目版本号（条目上没有则 nil）
 ---@field version_device string|nil 该版本的写入者
----@field remote table<string, boolean>|nil 刷新时列出的远端书文件；日常同步不列目录，为 nil
+---@field remote table<string, boolean>|nil 刷新时列出的远端书文件（失败目录保留原成员）；日常同步为 nil
 ---@field local_files table<string, table>|nil 扫出的本地书库目录文件（相对路径 → scanFiles 条目；推脏不扫，为 nil）
 ---@field meta_failed boolean|nil books.sync 存在但读不出：本轮不能回写，否则会覆盖别的设备的书目
 ---@field reconcile_skipped boolean|nil 书目与远端列表都为空，本轮 pullBooksSync 没有 reconcile
@@ -169,22 +169,22 @@ end
 ---@field report fun(text: string, done: integer|nil, total: integer|nil) 真实步骤上报
 ---@field active table|nil
 ---@field list_jobs table<table, boolean>|nil 在飞的子目录请求，完成即移除
----@field list_errors integer|nil 本轮子目录读取失败次数
+---@field list_failed string[]|nil 本轮无法核对的子目录，相对书库根的路径
 ---@field cancelled boolean
 ---@field deleted integer|nil 本轮推删成功（墓碑已撕）的本数
 ---@field push_error string|nil 本地改动没推上去的第一条原因（脏标记保留，本轮其余步骤照跑）
 
 --- 书文件相对路径最多 3 段：根 / 分类 / 系列（与本地 scanFiles、旧版逐层下钻一致），更深忽略。
 local BOOK_PATH_MAX_DEPTH = 3
---- 硬刷新逐文件夹回退时的并发路数（与 dav 列目录池一致）。
+--- 硬刷新逐文件夹检查的并发路数（与 dav 列目录池一致）。
 local LIST_CONCURRENCY = 4
-local DIR_MTIME_FILE = "dir_mtimes"
+local LARGE_LIBRARY_ENTRIES = 1000
 
 ---@param rel string
 ---@return integer
 local function pathDepth(rel)
     local n = 1
-    for _ in rel:gmatch("/") do n = n + 1 end
+    for _slash in rel:gmatch("/") do n = n + 1 end
     return n
 end
 
@@ -207,13 +207,10 @@ end
 ---@param done fun()
 local function eachAsyncLimit(list, limit, step, done)
     if #list == 0 then return done() end
-    local next_i, live, finished = 1, 0, false
+    local next_i, live, finished, pumping = 1, 0, false, false
     local function pump()
-        if finished then return end
-        if next_i > #list and live == 0 then
-            finished = true
-            return done()
-        end
+        if finished or pumping then return end
+        pumping = true
         while live < limit and next_i <= #list do
             local i = next_i
             next_i = next_i + 1
@@ -223,44 +220,16 @@ local function eachAsyncLimit(list, limit, step, done)
                 pump()
             end, i)
         end
+        pumping = false
+        if next_i > #list and live == 0 then
+            finished = true
+            done()
+        end
     end
     pump()
 end
 
----@param self LocalClient
----@return string
-local function dirMtimePath(self)
-    return self:webdavCacheRoot() .. "/" .. DIR_MTIME_FILE
-end
-
---- 上次硬刷新记下的目录 mtime（相对书库根的路径 → UTC 秒）。
----@param self LocalClient
----@return table<string, integer>
-local function loadDirMtimes(self)
-    local raw = readFile(dirMtimePath(self))
-    local out = {}
-    if type(raw) ~= "string" then return out end
-    for line in raw:gmatch("[^\n]+") do
-        local rel, mt = line:match("^(.*)\t(%d+)$")
-        if rel and not rel:find("[\t\r]") then out[rel] = tonumber(mt) end
-    end
-    return out
-end
-
----@param self LocalClient
----@param map table<string, integer>
-local function saveDirMtimes(self, map)
-    local lines = {}
-    for rel, mt in pairs(map) do
-        if type(mt) == "number" and rel ~= "" and not rel:find("[\t\r\n]") then
-            lines[#lines + 1] = rel .. "\t" .. tostring(mt)
-        end
-    end
-    table.sort(lines)
-    writeFile(dirMtimePath(self), table.concat(lines, "\n"))
-end
-
---- 书架上已有的 WebDAV 书（相对路径）。硬刷新时目录 mtime 未变就不再进文件夹打探。
+--- 书架上已有的 WebDAV 书（相对路径），列目录失败时保留，不能误当成远端删除。
 ---@return table<string, boolean>
 local function knownRemoteFiles()
     local BookDB = require("book.books_db")
@@ -286,7 +255,7 @@ end
 
 --- 刷新步骤：列远端书文件（跳过 . 前缀项，含 .Moon+）。根目录列不出来就中止整轮：
 --- 合并时把“无法确认”当成“不存在”会误删书目条目。单本 / 单文件夹超时或失败只跳过该目录。
---- 先试一次 Depth:infinity；服务器不支持或回包仍像 Depth:1 时，再并发下钻。
+--- 每个目录用 Depth:1 核对，不信任目录 mtime，也不依赖服务器是否完整实现 Depth:infinity。
 --- 日常同步以 books.sync 为准；硬刷新必须列目录。books.sync 404 是尚未写过书目（常见于首次
 --- 或 Calibre 式书库），不是退回全量遍历的额外故障——列完并成功后 pushBooksSync 会写上。
 ---@param self LocalClient
@@ -296,21 +265,17 @@ local function listBooks(self, run, done)
     local Timeout = require("http.timeout")
     -- 列目录跟用户的「网络超时」走，不写死比设置更短的秒数。
     -- 单文件夹：整包 net(1)，连接 net(CONNECT_RATIO)。
-    -- 书库根（infinity 与降级后的 Depth:1）一次可能列上万条，整包和连接都用 net(10)，
+    -- 书库根一次可能列上万条，整包和连接都用 net(10)，
     -- 避免慢服务器的首包被默认连接超时（30×2/3=20 秒）掐掉。
     local folder_timeout = Timeout.net(1)
     local folder_connect = Timeout.net(Timeout.CONNECT_RATIO)
     local tree_timeout = Timeout.net(10)
     local root = self:webdavPath()
     local known = knownRemoteFiles()
-    local mtimes, seen_mtimes = loadDirMtimes(self), {}
     local list_jobs = {}
     run.list_jobs = list_jobs
-    run.list_errors = 0
-
-    local function rememberMtime(rel, mtime)
-        if type(mtime) == "number" then seen_mtimes[rel] = mtime end
-    end
+    run.list_failed = {}
+    local checked = 0
 
     local function adoptKnown(dir_rel)
         for _idx, rel in ipairs(knownUnder(known, dir_rel)) do
@@ -318,34 +283,27 @@ local function listBooks(self, run, done)
         end
     end
 
-    --- 父目录列表里这个子文件夹的 mtime 与上次刷新一致，且书架上已有它的直接子书文件
-    --- （Calibre 式一文件夹一本书）。分类目录下还有子文件夹时，mtime 不一定随深层文件变，不能跳过。
-    ---@param dir_rel string
-    ---@param mtime number|nil
-    ---@return boolean
-    local function skipUnchanged(dir_rel, mtime)
-        if type(mtime) ~= "number" or mtimes[dir_rel] ~= mtime then return false end
-        local found = knownUnder(known, dir_rel)
-        -- 书架上没有这本书时不能跳过：否则清过书架或书目尚未写入时，mtime 缓存会把整库都跳过去。
-        if #found == 0 then return false end
-        local prefix = dir_rel .. "/"
-        for _idx, rel in ipairs(found) do
-            if rel:find("/", #prefix + 1, true) then return false end
-        end
-        adoptKnown(dir_rel)
-        rememberMtime(dir_rel, mtime)
-        return true
-    end
-
-    local function collect(folder_path, prefix, entries, depth, complete_tree)
+    local function collect(folder_path, prefix, entries, depth)
         local dirs = {}
         for _idx, entry in ipairs(entries) do
             if entry.name:sub(1, 1) ~= "." then
+                checked = checked + 1
+                if checked == LARGE_LIBRARY_ENTRIES then
+                    local Settings = require("utils.settings")
+                    local cfg = Settings.getSource(SOURCE_ID)
+                    if not cfg.webdav_large_library_warned then
+                        require("ui.themes.widgets.toast"):new{
+                            text = _("WebDAV 中的文件和文件夹较多，逐项检查会较慢。建议自行部署月读服务：\nhttps://github.com/AnkioTomas/book"),
+                            timeout = 8,
+                        }:show()
+                        cfg.webdav_large_library_warned = true
+                        Settings.saveSource(SOURCE_ID)
+                    end
+                end
                 local rel = prefix ~= "" and prefix .. "/" .. entryRel(folder_path, entry) or entryRel(folder_path, entry)
                 if entry.is_dir then
-                    if complete_tree then rememberMtime(rel, entry.mtime) end
-                    if depth < BOOK_PATH_MAX_DEPTH and not skipUnchanged(rel, entry.mtime) then
-                        dirs[#dirs + 1] = { path = entry.path, rel = rel, mtime = entry.mtime }
+                    if depth < BOOK_PATH_MAX_DEPTH then
+                        dirs[#dirs + 1] = { path = entry.path, rel = rel }
                     end
                 elseif isBookFile(entry.name) and pathDepth(rel) <= BOOK_PATH_MAX_DEPTH then
                     run.remote[rel] = true
@@ -355,19 +313,8 @@ local function listBooks(self, run, done)
         return dirs
     end
 
-    --- 深度列表是否其实只返回了直接子项（服务器忽略了 Depth:infinity）。
-    ---@param entries WebdavEntry[]
-    ---@return boolean
-    local function shallowOnly(entries)
-        for _idx, entry in ipairs(entries) do
-            if entryRel(root, entry):find("/", 1, true) then return false end
-        end
-        return true
-    end
-
     local function walkEntries(path, prefix, depth, entries, finish)
         local dirs = collect(path, prefix, entries, depth)
-        local complete = true
         eachAsyncLimit(dirs, LIST_CONCURRENCY, function(dir, next_dir, index)
             if run.cancelled then return end
             run.report(T(_("正在列出远端目录 %1"), dir.path), index, #dirs)
@@ -379,41 +326,19 @@ local function listBooks(self, run, done)
                 if not child then
                     -- 单本 / 单文件夹失败不中止整轮：记下、跳过，已列入的书仍保留。
                     require("utils.log").warn("book webdav list folder failed", dir.rel, err)
-                    run.list_errors = run.list_errors + 1
-                    complete = false
+                    run.list_failed[#run.list_failed + 1] = dir.rel
                     adoptKnown(dir.rel)
                     return next_dir()
                 end
-                walkEntries(dir.path, dir.rel, depth + 1, child, function(child_complete)
-                    if child_complete then
-                        rememberMtime(dir.rel, dir.mtime)
-                    else
-                        complete = false
-                    end
-                    next_dir()
-                end)
+                walkEntries(dir.path, dir.rel, depth + 1, child, next_dir)
             end, { timeout = folder_timeout, connect_timeout = folder_connect })
             if job and not completed then list_jobs[job] = true end
-        end, function() finish(complete) end)
+        end, finish)
     end
 
     local function finishList(err)
         run.list_jobs = nil
-        if not err then saveDirMtimes(self, seen_mtimes) end
         done(err)
-    end
-
-    local function listRoot(depth, timeout, cb)
-        run.report(depth == "infinity" and _("正在列出远端书库…") or T(_("正在列出远端目录 %1"), root))
-        run.active = self.dav:listAsync(root, cb, {
-            depth = depth,
-            timeout = timeout,
-            connect_timeout = timeout,
-        })
-    end
-
-    local function walkFrom(entries)
-        walkEntries(root, "", 1, entries, function() finishList() end)
     end
 
     -- 固定布局目录（书库根、.Moon+、Cache、Cover）不存在就建，已存在时 MKCOL 返回 405 视为成功。
@@ -424,26 +349,12 @@ local function listBooks(self, run, done)
         run.active = self.dav:ensurePathAsync(moonPath(self, "Cover"), function(ok_cover, cover_err)
             if run.cancelled then return end
             if not ok_cover then return done(cover_err) end
-            listRoot("infinity", tree_timeout, function(entries, err)
+            run.report(T(_("正在列出远端目录 %1"), root))
+            run.active = self.dav:listAsync(root, function(entries, list_err)
                 if run.cancelled then return end
-                if entries and not (shallowOnly(entries) and collect(root, "", entries, 1)[1]) then
-                    -- 一次拉到了深层文件，或根下没有还要下钻的目录。
-                    collect(root, "", entries, 1, true)
-                    -- collect 会把未跳过的子目录放进返回值；完整树里这些目录的文件已在 entries 中，
-                    -- 不应再走 walk。上面的条件已排除「有待下钻目录」的浅列表。
-                    return finishList()
-                end
-                local function fromDepth1(root_entries, root_err)
-                    if run.cancelled then return end
-                    if not root_entries then return finishList(root_err or err or "WebDAV list failed") end
-                    walkFrom(root_entries)
-                end
-                if entries then
-                    -- 服务器忽略了 infinity，回包装成 Depth:1：直接用这份根列表下钻，不再重列根。
-                    return fromDepth1(entries)
-                end
-                listRoot("1", tree_timeout, fromDepth1)
-            end)
+                if not entries then return finishList(list_err or "WebDAV list failed") end
+                walkEntries(root, "", 1, entries, function() finishList() end)
+            end, { depth = "1", timeout = tree_timeout, connect_timeout = tree_timeout })
         end)
     end)
 end
@@ -545,6 +456,13 @@ local function pullBooksSync(self, run, done)
             return done()
         end
 
+        -- 失败目录中的书目条目即使尚未拉到本地，也不能因为这次没列出来就删除。
+        for _idx, dir_rel in ipairs(run.list_failed or {}) do
+            local prefix = dir_rel .. "/"
+            for rel in pairs(run.entries) do
+                if rel:sub(1, #prefix) == prefix then run.remote[rel] = true end
+            end
+        end
         local BookDB = require("book.books_db")
         run.files = memberFiles(run)
         -- 书目与远端列表都为空而本地书架非空：首次同步，或目录填错 / 服务端异常。本轮不下架任何书，
