@@ -145,11 +145,11 @@ local Screen = {
     scaleBySize = function(_, n) return n end,
     scaleByDPI = function(_, n) return n end,
     getSize = function() return { w = 1240, h = 1650 } end,
-    isColorEnabled = function() return true end,
-    isColorScreen = function() return true end,
+    isColorEnabled = function() return false end,
+    isColorScreen = function() return false end,
     getWidthMM = function() return 100 end,
     getHeightMM = function() return 130 end,
-    fb_bpp = 32,
+    fb_bpp = 8,
 }
 package.preload["device"] = function()
     local Device = {
@@ -167,7 +167,7 @@ package.preload["device"] = function()
         isPocketBook = function() return false end,
         hasSystemFonts = function() return true end,
         hasEinkScreen = function() return false end,
-        hasColorScreen = function() return true end,
+        hasColorScreen = function() return false end,
         canHWDither = function() return false end,
         enableCPUCores = function() end,
         isSDL = function() return false end,

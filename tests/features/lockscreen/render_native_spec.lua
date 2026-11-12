@@ -11,8 +11,10 @@ if not Config.setupNativePath() then
 end
 
 local ffi = require("ffi")
-ffi.loadlib = function(name)
-    return ffi.load(Config.dir() .. "/libs/lib" .. name .. (ffi.os == "OSX" and ".dylib" or ".so"))
+ffi.loadlib = function(name, version)
+    local suffix = ffi.os == "OSX" and ".dylib" or ".so"
+    if version then suffix = ffi.os == "OSX" and "." .. version .. suffix or suffix .. "." .. version end
+    return ffi.load(Config.dir() .. "/libs/lib" .. name .. suffix)
 end
 package.loaded["ffi/blitbuffer"] = nil
 package.preload["ffi/blitbuffer"] = nil
@@ -43,6 +45,8 @@ end
 local function cleanup()
     os.remove(path .. ".part")
     os.remove(path)
+    os.remove(dir .. "/card.png")
+    os.remove(dir .. "/color-source.png")
     lfs.rmdir(dir)
 end
 
@@ -78,14 +82,17 @@ local ok_run, err_run = xpcall(function()
         os.remove(path .. ".part")
     end
     color_screen = false
-    package.loaded["ui/renderimage"] = { renderImageFile = function()
+    local function decodedImage()
         return BB.new(8, 8, BB.TYPE_BBRGB32)
-    end }
+    end
+    package.loaded["ui/renderimage"] = { renderImageFile = decodedImage, renderImageData = decodedImage }
     local ImageWidget = package.loaded["ui/widget/imagewidget"]
     ImageWidget.new = function(_self, options)
         return {
             paintTo = function(_image, bb) bb:blitFrom(options.image) end,
-            free = function() options.image:free() end,
+            free = function()
+                if options.image_disposable then options.image:free() end
+            end,
         }
     end
     local ok, err, transparent = Render.write(path, { path = "transparent-background" }, {
@@ -99,20 +106,48 @@ local ok_run, err_run = xpcall(function()
     Assert.eq(image.data[8 * 4 + 3], 0, "未绘制主体的背景保留透明")
     ffi.C.free(image.data)
 
-    -- writeSize：彩屏 RGB 底必须保持设计色，不能被 fill() 收成灰度。
-    color_screen = true
+    -- writeSize：无论屏幕能力，RGB 底都保留设计色。
     local card = dir .. "/card.png"
     local cream = BB.ColorRGB32(0xF6, 0xF1, 0xE8, 0xFF)
-    local ok_size, err_size = Render.writeSize(card, 8, 8, {}, cream)
-    Assert.is_true(ok_size, tostring(err_size))
-    decoded, image = Png.decodeFromFile(card, 4)
-    Assert.is_true(decoded)
-    Assert.eq(image.width, 8)
-    Assert.eq(image.data[0], 0xF6, "纸页底 R")
-    Assert.eq(image.data[1], 0xF1, "纸页底 G")
-    Assert.eq(image.data[2], 0xE8, "纸页底 B")
-    ffi.C.free(image.data)
+    local ok_size, err_size
+    for _idx, enabled in ipairs({ false, true }) do
+        color_screen = enabled
+        ok_size, err_size = Render.writeSize(card, 8, 8, {}, cream)
+        Assert.is_true(ok_size, tostring(err_size))
+        decoded, image = Png.decodeFromFile(card, 4)
+        Assert.is_true(decoded)
+        Assert.eq(image.width, 8)
+        Assert.eq(image.data[0], 0xF6, "纸页底 R")
+        Assert.eq(image.data[1], 0xF1, "纸页底 G")
+        Assert.eq(image.data[2], 0xE8, "纸页底 B")
+        ffi.C.free(image.data)
+    end
     os.remove(card)
+
+    -- 故意把彩色 JPEG 存成 .png：解码按文件头，黑白设备也不能丢掉封面颜色。
+    local jpeg_path = dir .. "/color-source.png"
+    ---@type BlitBuffer
+    ---@diagnostic disable-next-line: assign-type-mismatch
+    local source = BB.new(8, 8, BB.TYPE_BBRGB32)
+    source:paintRectRGB32(0, 0, 8, 8, BB.ColorRGB32(0xC0, 0x22, 0x33, 0xFF))
+    local written, write_err = require("ffi/jpeg").encodeToFile(
+        jpeg_path, ffi.cast("const unsigned char *", source.data), 8, 8, 4, 100, source.stride)
+    source:free()
+    Assert.is_true(written, tostring(write_err))
+    color_screen = false
+    for _idx, cover in ipairs({ false, true }) do
+        ok_size, err_size = Render.writeSize(card, 8, 8, {
+            { kind = "image", file = jpeg_path, x = 0, y = 0, width = 8, height = 8, cover = cover },
+        }, cream)
+        Assert.is_true(ok_size, tostring(err_size))
+        decoded, image = Png.decodeFromFile(card, 4)
+        Assert.is_true(decoded)
+        Assert.is_true(image.data[0] > image.data[1] * 2, "JPEG 封面保留红色而非等通道灰色")
+        ffi.C.free(image.data)
+    end
+    os.remove(card)
+    os.remove(jpeg_path)
+    color_screen = true
 
     -- 水平渐变按列插值，不是两截色块。
     local from = BB.ColorRGB32(0x2A, 0x26, 0x22, 0xFF)
@@ -145,7 +180,7 @@ local ok_run, err_run = xpcall(function()
                 local h = options.height or 8
                 bb:paintRectRGB32(x, y, w, h, BB.ColorRGB32(0x20, 0x80, 0xE0, 0xFF))
             end,
-            free = function() end,
+            free = function() options.image:free() end,
         }
     end
     ok_size, err_size = Render.writeSize(card, 8, 8, {

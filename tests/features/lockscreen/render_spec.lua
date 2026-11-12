@@ -226,6 +226,10 @@ local ok_run, err_run = pcall(function()
     Assert.is_true((Render.write("/tmp/compose.png", nil, {})))
     Assert.eq(buffer_types[1], 1, "灰度屏用 BB8 画布")
     Assert.eq(encoded_channels, 1)
+    reset()
+    Assert.is_true((Render.writeSize("/tmp/share.png", 100, 200, {})))
+    Assert.eq(buffer_types[1], 2, "黑白设备的书摘仍用彩色画布")
+    Assert.eq(encoded_channels, 4)
     color_screen = true
 
     -- 旧屏幕接口没有彩色能力查询时，仍按灰度合成而不是调用 nil。
