@@ -107,5 +107,14 @@ migrated = Settings.read()
 Assert.eq(migrated.theme, "paper")
 Assert.eq(migrated.swatch, "blue")
 
+Settings.write({ theme = "night", swatch = "removed", font_id = "", font_name = "旧字体" })
+Settings, MoonSettings = reload()
+local normalized = Settings.read()
+Assert.eq(normalized.theme, "paper")
+Assert.eq(normalized.swatch, "night", "未知色板先回落默认，再迁移旧夜读")
+Assert.is_nil(normalized.font_id)
+Assert.is_nil(normalized.font_name)
+Assert.is_true(normalized.show_logo)
+
 os.remove(Paths.sectionPath("share"))
 return true

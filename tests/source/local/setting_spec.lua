@@ -144,6 +144,14 @@ Assert.eq(row(3).status, "关")
 Assert.eq(painted, 3)
 Assert.is_true(not reloaded)
 
+-- 重选当前普通目录不弹换根提醒。
+cfg.path = "/mnt/us/documents/books"
+last_confirm, forgotten = nil, {}
+Setting.open(nil, plugin.desktop)
+item("使用此目录").callback()
+Assert.is_nil(last_confirm)
+Assert.len(forgotten, 0)
+
 -- 换书库目录：进子目录确认 → 先收成待重匹配 + 强制重扫，不 reload；并提醒用当前根下的文件夹分类
 cfg.path = "/mnt/us/documents"
 forgotten, rescanned, reloaded, last_confirm = {}, false, false, nil

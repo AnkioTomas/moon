@@ -171,5 +171,131 @@ do -- 过大的已缓存 CBZ 打开前会重打包
     Assert.eq(result, "/cache/fanqie/767.cbz")
 end
 
+do -- Reader 的路径索引属于实例：未 iterate 的新实例不能直接按路径提取。
+    local Paths = require("utils.paths")
+    local sandbox = require("support.config").dir() .. "/cbz-reader-spec"
+    Assert.is_true(Paths.ensureDir(sandbox))
+    local archive = sandbox .. "/cached.cbz"
+    local header = "\137PNG\r\n\26\n" .. string.rep("\0", 4) .. "IHDR"
+        .. string.char(0, 0, 8, 96, 0, 0, 7, 208)
+    local readers, broken, empty = {}, false, false
+    local original_archiver = package.loaded["ffi/archiver"]
+    local original_docsettings = package.loaded["docsettings"]
+    local sidecar, flushed = { last_page = 1, doc_pages = 1 }, 0
+    package.loaded["docsettings"] = {
+        hasSidecarFile = function() return true end,
+        open = function()
+            return {
+                readSetting = function(_self, key) return sidecar[key] end,
+                saveSetting = function(_self, key, value) sidecar[key] = value end,
+                flush = function() flushed = flushed + 1 end,
+            }
+        end,
+    }
+    package.loaded["ffi/archiver"] = {
+        Reader = {
+            new = function()
+                local reader = { entries = {} }
+                readers[#readers + 1] = reader
+                function reader:open(path)
+                    return path ~= sandbox .. "/missing.cbz"
+                end
+                function reader:iterate()
+                    local yielded = false
+                    return function()
+                        if empty or yielded then return nil end
+                        yielded = true
+                        local entry = { path = "page.png", mode = "file", size = #header }
+                        self.entries[entry.path] = entry
+                        return entry
+                    end
+                end
+                function reader:extractToMemory(name)
+                    if self.entries[name] then return header end
+                end
+                function reader:extractToPath(name, dest)
+                    if not self.entries[name] or broken then
+                        self.err = "extract failed"
+                        return false
+                    end
+                    writeFile(dest, header)
+                    return true
+                end
+                function reader:close() self.closed = true end
+                return reader
+            end,
+        },
+        Writer = {
+            new = function()
+                return {
+                    open = function(_self, path) writeFile(path, "rebuilt"); return true end,
+                    setZipCompression = function() return true end,
+                    addFileFromMemory = function(_self, name, data)
+                        added[#added + 1] = { name = name, data = data }
+                        return true
+                    end,
+                    close = function() end,
+                }
+            end,
+        },
+    }
+    writeFile(archive, "original")
+    local needed, count = Cbz.needsFit(archive, 1072, 1448)
+    Assert.is_true(needed)
+    Assert.eq(count, 1)
+    Assert.is_true(readers[#readers].closed)
+    added, ticks = {}, {}
+    Fit.backend = { materialize = function(path)
+        return {
+            { path = path, name = "0001.png", temp = false },
+            { path = path, name = "0002.png", temp = false },
+        }
+    end }
+    local result, reason, meta
+    Cbz.rebuild(archive, {}, function(path, err, info) result, reason, meta = path, err, info end, 1072, 1448)
+    drain()
+    Assert.eq(result, archive)
+    Assert.is_nil(reason)
+    Assert.eq(meta.old_pages, 1)
+    Assert.eq(meta.new_pages, 2)
+    Assert.len(added, 2)
+    Assert.eq(added[1].data, header)
+    Assert.is_true(readers[#readers].closed)
+    Assert.eq(sidecar.last_page, 1)
+    Assert.eq(sidecar.doc_pages, 2)
+    Assert.eq(flushed, 1)
+
+    broken = true
+    local before = assert(io.open(archive, "rb"))
+    local content = before:read("*a")
+    before:close()
+    Cbz.rebuild(archive, {}, function(path, err) result, reason = path, err end, 1072, 1448)
+    drain()
+    Assert.is_nil(result)
+    Assert.eq(reason, "extract failed")
+    Assert.is_true(readers[#readers].closed)
+    Assert.eq(flushed, 1, "失败时不能重写阅读进度")
+    local after = assert(io.open(archive, "rb"))
+    Assert.eq(after:read("*a"), content, "提取失败不能替换原归档")
+    after:close()
+    Assert.is_nil(io.open(archive .. ".part", "rb"))
+
+    header = "\137PNG\r\n\26\n" .. string.rep("\0", 4) .. "IHDR"
+        .. string.char(0, 0, 2, 0, 0, 0, 2, 0)
+    Assert.is_false(Cbz.needsFit(archive, 1072, 1448))
+    empty = true
+    Assert.is_false(Cbz.needsFit(archive, 1072, 1448))
+    Cbz.rebuild(archive, {}, function(path, err) result, reason = path, err end, 1072, 1448)
+    Assert.is_nil(result)
+    Assert.not_nil(reason)
+    Assert.is_true(readers[#readers].closed)
+    Assert.is_false(Cbz.needsFit(sandbox .. "/missing.cbz", 1072, 1448))
+    Fit.backend = nil
+    package.loaded["ffi/archiver"] = original_archiver
+    package.loaded["docsettings"] = original_docsettings
+    os.remove(archive)
+    require("libs/libkoreader-lfs").rmdir(sandbox)
+end
+
 os.execute("rm -rf '" .. dir .. "'")
 return true

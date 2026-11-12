@@ -221,8 +221,8 @@ function Setting.open(on_saved, desktop)
             require("utils.log").warn("book local picker skip unreadable dir", path, err)
             return nil
         end
+        local next_path = Text.rtrimSlashes(Text.rtrim(path))
         local function save()
-            local next_path = Text.rtrimSlashes(Text.rtrim(path))
             -- 换目录：旧根书先下架但保留记录，随后扫描按 md5 迁到新路径；无法再匹配的墓碑才撕掉。
             if previous ~= next_path and previous ~= ""
                 and not require("book.store").stashOldRoot(previous, next_path) then

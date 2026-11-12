@@ -31,10 +31,10 @@ end
 ---@param ctx { ui?: table, snapshot?: table }|nil
 ---@return table
 local function bookContext(highlight, ctx)
+    local Session = require("reader.session")
     local snapshot = ctx and ctx.snapshot
     if not snapshot then
-        local ok, Session = pcall(require, "reader.session")
-        if ok then snapshot = Session.current() end
+        snapshot = Session.current()
     end
     local ui = (ctx and ctx.ui) or (highlight and highlight.ui) or (snapshot and snapshot.ui)
     local title, authors, chapter, source_id, stable_id
@@ -44,8 +44,7 @@ local function bookContext(highlight, ctx)
         source_id, stable_id = identity.source_id, identity.stable_id
         title = book.title
         authors = book.authors
-        local ok, Session = pcall(require, "reader.session")
-        if ok then chapter = Session.chapterTitle(snapshot) end
+        chapter = Session.chapterTitle(snapshot)
     end
     local props = ui and (ui.doc_props or (ui.document and ui.document.file and ui.document.doc_props)) or {}
     title = title or props.display_title or props.title
@@ -64,10 +63,7 @@ end
 ---@return string
 local function cleanText(text)
     if type(text) ~= "string" then return "" end
-    local ok, util = pcall(require, "util")
-    if ok and util.cleanupSelectedText then
-        text = util.cleanupSelectedText(text)
-    end
+    text = require("util").cleanupSelectedText(text)
     return require("utils.text").trim(text)
 end
 
