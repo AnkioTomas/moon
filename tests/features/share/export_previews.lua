@@ -6,19 +6,13 @@
 --]]
 
 -- 既可经 tests/features/share/run_export.lua 引导（推荐），也可在已挂好
--- 原生库与 Device 的环境里直接跑。这里只确保彩屏路径和 blitbuffer 不是桩。
+-- 原生库与 Device 的环境里直接跑。这里只确保 blitbuffer 不是桩。
 local Config = require("support.config")
 if not Config.setupNativePath() then
     error("需要 KOReader 模拟器原生库才能导出预览")
 end
 
--- 导出预览按彩屏设计稿走，避免被灰度路径收成单色。
 -- 不要卸载 ffi/blitbuffer：mupdf 可能已经 cdef 过，再 require 会 redefine。
-local Device = require("device")
-if Device.screen then
-    Device.screen.isColorEnabled = function() return true end
-end
-
 package.loaded["features.share.card"] = nil
 package.loaded["features.lockscreen.render"] = nil
 local Card = require("features.share.card")

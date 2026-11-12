@@ -36,10 +36,13 @@ end
 package.loaded["features.share.card"] = nil
 local Card = require("features.share.card")
 
--- 色板令牌：电纸灰度、彩屏 RGB。Box.style 必须吃数字，不能吃 Color 对象。
-Assert.eq(Card.colorToken(0xF6F1E8, 0xF0), 0xF0)
-color_screen = true
-Assert.eq(Card.colorToken(0xF6F1E8, 0xF0), 0xF6F1E8)
+-- 书摘色板不随屏幕能力转灰。
+for _idx, enabled in ipairs({ false, true }) do
+    color_screen = enabled
+    local palette = Card.palette("paper", {})
+    Assert.eq(palette.bg.rgb, 0xF6F1E8)
+    Assert.eq(palette.ink.rgb, 0x2C271F)
+end
 color_screen = false
 
 local SAMPLE = "明月几时有？把酒问青天。不知天上宫阙，今夕是何年。我欲乘风归去，又恐琼楼玉宇，高处不胜寒。"
@@ -338,7 +341,7 @@ do
     Assert.is_true(layout.height <= 375 * 1.45 + 200)
 end
 
--- 生成的渲染块不含 kicker/slogan；电纸顶条是实心深色，logo 圆形，引号是透明文字块。
+-- 生成的渲染块不含 kicker/slogan；logo 圆形，引号是透明文字块。
 do
     local layout = Card.layout("paper", payload, 375, m)
     local blocks = Card.blocks(layout)
@@ -356,7 +359,6 @@ do
             Assert.is_nil(b.circle, "封面保持矩形")
         end
     end
-    Assert.is_nil(table.concat(kinds, ","):find("hgradient", 1, true), "电纸不用渐变")
     Assert.is_true(table.concat(kinds, ","):find("image", 1, true), "封面和 logo")
     local paper = Card.blocks(Card.layout("paper", payload, 375, m))
     local mark
@@ -367,6 +369,8 @@ do
     Assert.not_nil(mark)
     Assert.is_true(mark.x < 8, "引号字模允许负 x")
     Assert.is_false(mark.box)
+    layout.banner = { height = 8, colors = { { rgb = 0xCC0000 }, { rgb = 0x0000CC } } }
+    Assert.eq(Card.blocks(layout)[1].kind, "hgradient", "黑白设备生成的文件也保留渐变")
 end
 
 -- 静影忽略底色色板，始终用默认遮罩。

@@ -94,8 +94,10 @@ end
 ---@param width number 目标宽度，单位像素
 ---@param height number 目标高度，单位像素
 ---@param paint fun(bb: BlitBuffer)
+---@param transparent boolean|nil
+---@param full_color boolean|nil
 ---@return boolean, any
-local function writePNG(path, width, height, paint, transparent)
+local function writePNG(path, width, height, paint, transparent, full_color)
     assert(width > 0 and width == math.floor(width), "invalid image width")
     assert(height > 0 and height == math.floor(height), "invalid image height")
     local bb
@@ -111,7 +113,7 @@ local function writePNG(path, width, height, paint, transparent)
             if not created then error("cannot create PNG directory " .. dir .. ": " .. tostring(reason)) end
         end
         -- 灰度屏用 BB8：整屏画布 RGB32 要 8 MiB，灰度 PNG 也小得多。透明背景只有 RGB32 带 alpha。
-        local channels = (transparent or (Screen.isColorEnabled and Screen:isColorEnabled())) and 4 or 1
+        local channels = (transparent or full_color or (Screen.isColorEnabled and Screen:isColorEnabled())) and 4 or 1
         bb = Blitbuffer.new(width, height,
             channels == 4 and Blitbuffer.TYPE_BBRGB32 or Blitbuffer.TYPE_BB8)
         ---@diagnostic disable-next-line: cast-type-mismatch
@@ -491,17 +493,30 @@ end
 local kept = {}
 local keptImage
 
+local function decodeImage(file, full_color)
+    local RenderImage = require("ui/renderimage")
+    if not full_color then return RenderImage:renderImageFile(file, false) end
+    local source, err = io.open(file, "rb")
+    if not source then error(err) end
+    local data = source:read("*a")
+    source:close()
+    -- KOReader 的 JPEG 入口会按硬件能力转灰，离屏导出显式要求 RGB。
+    if require("utils.image").ext(data) == ".jpg" then
+        return (require("ffi/jpeg").openDocumentFromMem(data, true, #data))
+    end
+    return assert(RenderImage:renderImageData(data, #data, false), "cannot decode image: " .. file)
+end
+
 --- 按 cover 方式把图片铺进矩形（可指定锚点、放大裁切、先缩小再模糊）。
-local function paintCoverImage(bb, block, x, y, width, canvas_w, canvas_h)
+local function paintCoverImage(bb, block, x, y, width, canvas_w, canvas_h, full_color)
     local height = block.height or width
     if width <= 0 or height <= 0 then return end
-    local RenderImage = require("ui/renderimage")
     local source
     local owned = false
     if block.keep then
-        source = keptImage(block.file)
+        source = keptImage(block.file, full_color)
     else
-        source = assert(RenderImage:renderImageFile(assert(block.file, "image block file required"), false),
+        source = assert(decodeImage(assert(block.file, "image block file required"), full_color),
             "cannot decode image: " .. tostring(block.file))
         owned = true
     end
@@ -583,11 +598,12 @@ end
 -- keep 图块（锁屏 logo）解码一次常驻：每次锁屏都画同一张小图，不必重复解码。只存小图，按文件一份。
 ---@param file string
 ---@return BlitBuffer
-function keptImage(file)
-    if not kept[file] then
-        kept[file] = assert(require("ui/renderimage"):renderImageFile(file, false), "cannot decode image: " .. file)
+function keptImage(file, full_color)
+    local key = full_color and (file .. "\0rgb") or file
+    if not kept[key] then
+        kept[key] = assert(decodeImage(file, full_color), "cannot decode image: " .. file)
     end
-    return kept[file]
+    return kept[key]
 end
 
 --- 分发非文本图形块：线、柱、卡片、票根缺口、图片和离屏 widget。
@@ -597,7 +613,7 @@ end
 ---@param w number 输出宽度
 ---@param h number 输出高度
 ---@param background BlitBuffer|nil 绘制主体前的背景副本
-local function paintShape(bb, block, w, h, background)
+local function paintShape(bb, block, w, h, background, full_color)
     local x = block.x or math.floor(w * 0.08)
     local y = block.y or 0
     local width = block.width or (w - x * 2)
@@ -684,11 +700,12 @@ local function paintShape(bb, block, w, h, background)
         end
     elseif block.kind == "image" then
         if block.cover or block.anchor_y or block.anchor_x or block.blur or block.zoom then
-            paintCoverImage(bb, block, x, y, width, w, h)
+            paintCoverImage(bb, block, x, y, width, w, h, full_color)
         else
         local image = ImageWidget:new{
-            file = not block.keep and assert(block.file, "image block file required") or nil,
-            image = block.keep and keptImage(block.file) or nil,
+            file = not full_color and not block.keep and assert(block.file, "image block file required") or nil,
+            image = block.keep and keptImage(block.file, full_color)
+                or full_color and decodeImage(assert(block.file, "image block file required"), true) or nil,
             image_disposable = not block.keep,
             -- 海报墙一次几十张封面；进全局 ImageCache 会挤掉阅读器 / 桌面的缓存，画完就没用了。
             file_do_cache = false,
@@ -762,9 +779,10 @@ end
 ---@param w number
 ---@param h number
 ---@param background BlitBuffer|nil
-function M.paintBlock(bb, block, w, h, background)
+---@param full_color boolean|nil
+function M.paintBlock(bb, block, w, h, background, full_color)
     if block.kind then
-        paintShape(bb, block, w, h, background)
+        paintShape(bb, block, w, h, background, full_color)
     else
         paintText(bb, block, w)
     end
@@ -868,7 +886,7 @@ function M.write(path, background, blocks, fill)
     return ok, err, ok and transparent or nil
 end
 
---- 按指定尺寸写 PNG（分享卡片等非整屏图）。画布与块坐标都是物理像素。
+--- 按指定尺寸写彩色 PNG（分享卡片等非整屏图），不随设备转灰。画布与块坐标都是物理像素。
 ---@param path string
 ---@param width number
 ---@param height number
@@ -879,9 +897,9 @@ function M.writeSize(path, width, height, blocks, fill)
     local ok, err = writePNG(path, width, height, function(bb)
         fillCanvas(bb, width, height, fill)
         for _idx, block in ipairs(blocks or {}) do
-            M.paintBlock(bb, block, width, height)
+            M.paintBlock(bb, block, width, height, nil, true)
         end
-    end)
+    end, nil, true)
     freeWidgets(blocks)
     return ok, err
 end

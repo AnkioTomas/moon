@@ -152,31 +152,6 @@ function Card.byline(author, chapter)
     return table.concat(parts, "  ·  ")
 end
 
---- 灰度屏用高对比灰度令牌，彩屏用设计稿 RGB 令牌。返回数字，供 Box.style / Theme.color 使用。
----@param rgb number
----@param gray number
----@return number
-function Card.colorToken(rgb, gray)
-    local Screen = Device.screen
-    if Screen.isColorEnabled and Screen:isColorEnabled() then
-        return rgb
-    end
-    return gray
-end
-
---- 灰度屏用高对比 Color8，彩屏用设计稿颜色。不要把信息只放在浅色渐变里。
----@param rgb number
----@param gray number
----@return any
-function Card.color(rgb, gray)
-    local token = Card.colorToken(rgb, gray)
-    local Screen = Device.screen
-    if Screen.isColorEnabled and Screen:isColorEnabled() then
-        return Theme.color(token)
-    end
-    return Blitbuffer.Color8(token)
-end
-
 local DIGITS = { "〇", "一", "二", "三", "四", "五", "六", "七", "八", "九" }
 local MONTHS = { "一", "二", "三", "四", "五", "六", "七", "八", "九", "十", "十一", "十二" }
 local WEEKS = { "星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六" }
@@ -342,17 +317,6 @@ local CINEMA_OVERLAY = {
     blue    = { 0x101C30, 0x45, 0x060A18, 0x86 },
 }
 
----@param hex number
----@param dark boolean
----@return number
-local function grayOf(hex, dark)
-    if dark then return 0x1A end
-    local r = math.floor(hex / 0x10000)
-    local g = math.floor(hex / 0x100) % 0x100
-    local b = hex % 0x100
-    return math.max(0, math.min(255, math.floor(0.299 * r + 0.587 * g + 0.114 * b + 0.5)))
-end
-
 ---@param theme string
 ---@param opts table
 ---@return table
@@ -392,20 +356,16 @@ function Card.palette(theme, opts)
             if theme == "calendar" then mark = 0xC45C3E end
         end
     end
-    local function tone(rgb, light_g, dark_g)
-        if rgb == nil then return nil end
-        return Card.color(rgb, dark and (dark_g or 0xF0) or (light_g or 0x2A))
-    end
     return {
-        bg = Card.color(bg, grayOf(bg, (theme == "cinema" or theme == "paper") and dark or (theme == "scenic" and dark))),
-        ink = tone(ink, 0x2A, 0xF0),
-        muted = tone(muted, 0x88, 0xA0),
-        line = tone(line, 0xDC, 0x3A),
-        mark = mark and tone(mark, 0xC0, 0x58) or nil,
-        band = spec.band and Card.color(spec.band, 0x2A) or nil,
-        gold = spec.gold and Card.color(spec.gold, 0xAA) or nil,
-        rule_color = rule_color and Card.color(rule_color, dark and 0x3A or 0xD0) or nil,
-        margin_line = margin_line and Card.color(margin_line, dark and 0x5A or 0xB0) or nil,
+        bg = Theme.color(bg),
+        ink = Theme.color(ink),
+        muted = Theme.color(muted),
+        line = Theme.color(line),
+        mark = mark and Theme.color(mark) or nil,
+        band = spec.band and Theme.color(spec.band) or nil,
+        gold = spec.gold and Theme.color(spec.gold) or nil,
+        rule_color = rule_color and Theme.color(rule_color) or nil,
+        margin_line = margin_line and Theme.color(margin_line) or nil,
         dark = dark,
         foot_light = theme == "scenic" and (Card.SCENIC[opts.art or "sunset"] or Card.SCENIC.sunset).foot_light or false,
         foot_ink = nil,
@@ -1148,8 +1108,8 @@ function Card.layout(style, payload, width, metrics, opts)
         cover_hidden = style == "cinema" and has_cover,
     }
     if pal.foot_light then
-        foot_ctx.foot_ink = Card.color(0xF4EEE4, 0xF0)
-        foot_ctx.foot_muted = Card.color(0xD5CBBD, 0xC0)
+        foot_ctx.foot_ink = Theme.color(0xF4EEE4)
+        foot_ctx.foot_muted = Theme.color(0xD5CBBD)
     end
     local foot = buildFooter(foot_ctx)
     local foot_gap = px(spec.foot_gap or 28)
@@ -1464,13 +1424,13 @@ function Card.blocks(layout)
             -- 没有封面时用深色径向近似：上下两截垂直渐变。
             blocks[#blocks + 1] = {
                 kind = "vgradient", x = 0, y = 0, width = layout.width, height = layout.height,
-                colors = { Card.color(0x3A332C, 0x30), Card.color(0x0C0B0A, 0x0A) },
+                colors = { Theme.color(0x3A332C), Theme.color(0x0C0B0A) },
             }
         end
         local ov = layout.media.overlay or CINEMA_OVERLAY.default
         blocks[#blocks + 1] = {
             kind = "vgradient", x = 0, y = 0, width = layout.width, height = layout.height,
-            colors = { Card.color(ov[1], 0x10), Card.color(ov[3], 0x08) },
+            colors = { Theme.color(ov[1]), Theme.color(ov[3]) },
             blend = true, alpha_from = (ov[2] or 0x42) / 255, alpha_to = (ov[4] or 0x84) / 255,
         }
     end
@@ -1485,7 +1445,7 @@ function Card.blocks(layout)
             blocks[#blocks + 1] = {
                 kind = "vgradient", x = 0, y = top, width = layout.width,
                 height = layout.height - top,
-                colors = { Card.color(0x100A06, 0x10), Card.color(0x100A06, 0x10) },
+                colors = { Theme.color(0x100A06), Theme.color(0x100A06) },
                 blend = true, alpha_from = 0, alpha_to = 0.62,
             }
         end
@@ -1557,9 +1517,7 @@ function Card.blocks(layout)
     if layout.banner then
         local h = layout.banner.height
         local colors = layout.banner.colors
-        local Screen = Device.screen
-        -- 彩屏按列插值成平滑渐变；电纸用实心深色细条，保住对比。
-        if colors[2] and Screen.isColorEnabled and Screen:isColorEnabled() then
+        if colors[2] then
             blocks[#blocks + 1] = {
                 kind = "hgradient", x = 0, y = 0, width = layout.width, height = h,
                 colors = colors,
