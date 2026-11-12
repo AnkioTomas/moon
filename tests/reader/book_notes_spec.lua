@@ -207,3 +207,41 @@ do
     ui.bookmark:onShowBookmark()
     Assert.eq(native(), 1, "带查询的搜索交给原生列表")
 end
+
+
+-- 有 note.item_actions 时点条目先出动作菜单，不直接跳转。
+do
+    local Ext = require("utils.extension")
+    local ran = {}
+    Ext.add("note.item_actions", {
+        text = "书摘",
+        icon = "share",
+        run = function(entry, ctx)
+            ran[#ran + 1] = { text = entry.text, has_snapshot = ctx.snapshot ~= nil }
+        end,
+    })
+    local ui, native = fakeUi({ { text = "三章新划线", pos0 = "/body/p[1]/text().4" } })
+    BookNotes.install(ui)
+    state.rows = {}
+    state.snapshot = {
+        identity = { source_id = "wechat", stable_id = "b1", chapter_idx = 3 },
+        chapter = { toc = { { idx = 3, title = "第三章" } } },
+    }
+    state.goto_calls = {}
+    ui.events = {}
+    ui.bookmark:onShowBookmark()
+    local menu = state.shown
+    menu.items[1].callback()
+    Assert.eq(#state.goto_calls, 0, "先不跳转")
+    Assert.eq(#ui.events, 0)
+    local sheet = state.shown
+    Assert.is_true(sheet.centered)
+    Assert.eq(sheet.items[1].text, "跳转到原文")
+    Assert.eq(sheet.items[2].text, "书摘")
+    sheet.on_select("jump")
+    Assert.eq(ui.events[1].name, "GotoXPointer")
+    sheet.on_select("action:1")
+    Assert.eq(ran[1].text, "三章新划线")
+    Assert.is_true(ran[1].has_snapshot)
+    Assert.eq(native(), 0)
+end

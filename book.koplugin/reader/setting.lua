@@ -16,7 +16,7 @@ return {
         selection_handles_enabled = true,
         -- 划词菜单的显示顺序；关闭状态仍由 reader_popup_buttons 单独保存。
         reader_popup_button_order = {
-            "select", "highlight", "copy", "add_note", "dictionary", "translate",
+            "select", "highlight", "copy", "add_note", "share", "dictionary", "translate",
             "wikipedia", "xray", "ai_explain", "search", "view_html", "qrcode",
         },
         reader_popup_buttons = {
@@ -24,6 +24,7 @@ return {
             highlight = true,
             copy = true,
             add_note = true,
+            share = true,
             wikipedia = true,
             dictionary = true,
             translate = true,

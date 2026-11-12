@@ -114,14 +114,15 @@ function Box:paintTo(bb, x, y)
         -- 白底按比例向白提亮即「白色 + 透明度」；直角提亮冒出的角外靠收尾还原。
         bb:lightenRect(x, y, w, h, self.bg_alpha / 100)
     elseif s.bg then
-        local paint = s.bg > 0xFF and bb.paintRoundedRectRGB32 or bb.paintRoundedRect
+        -- Theme.isRgb：令牌是数字时 >0xFF 走 RGB32；已是 ColorRGB32 时不能和 0xFF 比。
+        local paint = Theme.isRgb(s.bg) and bb.paintRoundedRectRGB32 or bb.paintRoundedRect
         paint(bb, x, y, w, h, Theme.color(s.bg), r)
     end
     local border = Theme.px(s.border or 0)
     if border > 0 then
         -- 只有边框收 anti_alias（paintRoundedRect 不收）：和 FrameContainer 一样靠它盖住底色的锯齿，
         -- 也和它一样听 KOReader「界面抗锯齿」设置。
-        local paint = s.border_color > 0xFF and bb.paintBorderRGB32 or bb.paintBorder
+        local paint = Theme.isRgb(s.border_color) and bb.paintBorderRGB32 or bb.paintBorder
         paint(bb, x, y, w, h, border, Theme.color(s.border_color), r,
             G_reader_settings:nilOrTrue("anti_alias_ui"))
     end

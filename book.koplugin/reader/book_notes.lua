@@ -17,6 +17,7 @@ require("l10n").apply()
 
 local NoteDB = require("book.note_db")
 local Normalize = require("book.note.normalize")
+local Ext = require("utils.extension")
 local _ = require("gettext")
 local T = require("ffi/util").template
 
@@ -117,13 +118,46 @@ function BookNotes.show(ui, snapshot, native)
     local match = ui.bookmark and ui.bookmark.match_table
     local entries = BookNotes.collect(identity.source_id, identity.stable_id, current_idx, live, titles, match)
 
+    local actions = Ext.list("note.item_actions")
+    local function openEntry(entry)
+        if #actions == 0 then
+            jump(ui, entry, current_idx)
+            return
+        end
+        local items = {
+            { text = _("跳转到原文"), value = "jump" },
+        }
+        for i, action in ipairs(actions) do
+            items[#items + 1] = {
+                text = action.text,
+                icon = action.icon,
+                value = "action:" .. tostring(i),
+            }
+        end
+        require("ui.themes.widgets.list"):new{
+            title = entry.chapter ~= "" and entry.chapter or _("书摘"),
+            centered = true,
+            items = items,
+            on_select = function(value)
+                if value == "jump" then
+                    jump(ui, entry, current_idx)
+                    return
+                end
+                local i = tonumber((value or ""):match("^action:(%d+)$"))
+                local action = i and actions[i]
+                if action and action.run then
+                    action.run(entry, { ui = ui, snapshot = snapshot })
+                end
+            end,
+        }:show()
+    end
     local items = {}
     for _idx, entry in ipairs(entries) do
         items[#items + 1] = {
             text = entry.text,
             icon = entry.note and "edit_note" or nil,
             mandatory = entry.chapter,
-            callback = function() jump(ui, entry, current_idx) end,
+            callback = function() openEntry(entry) end,
         }
     end
     local title

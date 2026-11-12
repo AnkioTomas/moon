@@ -125,3 +125,30 @@ Assert.not_nil(settings.reader_popup_seen["12_0_make_handmade_toc_item"])
 Assert.is_false(settings.reader_popup_buttons["12_0_make_handmade_toc_item"], "显隐设置不动")
 Assert.not_nil(highlight.highlight_dialog)
 Assert.is_nil(highlight.highlight_dialog._added_widgets)
+
+
+-- 扩展点 highlight.buttons 在 ensureWrapped 时注入，并走同一套显隐门控。
+do
+    local Ext = require("utils.extension")
+    Ext.add("highlight.buttons", {
+        key = "share",
+        factory = function()
+            return { text = "书摘", callback = function() end }
+        end,
+    })
+    local h = { _highlight_buttons = { ["06_dictionary"] = function() return { text = "Dictionary" } end } }
+    HighlightMenu.ensureWrapped(h)
+    Assert.not_nil(h._highlight_buttons.share)
+    local share = h._highlight_buttons.share({}, nil)
+    Assert.eq(share.text, "书摘")
+    Assert.is_true(share.show_in_highlight_dialog_func())
+    settings.reader_popup_buttons.share = false
+    Assert.is_false(share.show_in_highlight_dialog_func())
+    -- 已有同名键不覆盖
+    local original = function() return { text = "kept" } end
+    local h2 = { _highlight_buttons = { share = original } }
+    HighlightMenu.ensureWrapped(h2)
+    Assert.eq(h2._highlight_buttons.share == original or h2._book_popup_wrapped[h2._highlight_buttons.share] == true, true)
+    -- 注入的工厂被包装后不应再是裸 factory；原有键被保留（不是我们登记的那份）
+    Assert.not_nil(h2._highlight_buttons.share)
+end

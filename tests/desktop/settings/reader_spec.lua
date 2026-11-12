@@ -105,10 +105,11 @@ Assert.eq(lookup[1].rows[1](600).title, "划词手柄")
 Assert.is_true(lookup[1].rows[1](600).toggle)
 
 local popup_rows = Settings:popupRows(desktop)
-Assert.len(popup_rows, 12)
+Assert.len(popup_rows, 13)
 Assert.eq(popup_rows[1](600).title, "选择")
-Assert.eq(popup_rows[9](600).title, "AI 解释")
-Assert.eq(popup_rows[12](600).title, "搜索")
+Assert.eq(popup_rows[5](600).title, "书摘")
+Assert.eq(popup_rows[10](600).title, "AI 解释")
+Assert.eq(popup_rows[13](600).title, "搜索")
 
 -- 旧配置缺键：设置页显示的位次必须和实际弹窗顺序（HighlightMenu.order）一致。
 reader_section = { reader_popup_button_order = { "copy" }, reader_popup_seen = {} }
@@ -117,8 +118,8 @@ local dictionary_pos
 for i, key in ipairs(order) do
     if key == "dictionary" then dictionary_pos = i end
 end
-Assert.eq(popup_rows[6](600).title, "词典")
-Assert.eq(popup_rows[6](600).status, "第 " .. dictionary_pos .. " 位")
+Assert.eq(popup_rows[7](600).title, "词典")
+Assert.eq(popup_rows[7](600).status, "第 " .. dictionary_pos .. " 位")
 
 -- 扫描到的按钮：内置按钮之后列出，标题用扫描到的文字，副标题写来源；还没扫到来源的不写
 reader_section = {
@@ -130,16 +131,16 @@ reader_section = {
     },
 }
 popup_rows = Settings:popupRows(desktop)
-Assert.len(popup_rows, 14)
+Assert.len(popup_rows, 15)
 Assert.is_nil(popup_rows[1](600).subtitle)
-Assert.eq(popup_rows[9](600).subtitle, "来自：月读")
-Assert.eq(popup_rows[11](600).subtitle, "来自：插件 qrclipboard")
-local toc_row = popup_rows[13](600)
+Assert.eq(popup_rows[10](600).subtitle, "来自：月读")
+Assert.eq(popup_rows[12](600).subtitle, "来自：插件 qrclipboard")
+local toc_row = popup_rows[14](600)
 Assert.eq(toc_row.title, "开始目录章节 ⊡")
 Assert.eq(toc_row.icon, "extension")
 Assert.eq(toc_row.subtitle, "来自：KOReader 自带")
-Assert.eq(popup_rows[14](600).title, "13_patch_button", "没扫到文字时显示原键")
-Assert.eq(popup_rows[14](600).subtitle, "来自：用户补丁 2-my-button")
+Assert.eq(popup_rows[15](600).title, "13_patch_button", "没扫到文字时显示原键")
+Assert.eq(popup_rows[15](600).subtitle, "来自：用户补丁 2-my-button")
 
 -- 停用扫描到的按钮：按原键写进 reader_popup_buttons
 toc_row.callback()
