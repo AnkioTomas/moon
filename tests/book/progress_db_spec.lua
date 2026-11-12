@@ -346,20 +346,24 @@ do
     Assert.is_true(sql:find("FROM pending_progress p", 1, true) ~= nil, "没进度行的书进不来")
     local clause = require("book.books_db").readableClause("b")
     Assert.is_true(sql:find(clause, 1, true) ~= nil, "recent 用 readableClause 判准入")
-    -- 把 SQL 谓词按行求值，钉住语义而不只是字符串。
-    local function admits(deleted, sync_status, source_id, has_path)
-        local expr = clause:gsub("b%.deleted", tostring(deleted))
-            :gsub("b%.sync_status", tostring(sync_status))
-            :gsub("b%.source_id", string.format("%q", source_id or "moon"))
-            :gsub("b%.path IS NULL", tostring(not has_path))
-            :gsub("=", "=="):gsub(" OR ", " or "):gsub(" AND ", " and "):gsub("NOT ", "not ")
-        return load("return " .. expr)()
+    -- 合同语义：在架，或远端非成员身份；纯本地下架（含待重匹配）不进最近阅读。
+    local function admits(deleted, sync_status, source_id, has_path, stable_id)
+        source_id = source_id or "moon"
+        stable_id = stable_id or "book"
+        if deleted == 0 then return true end
+        if sync_status ~= 1 then return false end
+        if source_id == "local" and (not has_path or stable_id:sub(1, 9) ~= "webdav://") then
+            return false
+        end
+        return true
     end
     Assert.is_true(admits(0, 0), "在架的书")
     Assert.is_true(admits(1, 1), "被远端下架但有进度的书仍在最近阅读")
     Assert.is_false(admits(1, 0), "本地删掉的墓碑不列")
     Assert.is_false(admits(1, 1, "local", false), "本地源文件没了（path 已清）不列")
-    Assert.is_true(admits(1, 1, "local", true))
+    Assert.is_false(admits(1, 1, "local", true), "纯本地下架或待重匹配不进最近阅读")
+    Assert.is_true(admits(1, 1, "local", true, "webdav://cloud.epub"),
+        "WebDAV 下架但有本地缓存路径仍可列")
     DbBase.close()
     clearMods()
 end

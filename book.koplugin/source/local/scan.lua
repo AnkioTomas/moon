@@ -131,15 +131,16 @@ local function parseFile(f, known, digests, index)
     return f
 end
 
---- 新路径是不是某本在架旧书移动/改名而来：新路径库里无任何行（known 不含元数据残缺行，要查库），
---- 且同 md5 的在架行里有文件已不在盘上的。同内容副本可以并存，必须挑真正被移走的那本，
+--- 新路径是不是某本旧书移动/改名而来：新路径库里无任何行（known 不含元数据残缺行，要查库），
+--- 且同 md5 的在架行或待重匹配行里有文件已不在盘上的。同内容副本可以并存，必须挑真正被移走的那本，
 --- 不能随便取一行：取到还在盘上的副本就会把移动当成新书，旧书的进度笔记留在下架行上。
+--- 用户删过的墓碑（path 已清空）不收编。
 ---@param f table parseFile 产物
 ---@return Book|nil
 local function movedFrom(f)
     local BookDB = require("book.books_db")
     if not f.md5 or BookDB.get(SOURCE_ID, f.path) then return nil end
-    for _idx, stable_id in ipairs(BookDB.stableIdsByMd5(SOURCE_ID, f.md5)) do
+    for _idx, stable_id in ipairs(BookDB.moveCandidatesByMd5(SOURCE_ID, f.md5)) do
         if not remoteRelativePath(stable_id) and not lfs.attributes(stable_id, "mode") then
             return BookDB.get(SOURCE_ID, stable_id)
         end
@@ -149,12 +150,14 @@ end
 --- 主进程：把子进程解析结果写入 books 表。
 --- 已入库且内容未变的行只恢复书架成员（changed 行按新解析结果重写）；未命中时按 movedFrom 找移动来源（墓碑不收编），
 --- 原地换 stable_id（身份以 md5 为准，不当新书），category/series 随新位置刷新；同内容副本并存时各自成书。
+--- 全量快照在对账前把新根外仍在架的已同步纯本地书收成待重匹配，避免尚未搬过来的书被清掉 path。
 ---@param files table[] parseFile 产物
 ---@param known table<string, Book>
 ---@param full_snapshot boolean|nil
 ---@param kept Book[]|nil 读不了的子目录下原有的在架行：不在快照里也照留
+---@param root string|nil 当前书库根；全量对账时用来收新根外的待重匹配行
 ---@return boolean ok, string|nil err
-local function commitFiles(files, known, full_snapshot, kept)
+local function commitFiles(files, known, full_snapshot, kept, root)
     local BookDB = require("book.books_db")
     for _idx, f in ipairs(files) do
         local cached = known[f.path]
@@ -162,10 +165,11 @@ local function commitFiles(files, known, full_snapshot, kept)
         local stable_id = owner and owner.source_id == SOURCE_ID and owner.stable_id or f.path
         local moved = not owner and movedFrom(f)
         if moved then
-            if not BookDB.renameStableId(SOURCE_ID, moved.stable_id, f.path, f.category, f.series) then
+            local from_id = moved.stable_id
+            if not BookDB.renameStableId(SOURCE_ID, from_id, f.path, f.category, f.series) then
                 return false, "rename " .. f.path
             end
-            moveBookArtifacts(moved.stable_id, f.path)
+            moveBookArtifacts(from_id, f.path)
         end
         if full_snapshot then
             f.source_id = SOURCE_ID
@@ -182,7 +186,11 @@ local function commitFiles(files, known, full_snapshot, kept)
         -- 换了内容的行即便走快照也要本地可信写入：reconcile 对脏行保留旧书名。
         elseif (f.changed or not full_snapshot) and not BookDB.upsert({
             source_id = SOURCE_ID, stable_id = stable_id, md5 = f.md5,
-            title = f.title, authors = f.authors, intro = f.intro, meta = { language = f.language },
+            -- 搬家只换路径：已有书名 / 作者 / 简介留下，不用文件名兜底盖掉。
+            title = moved and moved.title or f.title,
+            authors = moved and moved.authors or f.authors,
+            intro = moved and moved.intro or f.intro,
+            meta = { language = f.language },
             category = f.category, series = f.series,
             inserted_at = moved and moved.inserted_at or os.time(), path = f.path,
         }) then
@@ -197,6 +205,10 @@ local function commitFiles(files, known, full_snapshot, kept)
         end
     end
     if not full_snapshot then return true end
+    -- 换目录后还没搬进来的书先留下 path 等下次按 md5 收编，不要被 reconcile 清掉。
+    if root and root ~= "" and not BookDB.stashSyncedOutsideRoot(SOURCE_ID, root) then
+        return false, "stash"
+    end
     -- 盘上就是真相：扫盘成功时空目录也要下架；读不了的子目录下原有的书由 kept 保留。
     local snapshot = files
     if kept and kept[1] then
@@ -429,8 +441,11 @@ function Scan.scanAsync(self, cb, report)
                 end
                 local unchanged = upToDate(files, known, rows, self.cfg.folder_category == false, kept)
                 local committed, step = true, nil
-                if not unchanged then committed, step = commitFiles(files, known, true, kept) end
+                if not unchanged then committed, step = commitFiles(files, known, true, kept, root) end
                 if committed then
+                    if not require("book.store").forgetUnmatchedRelocated() then
+                        require("utils.log").warn("book local scan forget unmatched relocated failed")
+                    end
                     require("utils.log").dbg("book.perf local.scan", Perf.elapsedMs(started_at), "ms",
                         "files", #files, unchanged and "unchanged" or "committed")
                     cb(true)

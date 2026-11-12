@@ -110,41 +110,49 @@ Assert.is_nil(BookDB.get("local", "webdav://cloud.epub"))
 Assert.is_nil(ProgressDB.get("local", "webdav://cloud.epub"))
 Assert.eq(BookDB.get("local", "/keep.epub").title, "别的源", "纯本地书不动")
 
--- forgetOldRoot：换目录整本撕掉（书架+进度+统计）；新根内 / WebDAV / 库外不动
+-- stashOldRoot：旧根在架书收下架但保留进度/统计，等 md5 重匹配；无 path 的墓碑整本撕掉
 Assert.is_true(BookDB.upsert({
     source_id = "local", stable_id = "/mnt/us/documents/a.epub", title = "旧根",
+    path = "/mnt/us/documents/a.epub", md5 = "digest-a",
 }))
 Assert.is_true(BookDB.upsert({
     source_id = "local", stable_id = "/mnt/us/documents/Books/b.epub", title = "新根内",
+    path = "/mnt/us/documents/Books/b.epub",
 }))
 Assert.is_true(BookDB.upsert({
     source_id = "local", stable_id = "/mnt/us/other/c.epub", title = "库外",
+    path = "/mnt/us/other/c.epub",
 }))
 Assert.is_true(BookDB.upsert({
     source_id = "local", stable_id = "webdav://keep.epub", title = "云端留",
 }))
 Assert.is_true(ProgressDB.upsert("local", "/mnt/us/documents/a.epub", { fraction = 0.3 }))
+Assert.is_true(NoteDB.upsert("local", "/mnt/us/documents/a.epub", 0, "{}"))
 Assert.is_true(StatsDB.add({
     source_id = "local", stable_id = "/mnt/us/documents/a.epub", record_type = "page",
     page = 1, start_time = 2000, duration = 10, total_pages = 5,
 }))
--- 墓碑也要清：否则「最近阅读」还挂着
+-- 墓碑无法再匹配：整本撕掉
 Assert.is_true(BookDB.upsert({
     source_id = "local", stable_id = "/mnt/us/documents/gone.epub", title = "墓碑",
 }))
 Assert.is_true(BookDB.markDeleted("local", "/mnt/us/documents/gone.epub"))
 Assert.is_true(ProgressDB.upsert("local", "/mnt/us/documents/gone.epub", { fraction = 0.9 }))
 
-local ok_root, root_dropped = BookDB.forgetOldRoot(
+local ok_root, root_dropped = BookDB.stashOldRoot(
     "local", "/mnt/us/documents", "/mnt/us/documents/Books")
 Assert.is_true(ok_root)
-table.sort(root_dropped)
-Assert.eq(table.concat(root_dropped, ","),
-    "/mnt/us/documents/a.epub,/mnt/us/documents/gone.epub")
-Assert.is_nil(BookDB.get("local", "/mnt/us/documents/a.epub"))
-Assert.is_nil(ProgressDB.get("local", "/mnt/us/documents/a.epub"))
+Assert.eq(table.concat(root_dropped, ","), "/mnt/us/documents/gone.epub")
+local stashed = BookDB.get("local", "/mnt/us/documents/a.epub")
+Assert.eq(stashed.deleted, 1, "旧根书下架待重匹配")
+Assert.eq(stashed.path, "/mnt/us/documents/a.epub", "保留旧路径以便稍后按文件是否还在决定去留")
+Assert.eq(stashed.md5, "digest-a")
+Assert.eq(ProgressDB.get("local", "/mnt/us/documents/a.epub").fraction, 0.3)
+Assert.not_nil(NoteDB.get("local", "/mnt/us/documents/a.epub", 0))
+Assert.is_nil(BookDB.get("local", "/mnt/us/documents/gone.epub"))
 Assert.is_nil(ProgressDB.get("local", "/mnt/us/documents/gone.epub"))
 Assert.eq(BookDB.get("local", "/mnt/us/documents/Books/b.epub").title, "新根内")
+Assert.eq(BookDB.get("local", "/mnt/us/documents/Books/b.epub").deleted, 0)
 Assert.eq(BookDB.get("local", "/mnt/us/other/c.epub").title, "库外")
 Assert.eq(BookDB.get("local", "webdav://keep.epub").title, "云端留")
 Assert.eq(BookDB.get("local", "/keep.epub").title, "别的源")
@@ -152,11 +160,65 @@ local stats_left = StatsDB.distinctBooks()
 local stats_ids = {}
 for _idx, row in ipairs(stats_left) do stats_ids[#stats_ids + 1] = row.stable_id end
 table.sort(stats_ids)
-Assert.is_true(not table.concat(stats_ids, ","):find("/mnt/us/documents/a.epub", 1, true),
-    "旧根统计已清")
+Assert.is_true(table.concat(stats_ids, ","):find("/mnt/us/documents/a.epub", 1, true) ~= nil,
+    "旧根统计仍在，等重匹配")
 
-Assert.is_true(BookDB.forgetOldRoot("local", "/mnt/us/documents", "/mnt/us/documents"), "同根空操作")
-Assert.is_true(BookDB.forgetOldRoot("local", "", "/mnt/us/books"), "无旧根空操作")
+-- 待重匹配行可按 md5 被收编，迁走进度 / 笔记 / 统计后重新上架
+Assert.eq(BookDB.moveCandidatesByMd5("local", "digest-a")[1], "/mnt/us/documents/a.epub")
+Assert.is_true(BookDB.renameStableId(
+    "local", "/mnt/us/documents/a.epub", "/mnt/us/documents/Books/novel/a.epub", "novel"))
+local moved = BookDB.get("local", "/mnt/us/documents/Books/novel/a.epub")
+Assert.eq(moved.deleted, 0)
+Assert.eq(moved.path, "/mnt/us/documents/Books/novel/a.epub")
+Assert.eq(moved.md5, "digest-a")
+Assert.eq(moved.title, "旧根")
+Assert.eq(ProgressDB.get("local", "/mnt/us/documents/Books/novel/a.epub").fraction, 0.3)
+Assert.not_nil(NoteDB.get("local", "/mnt/us/documents/Books/novel/a.epub", 0))
+Assert.is_nil(BookDB.get("local", "/mnt/us/documents/a.epub"))
+local stats_after = {}
+for _idx, row in ipairs(StatsDB.distinctBooks()) do stats_after[#stats_after + 1] = row.stable_id end
+table.sort(stats_after)
+Assert.is_true(table.concat(stats_after, ","):find("/mnt/us/documents/Books/novel/a.epub", 1, true) ~= nil)
+
+-- 文件已不在的待重匹配行：forgetMany 整本撕掉；文件还在的留下
+Assert.is_true(BookDB.upsert({
+    source_id = "local", stable_id = "/mnt/us/documents/missing.epub", title = "已删",
+    path = "/mnt/us/documents/missing.epub", md5 = "gone-md5",
+}))
+Assert.is_true(ProgressDB.upsert("local", "/mnt/us/documents/missing.epub", { fraction = 0.1 }))
+Assert.is_true(BookDB.stashOldRoot("local", "/mnt/us/documents", "/mnt/us/documents/Books"))
+Assert.eq(BookDB.get("local", "/mnt/us/documents/missing.epub").deleted, 1)
+local ok_forget, dropped = BookDB.forgetMany("local", { "/mnt/us/documents/missing.epub" })
+Assert.is_true(ok_forget)
+Assert.eq(dropped[1], "/mnt/us/documents/missing.epub")
+Assert.is_nil(BookDB.get("local", "/mnt/us/documents/missing.epub"))
+Assert.is_nil(ProgressDB.get("local", "/mnt/us/documents/missing.epub"))
+Assert.not_nil(BookDB.get("local", "/mnt/us/documents/Books/novel/a.epub"))
+
+-- 同内容两份副本仍是两本书；待重匹配候选不会把还在盘上的那本误收编掉
+Assert.is_true(BookDB.upsert({
+    source_id = "local", stable_id = "/mnt/us/documents/Books/copy.epub", title = "副本",
+    path = "/mnt/us/documents/Books/copy.epub", md5 = "digest-a",
+}))
+local candidates = BookDB.moveCandidatesByMd5("local", "digest-a")
+table.sort(candidates)
+Assert.eq(table.concat(candidates, ","),
+    "/mnt/us/documents/Books/copy.epub,/mnt/us/documents/Books/novel/a.epub")
+
+Assert.is_true(BookDB.stashOldRoot("local", "/mnt/us/documents", "/mnt/us/documents"), "同根空操作")
+Assert.is_true(BookDB.stashOldRoot("local", "", "/mnt/us/books"), "无旧根空操作")
+
+-- stashSyncedOutsideRoot：只收下架已同步、且不在新根下的纯本地书；库外脏行 / WebDAV 不动
+Assert.is_true(BookDB.upsert({
+    source_id = "local", stable_id = "/mnt/us/documents/outside.epub", title = "待收",
+    path = "/mnt/us/documents/outside.epub",
+}))
+Assert.is_true(DB.exec("UPDATE books SET sync_status=1 WHERE stable_id=?;", "/mnt/us/documents/outside.epub"))
+Assert.is_true(BookDB.stashSyncedOutsideRoot("local", "/mnt/us/documents/Books"))
+Assert.eq(BookDB.get("local", "/mnt/us/documents/outside.epub").deleted, 1)
+Assert.eq(BookDB.get("local", "/mnt/us/documents/outside.epub").path, "/mnt/us/documents/outside.epub")
+Assert.eq(BookDB.get("local", "/mnt/us/other/c.epub").deleted, 0, "库外脏行不动")
+Assert.eq(BookDB.relocatingIds("local")[1], "/mnt/us/documents/outside.epub")
 
 -- 主动清理：书库与阅读数据分开选择，不产生远端删除墓碑。
 local cancelled = {}
