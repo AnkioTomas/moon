@@ -20,16 +20,33 @@ local function refreshShelf()
     if desk and not desk.closed then desk:onEvent("shelf_changed") end
 end
 
+--- 关书回桌面后再做清文件 / 删书。阅读中 Desktop.open 只排下一拍关书，
+--- 这一拍文档还开着；立刻软删会把「已软删除」提示弹在当前阅读页上，
+--- 关书后提示还留在窗口栈里，再打开另一本书时仍可能露出来。
+---@param plugin table
+---@param fn fun()
+local function afterReaderClosed(plugin, fn)
+    local wait = plugin.ui and plugin.ui.document
+    require("desktop").open(plugin)
+    if wait then
+        require("ui/uimanager"):nextTick(require("ui.guard").wrap("end dialog", fn))
+        return
+    end
+    fn()
+end
+
 ---@param plugin table
 ---@param identity BookIdentity
 function EndDialog.show(plugin, identity)
     local title = identity.book and identity.book.title or identity.stable_id
+    -- 关书后再动文件：只用这时记下的身份，避免会话已切到另一本书。
+    local source_id, stable_id = identity.source_id, identity.stable_id
     local function goHome()
         require("desktop").open(plugin)
     end
     --- 本书正在后台缓存时不能删它的文件。
     local function cacheBusy()
-        local key = "cache\0" .. identity.source_id .. "\0" .. identity.stable_id
+        local key = "cache\0" .. source_id .. "\0" .. stable_id
         if require("workers.tasks").get(key) then
             Toast:new{ text = _("本书正在后台缓存，请稍后再试") }:show()
             return true
@@ -42,16 +59,17 @@ function EndDialog.show(plugin, identity)
             ok_text = _("清理"),
             ok_callback = function()
                 if cacheBusy() then return end
-                require("desktop").open(plugin)
-                local ok, leftover = require("book.store").clearCache(identity.source_id, identity.stable_id, false)
-                local result = _("缓存已清理")
-                if not ok then
-                    result = _("清理缓存失败")
-                elseif leftover then
-                    result = _("部分缓存文件未能删除")
-                end
-                Toast:new{ text = result }:show()
-                if ok then refreshShelf() end
+                afterReaderClosed(plugin, function()
+                    local ok, leftover = require("book.store").clearCache(source_id, stable_id, false)
+                    local result = _("缓存已清理")
+                    if not ok then
+                        result = _("清理缓存失败")
+                    elseif leftover then
+                        result = _("部分缓存文件未能删除")
+                    end
+                    Toast:new{ text = result }:show()
+                    if ok then refreshShelf() end
+                end)
             end,
         }:show()
     end
@@ -63,13 +81,14 @@ function EndDialog.show(plugin, identity)
             ok_text = _("软删除"),
             ok_callback = function()
                 if cacheBusy() then return end
-                require("desktop").open(plugin)
-                if not require("book.store").softDelete(identity.source_id, identity.stable_id) then
-                    Toast:new{ text = _("软删除失败") }:show()
-                    return
-                end
-                Toast:new{ text = _("已软删除") }:show()
-                refreshShelf()
+                afterReaderClosed(plugin, function()
+                    if not require("book.store").softDelete(source_id, stable_id) then
+                        Toast:new{ text = _("软删除失败"), timeout = 2 }:show()
+                        return
+                    end
+                    Toast:new{ text = _("已软删除"), timeout = 2 }:show()
+                    refreshShelf()
+                end)
             end,
         }:show()
     end
@@ -84,13 +103,19 @@ function EndDialog.show(plugin, identity)
             text = T(_("彻底删除《%1》？\n\n会清理：本地文件与缓存、书架条目、阅读进度、划线与笔记、统计\n有云端时下次同步也会从远端删除，无法从「软删除」筛选恢复。"), title),
             ok_text = _("删除"),
             ok_callback = function()
-                require("desktop").open(plugin)
-                source:deleteBookAsync(identity, function(ok, err)
-                    if not ok then
-                        Toast:new{ text = err or _("删除本书失败") }:show()
-                        return
-                    end
-                    refreshShelf()
+                afterReaderClosed(plugin, function()
+                    source:deleteBookAsync({
+                        source_id = source_id,
+                        stable_id = stable_id,
+                        book = identity.book,
+                        source = source,
+                    }, function(ok, err)
+                        if not ok then
+                            Toast:new{ text = err or _("删除本书失败") }:show()
+                            return
+                        end
+                        refreshShelf()
+                    end)
                 end)
             end,
         }:show()
