@@ -73,6 +73,22 @@ function M.paintWidget(bb, block, canvas_w, canvas_h)
     end
 end
 
+
+--- fill() 会先把颜色收成灰度再铺开，彩屏上的 RGB 底会变成一条灰。
+--- Color8 仍走 fill；RGB 走 paintRectRGB32，保持设计稿颜色。
+---@param bb BlitBuffer
+---@param width number
+---@param height number
+---@param fill BlitColor|nil
+local function fillCanvas(bb, width, height, fill)
+    fill = fill or Blitbuffer.COLOR_WHITE
+    if Blitbuffer.isColor8(fill) then
+        bb:fill(fill)
+    else
+        bb:paintRectRGB32(0, 0, width, height, fill)
+    end
+end
+
 --- 离屏画一张 PNG 并原子替换；画布及临时文件归本次调用，失败保留原文件。
 ---@param path string 目标 PNG 路径
 ---@param width number 目标宽度，单位像素
@@ -115,19 +131,63 @@ local function writePNG(path, width, height, paint, transparent)
     return ok, err
 end
 
+--- 取可用字体。指定文件打不开时回退 cfont，绝不把 nil 交给 TextBoxWidget。
+---@param font string|nil
+---@param size number|nil
+---@param faceindex number|nil
+---@return table|nil
+function M.getFace(font, size, faceindex)
+    local face = Font:getFace(font or "cfont", size, faceindex)
+    if face then return face end
+    if font ~= "cfont" then
+        face = Font:getFace("cfont", size)
+        if face then return face end
+    end
+    return Font:getFace("NotoSans-Regular.ttf", size)
+end
+
+--- 组装 TextBoxWidget 参数；line_height 只有显式给出时才写入，避免 nil 覆盖默认 0.3。
+---@param text string
+---@param width number
+---@param size number
+---@param bold boolean|nil
+---@param opts { face?: string, faceindex?: number, align?: string, justified?: boolean, line_height?: number }|nil
+---@return table
+local function textBoxOpts(text, width, size, bold, opts)
+    opts = opts or {}
+    local args = {
+        text = tostring(text or ""),
+        face = M.getFace(opts.face or "cfont", size, opts.faceindex),
+        width = width,
+        alignment = opts.align or "left",
+        bold = bold == true,
+    }
+    if opts.justified == true then args.justified = true end
+    if opts.line_height ~= nil then args.line_height = opts.line_height end
+    return args
+end
+
 --- 按实际渲染参数测量文本高度，供样式计算动态布局。
 ---@param text string
 ---@param width number
 ---@param size number
 ---@param bold boolean|nil
+---@param opts { face?: string, faceindex?: number, align?: string, justified?: boolean, line_height?: number }|nil
 ---@return number
-function M.measureText(text, width, size, bold)
-    local widget = TextBoxWidget:new{
-        text = tostring(text or ""),
-        face = Font:getFace("cfont", size),
-        width = width,
-        bold = bold == true,
-    }
+function M.measureText(text, width, size, bold, opts)
+    local args = textBoxOpts(text, width, size, bold, opts)
+    if not args.face then
+        -- 连 cfont 都没有时不要去构造 TextBoxWidget（getAdjustedFace 会对 nil face 崩溃）。
+        opts = opts or {}
+        local leading = 1 + (opts.line_height or 0.3)
+        local w = math.max(1, width or 1)
+        local px = math.max(1, size or 1)
+        -- 无字体时按近似字数估高：UTF-8 中文大约 3 字节一字。
+        local chars = math.max(1, math.ceil(#tostring(text or "") / 3))
+        local per = math.max(1, math.floor(w / px))
+        return math.max(px, math.ceil(chars / per) * px * leading)
+    end
+    local widget = TextBoxWidget:new(args)
     local height = widget:getSize().h
     widget:free()
     return height
@@ -142,7 +202,7 @@ end
 ---@param contain boolean|nil 整图缩进画布、两侧留底色；缺省铺满裁切
 ---@return boolean, any
 local function paintBackground(bb, path, w, h, fill, contain, decoded, transparent)
-    if not transparent then bb:fill(fill or Blitbuffer.COLOR_WHITE) end
+    if not transparent then fillCanvas(bb, w, h, fill or Blitbuffer.COLOR_WHITE) end
     if not path then
         return true
     end
@@ -191,15 +251,10 @@ local function paintText(bb, block, w)
     -- （票根粗体 + MUTED 色就是这条路径）。用 not 判缺省即可。
     local color = blockColor(block, Blitbuffer.COLOR_BLACK, block.bold and not block.color)
     local mask_text = block.box == false or not Blitbuffer.isColor8(color)
-    local widget = TextBoxWidget:new{
-        text = tostring(block.text or ""),
-        face = Font:getFace(block.face or "cfont", block.size or 24),
-        width = width,
-        alignment = block.align or "left",
-        fgcolor = mask_text and Blitbuffer.COLOR_WHITE or color,
-        bgcolor = mask_text and Blitbuffer.COLOR_BLACK or Blitbuffer.COLOR_WHITE,
-        bold = block.bold == true,
-    }
+    local opts = textBoxOpts(block.text, width, block.size or 24, block.bold, block)
+    opts.fgcolor = mask_text and Blitbuffer.COLOR_WHITE or color
+    opts.bgcolor = mask_text and Blitbuffer.COLOR_BLACK or Blitbuffer.COLOR_WHITE
+    local widget = TextBoxWidget:new(opts)
     local size = widget:getSize()
     local y = block.y or 0
     if block.box ~= false then
@@ -235,6 +290,35 @@ local function paintRect(bb, x, y, width, height, color, radius)
     end
 end
 
+--- 在两色之间插值，不走 Theme.mix（会补饱和，把设计稿渐变推离原色）。
+---@param from BlitColor
+---@param to BlitColor
+---@param t number
+---@return BlitColor
+local function mixColors(from, to, t)
+    if t <= 0 then return from end
+    if t >= 1 then return to end
+    local function rgb(color)
+        if Blitbuffer.isColor8(color) then
+            return color.a, color.a, color.a
+        end
+        if color.getColorRGB32 then
+            local c = color:getColorRGB32()
+            return c.r, c.g, c.b
+        end
+        return 0, 0, 0
+    end
+    local r1, g1, b1 = rgb(from)
+    local r2, g2, b2 = rgb(to)
+    local r = math.max(0, math.min(255, math.floor(r1 + (r2 - r1) * t + 0.5)))
+    local g = math.max(0, math.min(255, math.floor(g1 + (g2 - g1) * t + 0.5)))
+    local b = math.max(0, math.min(255, math.floor(b1 + (b2 - b1) * t + 0.5)))
+    if Blitbuffer.isColor8(from) and Blitbuffer.isColor8(to) then
+        return Blitbuffer.Color8(r)
+    end
+    return Blitbuffer.ColorRGB32(r, g, b, 0xFF)
+end
+
 --- 在圆角矩形范围内叠一层半透明白：圆角行逐行收窄，中段一次混合。
 ---@param bb BlitBuffer
 ---@param radius number|nil
@@ -251,11 +335,255 @@ local function lightenRounded(bb, x, y, width, height, radius, by)
     bb:lightenRect(x, y + radius, width, height - radius * 2, by)
 end
 
--- keep 图块（锁屏 logo）解码一次常驻：每次锁屏都画同一张小图，不必重复解码。只存小图，按文件一份。
+--- 取出颜色的 RGB 分量（0–255）。
+---@param color BlitColor
+---@return number, number, number
+local function rgbOf(color)
+    if Blitbuffer.isColor8(color) then
+        return color.a, color.a, color.a
+    end
+    if color.getColorRGB32 then
+        local c = color:getColorRGB32()
+        return c.r, c.g, c.b
+    end
+    return 0, 0, 0
+end
+
+--- 把带不透明度的颜色叠到已有像素上（用于风景页脚遮罩、静影暗角）。
+---@param alpha number 0..1
+local function blendRect(bb, x, y, width, height, color, alpha)
+    alpha = tonumber(alpha) or 0
+    if alpha <= 0 or width <= 0 or height <= 0 then return end
+    local canvas_w = bb.getWidth and bb:getWidth() or 0
+    local canvas_h = bb.getHeight and bb:getHeight() or 0
+    if x < 0 then width = width + x; x = 0 end
+    if y < 0 then height = height + y; y = 0 end
+    if canvas_w > 0 then width = math.min(width, canvas_w - x) end
+    if canvas_h > 0 then height = math.min(height, canvas_h - y) end
+    if width <= 0 or height <= 0 then return end
+    if alpha >= 1 then
+        paintRect(bb, x, y, width, height, color, 0)
+        return
+    end
+    local cr, cg, cb = rgbOf(color)
+    local typ = bb.getType and bb:getType() or nil
+    if typ == Blitbuffer.TYPE_BBRGB32 and bb.data then
+        local ffi = require("ffi")
+        local data = ffi.cast("uint8_t *", bb.data)
+        local stride = tonumber(bb.stride)
+        local inv = 1 - alpha
+        for row = 0, height - 1 do
+            local dest = (y + row) * stride + x * 4
+            for col = 0, width - 1 do
+                local i = dest + col * 4
+                data[i] = math.max(0, math.min(255, math.floor(data[i] * inv + cr * alpha + 0.5)))
+                data[i + 1] = math.max(0, math.min(255, math.floor(data[i + 1] * inv + cg * alpha + 0.5)))
+                data[i + 2] = math.max(0, math.min(255, math.floor(data[i + 2] * inv + cb * alpha + 0.5)))
+            end
+        end
+        return
+    end
+    local target = math.floor(0.299 * cr + 0.587 * cg + 0.114 * cb + 0.5)
+    local inv = 1 - alpha
+    for row = 0, height - 1 do
+        for col = 0, width - 1 do
+            local px = bb:getPixel(x + col, y + row)
+            local g = 255
+            if type(px) == "number" then
+                g = px
+            elseif px then
+                if px.getColor8 then
+                    local ok, c8 = pcall(function() return px:getColor8() end)
+                    if ok and c8 and type(c8.a) == "number" then g = c8.a end
+                elseif type(px.a) == "number" then
+                    g = px.a
+                end
+            end
+            local v = math.max(0, math.min(255, math.floor(g * inv + target * alpha + 0.5)))
+            if typ == Blitbuffer.TYPE_BBRGB32 then
+                bb:setPixel(x + col, y + row, Blitbuffer.ColorRGB32(v, v, v, 0xFF))
+            else
+                bb:setPixel(x + col, y + row, Blitbuffer.Color8(v))
+            end
+        end
+    end
+end
+
+--- 垂直渐变；blend=true 时按两端不透明度叠在已有画面上。
+---@param alpha_from number|nil 0..1，缺省 1
+---@param alpha_to number|nil 0..1，缺省与 from 相同
+local function paintVGradient(bb, x, y, width, height, from, to, blend, alpha_from, alpha_to)
+    if not from or width <= 0 or height <= 0 then return end
+    to = to or from
+    alpha_from = alpha_from == nil and 1 or alpha_from
+    alpha_to = alpha_to == nil and alpha_from or alpha_to
+    if height == 1 then
+        if blend then
+            blendRect(bb, x, y, width, 1, mixColors(from, to, 0), alpha_from)
+        else
+            paintRect(bb, x, y, width, 1, from, 0)
+        end
+        return
+    end
+    for row = 0, height - 1 do
+        local t = row / (height - 1)
+        local color = mixColors(from, to, t)
+        local a = alpha_from + (alpha_to - alpha_from) * t
+        if blend then
+            blendRect(bb, x, y + row, width, 1, color, a)
+        else
+            paintRect(bb, x, y + row, width, 1, color, 0)
+        end
+    end
+end
+
+--- 小图逐行盒式模糊（先缩小再模糊，近似大半径）。
+---@param src BlitBuffer
+---@param radius number
+---@return BlitBuffer
+local function blurBuffer(src, radius)
+    radius = math.max(1, math.floor(tonumber(radius) or 1))
+    local sw, sh = src:getWidth(), src:getHeight()
+    local typ = src.getType and src:getType() or Blitbuffer.TYPE_BBRGB32
+    ---@type BlitBuffer
+    ---@diagnostic disable-next-line: assign-type-mismatch
+    local work = src:copy()
+    ---@type BlitBuffer
+    ---@diagnostic disable-next-line: assign-type-mismatch
+    local tmp = Blitbuffer.new(sw, sh, typ)
+    local function pass(from, dest, horizontal)
+        dest:fill(Blitbuffer.COLOR_BLACK)
+        for y = 0, sh - 1 do
+            for x = 0, sw - 1 do
+                local r, g, b, n = 0, 0, 0, 0
+                for k = -radius, radius do
+                    local sx, sy = x, y
+                    if horizontal then sx = x + k else sy = y + k end
+                    if sx >= 0 and sx < sw and sy >= 0 and sy < sh then
+                        local px = from:getPixel(sx, sy)
+                        if type(px) ~= "number" and px and px.getColorRGB32 then
+                            local c = px:getColorRGB32()
+                            r, g, b = r + c.r, g + c.g, b + c.b
+                        else
+                            local v = type(px) == "number" and px or (px and px.a or 0)
+                            r, g, b = r + v, g + v, b + v
+                        end
+                        n = n + 1
+                    end
+                end
+                if n > 0 then
+                    r, g, b = math.floor(r / n + 0.5), math.floor(g / n + 0.5), math.floor(b / n + 0.5)
+                    if typ == Blitbuffer.TYPE_BBRGB32 then
+                        dest:setPixel(x, y, Blitbuffer.ColorRGB32(r, g, b, 0xFF))
+                    else
+                        dest:setPixel(x, y, Blitbuffer.Color8(r))
+                    end
+                end
+            end
+        end
+    end
+    pass(work, tmp, true)
+    pass(tmp, work, false)
+    tmp:free()
+    return work
+end
+
 local kept = {}
+local keptImage
+
+--- 按 cover 方式把图片铺进矩形（可指定锚点、放大裁切、先缩小再模糊）。
+local function paintCoverImage(bb, block, x, y, width, canvas_w, canvas_h)
+    local height = block.height or width
+    if width <= 0 or height <= 0 then return end
+    local RenderImage = require("ui/renderimage")
+    local source
+    local owned = false
+    if block.keep then
+        source = keptImage(block.file)
+    else
+        source = assert(RenderImage:renderImageFile(assert(block.file, "image block file required"), false),
+            "cannot decode image: " .. tostring(block.file))
+        owned = true
+    end
+    local iw, ih = source:getWidth(), source:getHeight()
+    if not iw or not ih or iw <= 0 or ih <= 0 then
+        if owned and source.free then source:free() end
+        error("cannot decode image: " .. tostring(block.file))
+    end
+    local typ = bb.getType and bb:getType() or Blitbuffer.TYPE_BBRGB32
+    local work = source
+    local free_work = false
+    if block.blur then
+        -- 先缩到短边约 64px，模糊后再放大，近似大半径高斯，避免在全分辨率上逐像素跑。
+        local short = math.min(iw, ih)
+        local small_w, small_h = iw, ih
+        if short > 64 then
+            local s = 64 / short
+            small_w = math.max(8, math.floor(iw * s + 0.5))
+            small_h = math.max(8, math.floor(ih * s + 0.5))
+            ---@type BlitBuffer
+            ---@diagnostic disable-next-line: assign-type-mismatch
+            local small = Blitbuffer.new(small_w, small_h, typ)
+            local ImageWidget = require("ui/widget/imagewidget")
+            local scaler = ImageWidget:new{
+                image = source,
+                image_disposable = false,
+                width = small_w,
+                height = small_h,
+                scale_factor = 0,
+            }
+            scaler:paintTo(small, 0, 0)
+            scaler:free()
+            work = blurBuffer(small, 2)
+            small:free()
+            free_work = true
+            iw, ih = small_w, small_h
+        else
+            work = blurBuffer(source, 2)
+            free_work = true
+        end
+    end
+    local zoom = block.zoom or 1
+    local scale = math.max(width / iw, height / ih) * zoom
+    local sw, sh = iw * scale, ih * scale
+    local ax = block.anchor_x
+    if ax == nil then ax = 0.5 end
+    local ay = block.anchor_y
+    if ay == nil then ay = 0.5 end
+    -- CSS background-position：图上 ax/ay 的点对齐到框内同一比例位置。
+    local off_x = width * ax - sw * ax
+    local off_y = height * ay - sh * ay
+    ---@type BlitBuffer
+    ---@diagnostic disable-next-line: assign-type-mismatch
+    local scaled = Blitbuffer.new(math.max(1, math.floor(sw + 0.5)), math.max(1, math.floor(sh + 0.5)), typ)
+    local ImageWidget = require("ui/widget/imagewidget")
+    local scaler = ImageWidget:new{
+        image = work,
+        image_disposable = false,
+        width = scaled:getWidth(),
+        height = scaled:getHeight(),
+        scale_factor = 0,
+    }
+    scaler:paintTo(scaled, 0, 0)
+    scaler:free()
+    local src_x = math.max(0, math.floor(-off_x + 0.5))
+    local src_y = math.max(0, math.floor(-off_y + 0.5))
+    local dst_x = math.max(0, x + math.floor(off_x + 0.5))
+    local dst_y = math.max(0, y + math.floor(off_y + 0.5))
+    local vis_w = math.min(scaled:getWidth() - src_x, width - (dst_x - x), (bb.getWidth and bb:getWidth() or canvas_w) - dst_x)
+    local vis_h = math.min(scaled:getHeight() - src_y, height - (dst_y - y), (bb.getHeight and bb:getHeight() or canvas_h) - dst_y)
+    if vis_w > 0 and vis_h > 0 then
+        bb:blitFrom(scaled, dst_x, dst_y, src_x, src_y, vis_w, vis_h)
+    end
+    scaled:free()
+    if free_work and work and work.free then work:free() end
+    if owned and source.free then source:free() end
+end
+
+-- keep 图块（锁屏 logo）解码一次常驻：每次锁屏都画同一张小图，不必重复解码。只存小图，按文件一份。
 ---@param file string
 ---@return BlitBuffer
-local function keptImage(file)
+function keptImage(file)
     if not kept[file] then
         kept[file] = assert(require("ui/renderimage"):renderImageFile(file, false), "cannot decode image: " .. file)
     end
@@ -292,6 +620,42 @@ local function paintShape(bb, block, w, h, background)
             paintRect(bb, x + s, y + s, width, height, Blitbuffer.COLOR_GRAY_D, radius)
         end
         paintRect(bb, x, y, width, height, color, radius)
+    elseif block.kind == "hgradient" then
+        -- 水平渐变：彩屏按列插值，避免分段色块。
+        local height = block.height or 1
+        local colors = block.colors or {}
+        local from, to = colors[1], colors[2] or colors[1]
+        if not from then
+            return
+        end
+        if not to or from == to or width <= 1 then
+            paintRect(bb, x, y, width, height, from, 0)
+            return
+        end
+        for col = 0, width - 1 do
+            local t = col / (width - 1)
+            paintRect(bb, x + col, y, 1, height, mixColors(from, to, t), 0)
+        end
+    elseif block.kind == "vgradient" then
+        -- 垂直渐变：彩屏按行插值；blend 时叠在已有画面上（页脚遮罩）。
+        local height = block.height or 1
+        local colors = block.colors or {}
+        local from, to = colors[1], colors[2] or colors[1]
+        if from then
+            paintVGradient(bb, x, y, width, height, from, to, block.blend == true,
+                block.alpha_from, block.alpha_to)
+        end
+    elseif block.kind == "overlay" then
+        -- 半透明色块，叠在已有画面上。
+        blendRect(bb, x, y, width, block.height or 1,
+            blockColor(block, Blitbuffer.COLOR_BLACK), block.alpha or 0.5)
+    elseif block.kind == "border" then
+        local height = block.height or 1
+        local bw = math.max(1, math.floor(tonumber(block.border or block.weight) or 1))
+        local color = blockColor(block, Blitbuffer.COLOR_BLACK)
+        local radius = block.radius or 0
+        local paint = Blitbuffer.isColor8(color) and bb.paintBorder or bb.paintBorderRGB32
+        paint(bb, x, y, width, height, bw, color, radius)
     elseif block.kind == "vbar" then
         -- DESIGN 锁屏日柱：默认无满高浅轨；value 为相对槽高的比例，也可由调用方直接给实心柱高
         local height = block.height or 1
@@ -319,6 +683,9 @@ local function paintShape(bb, block, w, h, background)
             end
         end
     elseif block.kind == "image" then
+        if block.cover or block.anchor_y or block.anchor_x or block.blur or block.zoom then
+            paintCoverImage(bb, block, x, y, width, w, h)
+        else
         local image = ImageWidget:new{
             file = not block.keep and assert(block.file, "image block file required") or nil,
             image = block.keep and keptImage(block.file) or nil,
@@ -330,9 +697,47 @@ local function paintShape(bb, block, w, h, background)
             scale_factor = block.scale_factor or 0,
             alpha = block.alpha == true,
         }
-        local ok, err = pcall(image.paintTo, image, bb, x, y)
+        local ok, err = pcall(function()
+            if not block.circle then
+                image:paintTo(bb, x, y)
+                return
+            end
+            -- 圆形遮罩：先画到临时画布，再按圆的弦逐行拷到主画布，角上露出底色。
+            local hh = block.height or width
+            if width <= 0 or hh <= 0 then return end
+            local tmp_type = bb.getType and bb:getType() or Blitbuffer.TYPE_BBRGB32
+            local tmp = Blitbuffer.new(width, hh, tmp_type)
+            image:paintTo(tmp, 0, 0)
+            local canvas_w = bb.getWidth and bb:getWidth() or w
+            local canvas_h = bb.getHeight and bb:getHeight() or h
+            local cx, cy = (width - 1) / 2, (hh - 1) / 2
+            local radius = math.min(width, hh) / 2
+            for row = 0, hh - 1 do
+                local inside = radius * radius - (row - cy) * (row - cy)
+                if inside >= 0 then
+                    local half = math.sqrt(inside)
+                    local x0 = math.max(0, math.ceil(cx - half))
+                    local x1 = math.min(width - 1, math.floor(cx + half))
+                    local dst_x, dst_y = x + x0, y + row
+                    local src_x, span = x0, x1 - x0 + 1
+                    if dst_x < 0 then
+                        span = span + dst_x
+                        src_x = src_x - dst_x
+                        dst_x = 0
+                    end
+                    if dst_y >= 0 and dst_y < canvas_h and dst_x < canvas_w and span > 0 then
+                        span = math.min(span, canvas_w - dst_x)
+                        if span > 0 then
+                            bb:blitFrom(tmp, dst_x, dst_y, src_x, row, span, 1)
+                        end
+                    end
+                end
+            end
+            tmp:free()
+        end)
         image:free()
         if not ok then error(err) end
+        end
     elseif block.kind == "widget" then
         M.paintWidget(bb, block, w, h)
     end
@@ -461,6 +866,24 @@ function M.write(path, background, blocks, fill)
     freeWidgets(blocks)
     if background_copy then background_copy:free() end
     return ok, err, ok and transparent or nil
+end
+
+--- 按指定尺寸写 PNG（分享卡片等非整屏图）。画布与块坐标都是物理像素。
+---@param path string
+---@param width number
+---@param height number
+---@param blocks table[]
+---@param fill table|nil 底色，缺省白色
+---@return boolean, any
+function M.writeSize(path, width, height, blocks, fill)
+    local ok, err = writePNG(path, width, height, function(bb)
+        fillCanvas(bb, width, height, fill)
+        for _idx, block in ipairs(blocks or {}) do
+            M.paintBlock(bb, block, width, height)
+        end
+    end)
+    freeWidgets(blocks)
+    return ok, err
 end
 
 return M

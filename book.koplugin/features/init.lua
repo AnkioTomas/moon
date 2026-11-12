@@ -134,6 +134,7 @@ Features.list = {
     "subscribe",
     "cookie",
     "notes",
+    "share",
     "wechat_import",
     "extensions",
 }

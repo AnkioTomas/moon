@@ -138,6 +138,12 @@ Assert.eq(rgb_channels[1], 0x24)
 Assert.eq(rgb_channels[2], 0x5B)
 Assert.eq(rgb_channels[3], 0x78)
 Assert.eq(Theme.color(0x88), 0x88)
+local rgb_obj = { kind = "ColorRGB32" }
+Assert.eq(Theme.color(rgb_obj), rgb_obj, "已是 Color 对象时原样返回")
+Assert.is_true(Theme.isRgb(0x245B78))
+Assert.is_false(Theme.isRgb(0x88))
+Assert.is_true(Theme.isRgb(rgb_obj), "非数字 ColorRGB32 走 RGB32，不能和 0xFF 比")
+Assert.is_false(Theme.isRgb(Theme.color(0x88)))
 Assert.eq(Theme.mix(0xFF, 0, 0.5), 0x80)
 Assert.eq(Theme.mix(0xFF, 0x0756AD, 1), 0x0756AD)
 -- 彩屏补饱和：灰度与等通道色不动，主题色绕均值拉开色差，掺灰的派生色也补回来。

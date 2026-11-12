@@ -20,6 +20,7 @@ local POPUP_BUTTONS = {
     { id = "highlight", title = _("高亮"), icon = "format_ink_highlighter" },
     { id = "copy", title = _("复制"), icon = "content_copy" },
     { id = "add_note", title = _("添加笔记"), icon = "note_add" },
+    { id = "share", title = _("书摘"), icon = "share" },
     -- 保持 wikipedia id，兼容已保存的划词菜单显示设置。
     { id = "wikipedia", title = _("百度百科"), icon = "language" },
     { id = "dictionary", title = _("词典"), icon = "book" },

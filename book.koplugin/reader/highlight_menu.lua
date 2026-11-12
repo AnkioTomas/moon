@@ -170,6 +170,15 @@ function HighlightMenu.ensureWrapped(highlight)
     if not highlight or not highlight._highlight_buttons then
         return
     end
+    -- 扩展点追加的按钮：已由 KOReader / 其它插件占用的键不覆盖。
+    for _idx, item in ipairs(Ext.list("highlight.buttons")) do
+        if type(item) == "table" and type(item.key) == "string" and type(item.factory) == "function" then
+            local idx = item.index or item.key
+            if highlight._highlight_buttons[idx] == nil then
+                highlight._highlight_buttons[idx] = item.factory
+            end
+        end
+    end
     -- 按工厂函数而非键记：原生自定义目录开关时会移除再注册同一个键。
     highlight._book_popup_wrapped = highlight._book_popup_wrapped or {}
     local wrapped = highlight._book_popup_wrapped

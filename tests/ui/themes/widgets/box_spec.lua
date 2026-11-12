@@ -145,6 +145,28 @@ bb = Kit.canvas()
 Box:new{ style = {}, width = 10, height = 10 }:paintTo(bb, 0, 0)
 Assert.len(bb.ops, 0)
 
+-- RGB 数字令牌走 paintRoundedRectRGB32。
+bb = Kit.canvas()
+Box:new{ style = { bg = 0xF6F1E8, radius = 0, border = 0, shadow = 0 }, width = 20, height = 10 }:paintTo(bb, 0, 0)
+Assert.eq(#bb.ops, 1)
+Assert.is_true(bb.ops[1].rgb)
+Assert.eq(bb.ops[1].c, 0xF6F1E8)
+
+-- ColorRGB32 对象不能和 0xFF 比较（模拟器崩溃点）；按对象类型分流，不能崩。
+local rgb_obj = { kind = "ColorRGB32" }
+bb = Kit.canvas()
+Box:new{
+    style = { bg = rgb_obj, radius = 0, border = 1, border_color = rgb_obj, shadow = 0 },
+    width = 20, height = 10,
+}:paintTo(bb, 0, 0)
+Assert.eq(#bb.ops, 2)
+Assert.eq(bb.ops[1].op, "rect")
+Assert.is_true(bb.ops[1].rgb)
+Assert.eq(bb.ops[1].c, rgb_obj)
+Assert.eq(bb.ops[2].op, "border")
+Assert.is_true(bb.ops[2].rgb)
+Assert.eq(bb.ops[2].c, rgb_obj)
+
 -- 进度条：高度取令牌，百分比夹到 0–100。
 Kit.use("paper")
 local bar = Progress:new{ width = 100, percent = 40 }

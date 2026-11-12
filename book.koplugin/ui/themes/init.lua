@@ -181,11 +181,21 @@ function Theme.mix(from, to, fraction)
 end
 
 --- 灰度 / RGB 令牌转绘图颜色；灰度主题保留原来的 Color8 路径。
----@param value number
+--- 已经是 Color 对象时原样返回：不能再和 0xFF 比较。
+---@param value number|BlitColor
 ---@return BlitColor
 function Theme.color(value)
+    if type(value) ~= "number" then return value end
     if value <= 0xFF then return Blitbuffer.Color8(value) end
     return Blitbuffer.ColorRGB32(math.floor(value / 0x10000), math.floor(value / 0x100) % 0x100, value % 0x100, 0xFF)
+end
+
+--- 令牌或 Color 是否走 RGB32 绘图路径。Color 对象不能和数字比较。
+---@param value any
+---@return boolean
+function Theme.isRgb(value)
+    if type(value) == "number" then return value > 0xFF end
+    return not (Blitbuffer.isColor8 and Blitbuffer.isColor8(value))
 end
 
 --- 当前 UI 缩放百分比（夹到 100–180）。
