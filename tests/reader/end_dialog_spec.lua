@@ -98,7 +98,27 @@ do
     Assert.eq(order[1], "open_desktop")
     Assert.eq(order[2], "soft:moon\0a.epub")
     Assert.eq(Themed.last("toast").text, "已软删除")
+    Assert.eq(Themed.last("toast").timeout, 2)
     Assert.eq(desk.events[1], "shelf_changed")
+end
+
+-- 阅读中确认软删除：这一拍只关书，下一拍才按原书身份软删；会话切到另一本也不串身份
+do
+    order, desk.events, soft_result, running_task = {}, {}, { true }, nil
+    local plugin = { ui = { document = { file = "a.epub" } } }
+    EndDialog.show(plugin, identity)
+    softItem().callback()
+    Themed.last("confirm").ok_callback()
+    Assert.eq(order[1], "open_desktop")
+    Assert.len(order, 1, "阅读器还开着时不能立刻软删")
+    identity.source_id, identity.stable_id = "wechat", "other.epub"
+    plugin.ui.document = { file = "other.html" }
+    Stubs.flush()
+    Assert.eq(order[2], "soft:moon\0a.epub")
+    Assert.eq(Themed.last("toast").text, "已软删除")
+    Assert.eq(Themed.last("toast").timeout, 2)
+    Assert.eq(desk.events[1], "shelf_changed")
+    identity.source_id, identity.stable_id = "moon", "a.epub"
 end
 
 -- 关书后文件管理器还没建好：软删成功，不崩，书架等新桌面自己建
@@ -121,6 +141,7 @@ do
     softItem().callback()
     Themed.last("confirm").ok_callback()
     Assert.eq(Themed.last("toast").text, "软删除失败")
+    Assert.eq(Themed.last("toast").timeout, 2)
     Assert.len(desk.events, 0)
 end
 
@@ -153,6 +174,7 @@ do
     Assert.eq(order[1], "open_desktop")
     Assert.eq(order[2], "soft:local\0y.epub")
     Assert.eq(Themed.last("toast").text, "已软删除")
+    Assert.eq(Themed.last("toast").timeout, 2)
     Assert.eq(desk.events[1], "shelf_changed")
 end
 
