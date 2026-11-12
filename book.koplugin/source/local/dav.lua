@@ -330,7 +330,7 @@ function Webdav:_listRequest(opts, cb)
     end)
 end
 
---- Nonblocking directory listing。opts.depth 缺省 "1"；硬刷新可传 "infinity" 一次拉整棵树。
+--- Nonblocking directory listing。opts.depth 缺省 "1"；也支持 "infinity"。
 ---@param path string|nil
 ---@param cb fun(entries: WebdavEntry[]|nil, err: string|nil, code: number|nil)
 ---@param opts { depth?: "1"|"infinity", timeout?: number, connect_timeout?: number }|nil
@@ -357,7 +357,15 @@ function Webdav:listAsync(path, cb, opts)
             return
         end
         local xml = res.body or ""
-        cb(xml == "" and {} or parseList(xml, url, path))
+        local prefix = xml:match("<([%w_]*:?)multistatus[%s/>]")
+        local complete = prefix and (xml:find("</" .. prefix .. "multistatus%s*>")
+            or xml:find("<" .. prefix .. "multistatus[^>]-/%s*>"))
+        -- 容量受限时服务器可能回 207 + 部分 response + 507，不能把它当成完整快照。
+        if not complete or xml:find("<[%w_]*:?status[^>]*>%s*HTTP/[%d%.]+%s+507[%s<]") then
+            cb(nil, _("WebDAV 返回了不完整的目录列表"))
+            return
+        end
+        cb(parseList(xml, url, path))
     end)
 end
 

@@ -183,10 +183,10 @@ do
     Assert.eq(captured[2].url, "http://example.com/dav/books/")
 end
 
--- ── listAsync：空 body → 空表 ────────────────────────────
+-- ── listAsync：完整的空目录响应 → 空表 ──────────────────
 do
     local dav = Webdav.new({ url = "http://example.com/dav/" })
-    canned_res = { code = 207, body = "" }
+    canned_res = { code = 207, body = '<d:multistatus xmlns:d="DAV:"/>' }
     canned_err = nil
 
     local entries, err
@@ -195,6 +195,26 @@ do
     end)
     Assert.is_nil(err)
     Assert.len(entries, 0)
+end
+
+-- 截断、空响应、错误页和容量不足的部分列表都不能冒充完整快照。
+do
+    local dav = Webdav.new({ url = "http://example.com/dav/" })
+    for _idx, body in ipairs({
+        "",
+        XML_ROOT:gsub("</d:multistatus>", ""),
+        "<html>upstream unavailable</html>",
+        (XML_ROOT:gsub("</d:multistatus>", [[
+            <d:response><d:href>/dav/</d:href>
+            <d:status>HTTP/1.1 507 Insufficient Storage</d:status></d:response>
+            </d:multistatus>]])),
+    }) do
+        canned_res = { code = 207, body = body }
+        local entries, err
+        dav:listAsync(nil, function(e, er) entries, err = e, er end)
+        Assert.is_nil(entries)
+        Assert.eq(err, "WebDAV 返回了不完整的目录列表")
+    end
 end
 
 -- ── listAsync：网络错误点明是连不上 WebDAV ────────────────
@@ -366,7 +386,7 @@ do
 
     canned_res = function(opts)
         if opts.method == "PROPFIND" then
-            return { code = 207, body = "" }, nil
+            return { code = 207, body = '<d:multistatus xmlns:d="DAV:"/>' }, nil
         end
         return { code = 409, body = "" }, nil
     end

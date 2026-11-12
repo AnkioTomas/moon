@@ -50,6 +50,8 @@ return {
     ["正在检查 %1"] = "Checking %1",
     ["正在扫描本地书库…"] = "Scanning local library…",
     ["正在检查远端目录…"] = "Checking remote folders…",
+    ["WebDAV 返回了不完整的目录列表"] = "WebDAV returned an incomplete directory listing",
+    ["WebDAV 中的文件和文件夹较多，逐项检查会较慢。建议自行部署月读服务：\nhttps://github.com/AnkioTomas/book"] = "This WebDAV library has many files and folders, so checking each item may take a while. Consider self-hosting the Moon service:\nhttps://github.com/AnkioTomas/book",
     ["正在列出远端目录 %1"] = "Listing remote folder %1",
     ["正在列出远端书库…"] = "Listing the remote library…",
     ["正在下载书目…"] = "Downloading book list…",
