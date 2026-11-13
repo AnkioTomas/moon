@@ -4,6 +4,7 @@
 
 缩放只缩小不放大。切分按行对齐，并把剩余高度均分，避免最后一片过短。
 解码按一张源图进行，优先用 TurboJPEG 裁切条带，避免整条长图进内存。
+没有裁切符号时改为无损抽出 JPEG 条带再解压，仍然按条带占用内存。
 
 @module koplugin.book.source.cbz_fit
 --]]
@@ -209,14 +210,55 @@ local function scaleBB(bb, w, h)
     return scaled or bb
 end
 
--- TurboJPEG 可选符号：裁切与缩放。库是 3.2，但头文件未声明这两项。
+-- TurboJPEG 裁切 / 缩放是 3.1+ 才有的符号，KOReader 的 FFI 头文件也没声明。
+-- Android / Kindle 的 monolibtic 只导出 turbojpeg_decl.c 里的符号，
+-- 直接取 tj3SetCroppingRegion 会在 __index 抛 undefined symbol。
 local turbo_ready = false
 local turbo_ok = false
+local turbo_crop = false
+local turbo_scale = false
 local tj = nil
 
+--- 测试可替换：自行加载 TurboJPEG 库。生产路径不要设置。
+---@type (fun(): any)|nil
+Fit.turboLoader = nil
+--- 测试可替换：覆盖能力探测结果。生产路径不要设置。
+---@type { ok: boolean, crop: boolean, scale: boolean, lib: any }|nil
+Fit.turboOverride = nil
+
+function Fit.resetTurbo()
+    turbo_ready = false
+    turbo_ok = false
+    turbo_crop = false
+    turbo_scale = false
+    tj = nil
+end
+
+---@param lib any
+---@param name string
+---@return boolean
+local function hasCSymbol(lib, name)
+    if lib == nil or type(name) ~= "string" then return false end
+    local ok, value = pcall(function()
+        return lib[name]
+    end)
+    return ok and value ~= nil
+end
+
+---@return boolean
 local function bindTurbo()
     if turbo_ready then return turbo_ok end
     turbo_ready = true
+    pcall(function() require("ffi/turbojpeg_h") end)
+    if Fit.turboOverride then
+        turbo_ok = not not Fit.turboOverride.ok
+        turbo_crop = not not Fit.turboOverride.crop
+        turbo_scale = not not Fit.turboOverride.scale
+        if Fit.turboOverride.lib ~= nil then
+            tj = Fit.turboOverride.lib
+        end
+        return turbo_ok
+    end
     local ok, ffi = pcall(require, "ffi")
     if not ok then return false end
     pcall(function()
@@ -227,17 +269,39 @@ local function bindTurbo()
             int tj3SetCroppingRegion(void *handle, tjregion croppingRegion);
         ]]
     end)
-    local loaded, lib = pcall(function()
-        return ffi.loadlib("turbojpeg", "0.5.0", "turbojpeg", "0.4.0", "turbojpeg", "0.3.0", "turbojpeg")
-    end)
-    if not loaded or not lib then
-        loaded, lib = pcall(function() return ffi.load("turbojpeg") end)
+    local lib
+    if Fit.turboLoader then
+        local loaded, result = pcall(Fit.turboLoader)
+        if not loaded or not result then return false end
+        lib = result
+    else
+        local loaded
+        loaded, lib = pcall(function()
+            return ffi.loadlib("turbojpeg", "0.5.0", "turbojpeg", "0.4.0", "turbojpeg", "0.3.0", "turbojpeg")
+        end)
+        if not loaded or not lib then
+            loaded, lib = pcall(function() return ffi.load("turbojpeg") end)
+        end
+        if not loaded or not lib then return false end
     end
-    if not loaded or not lib then return false end
-    if not lib.tj3Init or not lib.tj3Decompress8 or not lib.tj3SetCroppingRegion then return false end
+    if not hasCSymbol(lib, "tj3Decompress8")
+        or not hasCSymbol(lib, "tj3DecompressHeader")
+        or not hasCSymbol(lib, "tj3Destroy")
+        or not (hasCSymbol(lib, "tj3Init") or hasCSymbol(lib, "tj3InitVersion")) then
+        return false
+    end
     tj = lib
+    turbo_crop = hasCSymbol(lib, "tj3SetCroppingRegion")
+    turbo_scale = hasCSymbol(lib, "tj3SetScalingFactor")
     turbo_ok = true
     return true
+end
+
+--- 探测当前环境的 TurboJPEG 能力。缺符号时不会抛错。
+---@return { ok: boolean, crop: boolean, scale: boolean }
+function Fit.turboCaps()
+    bindTurbo()
+    return { ok = turbo_ok, crop = turbo_crop, scale = turbo_scale }
 end
 
 ---@param src_w integer
@@ -264,6 +328,70 @@ local function jpegScale(src_w, out_w, band_src_h, bpp)
     return chosen_num, chosen_denom
 end
 
+---@return any|nil
+local function tjInit()
+    if hasCSymbol(tj, "tj3Init") then
+        return tj.tj3Init(tj.TJINIT_DECOMPRESS)
+    end
+    if hasCSymbol(tj, "tj3InitVersion") then
+        return tj.tj3InitVersion(tj.TJINIT_DECOMPRESS, tj.TURBOJPEG_VERSION_NUMBER)
+    end
+    return nil
+end
+
+---@param jpeg string
+---@param color boolean
+---@return table|nil bb
+local function decompressJpegData(jpeg, color)
+    if type(jpeg) ~= "string" or jpeg == "" or not bindTurbo() then return nil end
+    local ffi = require("ffi")
+    local BB = require("ffi/blitbuffer")
+    local handle = tjInit()
+    if handle == nil then return nil end
+    local bb
+    local ok = pcall(function()
+        if tj.tj3DecompressHeader(handle, ffi.cast("const unsigned char*", jpeg), #jpeg) < 0 then
+            error("jpeg header")
+        end
+        local dec_w = tj.tj3Get(handle, tj.TJPARAM_JPEGWIDTH)
+        local dec_h = tj.tj3Get(handle, tj.TJPARAM_JPEGHEIGHT)
+        if not dec_w or dec_w < 1 or not dec_h or dec_h < 1 then
+            error("jpeg size")
+        end
+        if dec_w * dec_h * (color and 3 or 1) > Fit.DECODE_BUDGET then
+            error("jpeg budget")
+        end
+        local typ = color and BB.TYPE_BBRGB24 or BB.TYPE_BB8
+        local format = color and tj.TJPF_RGB or tj.TJPF_GRAY
+        bb = BB.new(dec_w, dec_h, typ)
+        if tj.tj3Decompress8(handle, ffi.cast("const unsigned char*", jpeg), #jpeg,
+            ffi.cast("unsigned char*", bb.data), bb.stride, format) < 0 then
+            error("jpeg decompress")
+        end
+    end)
+    tj.tj3Destroy(handle)
+    if not ok or not bb then
+        freeBB(bb)
+        return nil
+    end
+    return bb
+end
+
+---@param src_h integer
+---@param plan { height: integer }
+---@param slice { y: integer, h: integer }
+---@return integer src_y
+---@return integer src_band_h
+local function sliceSourceBand(src_h, plan, slice)
+    local scale_y = plan.height / src_h
+    local src_y = math.floor(slice.y / scale_y + 0.5)
+    local src_band_h = math.max(1, math.floor(slice.h / scale_y + 0.5))
+    if src_y < 0 then src_y = 0 end
+    if src_y + src_band_h > src_h then src_band_h = src_h - src_y end
+    return src_y, src_band_h
+end
+
+--- 有 tj3SetCroppingRegion 时按条带裁切解码，尽量在库内完成缩小。
 ---@param data string
 ---@param src_w integer
 ---@param src_h integer
@@ -271,18 +399,25 @@ end
 ---@param slice { y: integer, h: integer }
 ---@param color boolean
 ---@return table|nil bb
-local function decodeJpegSlice(data, src_w, src_h, plan, slice, color)
-    if not bindTurbo() then return nil end
+local function decodeJpegSliceCrop(data, src_w, src_h, plan, slice, color)
     local ffi = require("ffi")
     local BB = require("ffi/blitbuffer")
-    local scale_y = plan.height / src_h
-    local src_y = math.floor(slice.y / scale_y + 0.5)
-    local src_band_h = math.max(1, math.floor(slice.h / scale_y + 0.5))
-    if src_y + src_band_h > src_h then src_band_h = src_h - src_y end
+    local src_y, src_band_h = sliceSourceBand(src_h, plan, slice)
     if src_band_h < 1 then return nil end
     local bpp = color and 3 or 1
-    local num, denom = jpegScale(src_w, plan.width, src_band_h, bpp)
-    local handle = tj.tj3Init(tj.TJINIT_DECOMPRESS)
+    local num, denom = 1, 1
+    if turbo_scale then
+        num, denom = jpegScale(src_w, plan.width, src_band_h, bpp)
+    end
+    local dec_w = math.max(1, math.floor(src_w * num / denom))
+    local dec_y = math.floor(src_y * num / denom)
+    local dec_h = math.max(1, math.floor(src_band_h * num / denom))
+    local scaled_h = math.max(1, math.floor(src_h * num / denom))
+    if dec_y + dec_h > scaled_h then
+        dec_h = math.max(1, scaled_h - dec_y)
+    end
+    if dec_w * dec_h * bpp > Fit.DECODE_BUDGET then return nil end
+    local handle = tjInit()
     if handle == nil then return nil end
     local bb
     local ok = pcall(function()
@@ -294,12 +429,6 @@ local function decodeJpegSlice(data, src_w, src_h, plan, slice, color)
             if tj.tj3SetScalingFactor(handle, factor) < 0 then
                 error("jpeg scale")
             end
-        end
-        local dec_w = math.max(1, math.floor(src_w * num / denom))
-        local dec_y = math.floor(src_y * num / denom)
-        local dec_h = math.max(1, math.floor(src_band_h * num / denom))
-        if dec_y + dec_h > math.max(1, math.floor(src_h * num / denom)) then
-            dec_h = math.max(1, math.floor(src_h * num / denom) - dec_y)
         end
         local region = ffi.new("tjregion", { 0, dec_y, dec_w, dec_h })
         if tj.tj3SetCroppingRegion(handle, region) < 0 then
@@ -319,6 +448,124 @@ local function decodeJpegSlice(data, src_w, src_h, plan, slice, color)
         return nil
     end
     return scaleBB(bb, plan.width, slice.h)
+end
+
+--- 没有裁切符号时：无损抽出 MCU 条带，再用已导出的 tj3Decompress8 解码。
+--- 过宽的条带再按内存预算切成更矮的几段，避免整张长图进内存。
+---@param data string
+---@param src_w integer
+---@param src_h integer
+---@param plan { width: integer, height: integer }
+---@param slice { y: integer, h: integer }
+---@param color boolean
+---@return table|nil bb
+local function decodeJpegSliceBand(data, src_w, src_h, plan, slice, color)
+    local Band = require("source.cbz_jpeg_band")
+    local info = Band.info(data)
+    if not info then return nil end
+    local src_y, src_band_h = sliceSourceBand(src_h, plan, slice)
+    if src_band_h < 1 then return nil end
+    local bpp = color and 3 or 1
+    local mcu_h = math.max(1, info.mcu_h)
+    local max_pixels = math.max(1, math.floor(Fit.DECODE_BUDGET / (math.max(1, src_w) * bpp)))
+    ---@type { bb: table, y: integer, h: integer }[]
+    local pieces = {}
+    local function abandon()
+        for _, piece in ipairs(pieces) do
+            freeBB(piece.bb)
+        end
+    end
+    local y = src_y
+    local src_end = src_y + src_band_h
+    while y < src_end do
+        local remain = src_end - y
+        local top = 0
+        if y >= mcu_h then
+            top = mcu_h
+        end
+        local chunk_h = math.min(remain, math.max(1, max_pixels - top))
+        if chunk_h < 1 then
+            abandon()
+            return nil
+        end
+        local ext_y = y - top
+        local ext_h = chunk_h + top
+        if ext_y + ext_h < src_h and ext_h + mcu_h <= max_pixels then
+            ext_h = ext_h + mcu_h
+        end
+        local jpeg, ay, ah = Band.extract(data, ext_y, ext_h)
+        if not jpeg or not ay or not ah then
+            abandon()
+            return nil
+        end
+        if ah * src_w * bpp > Fit.DECODE_BUDGET then
+            abandon()
+            return nil
+        end
+        local decoded = decompressJpegData(jpeg, color)
+        if not decoded then
+            abandon()
+            return nil
+        end
+        local crop_y = y - ay
+        local crop_h = math.min(src_end, ay + (decoded.getHeight and decoded:getHeight() or ah)) - y
+        if crop_h > remain then crop_h = remain end
+        if crop_y < 0 or crop_h < 1 or crop_y + crop_h > decoded:getHeight() then
+            freeBB(decoded)
+            abandon()
+            return nil
+        end
+        local cropped = cropBB(decoded, 0, crop_y, decoded:getWidth(), crop_h)
+        if cropped ~= decoded then freeBB(decoded) end
+        if not cropped then
+            abandon()
+            return nil
+        end
+        pieces[#pieces + 1] = { bb = cropped, y = y, h = crop_h }
+        local next_y = y + crop_h
+        if next_y <= y then
+            abandon()
+            return nil
+        end
+        y = next_y
+    end
+    if #pieces == 0 then return nil end
+    if #pieces == 1 and pieces[1].y == src_y and pieces[1].h == src_band_h then
+        return scaleBB(pieces[1].bb, plan.width, slice.h)
+    end
+    local BB = require("ffi/blitbuffer")
+    local typ = pieces[1].bb.getType and pieces[1].bb:getType()
+    local out = BB.new(plan.width, slice.h, typ)
+    for i, piece in ipairs(pieces) do
+        local out_y = math.floor((piece.y - src_y) * slice.h / src_band_h + 0.5)
+        local out_end = math.floor((piece.y + piece.h - src_y) * slice.h / src_band_h + 0.5)
+        if i == 1 then out_y = 0 end
+        if i == #pieces then out_end = slice.h end
+        local out_h = math.max(1, out_end - out_y)
+        if out_y + out_h > slice.h then
+            out_h = slice.h - out_y
+        end
+        local scaled = scaleBB(piece.bb, plan.width, out_h)
+        out:blitFrom(scaled, 0, out_y, 0, 0, plan.width, out_h)
+        if scaled ~= piece.bb then freeBB(scaled) end
+    end
+    return out
+end
+
+---@param data string
+---@param src_w integer
+---@param src_h integer
+---@param plan { width: integer, height: integer }
+---@param slice { y: integer, h: integer }
+---@param color boolean
+---@return table|nil bb
+local function decodeJpegSlice(data, src_w, src_h, plan, slice, color)
+    if not bindTurbo() then return nil end
+    if turbo_crop then
+        local bb = decodeJpegSliceCrop(data, src_w, src_h, plan, slice, color)
+        if bb then return bb end
+    end
+    return decodeJpegSliceBand(data, src_w, src_h, plan, slice, color)
 end
 
 ---@param path string
@@ -400,8 +647,10 @@ function Fit.materialize(path, dest_dir, start_index, screen_w, screen_h)
             if bb then return bb end
         end
         if not full then
-            local scaled = plan.width * plan.height * (color and 3 or 1)
-            if scaled > Fit.DECODE_BUDGET then
+            -- RenderImage / MuPDF 会先按源图像素解码，源图过大时不要走这条路径。
+            local bpp = color and 3 or 1
+            if src_w * src_h * bpp > Fit.DECODE_BUDGET
+                or plan.width * plan.height * bpp > Fit.DECODE_BUDGET then
                 return nil, _("无法读取漫画图片")
             end
             full = decodeFull(path, plan)

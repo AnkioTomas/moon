@@ -128,4 +128,118 @@ do -- 无效尺寸
     Assert.is_nil(Fit.plan(10, 0, 1072, 1448))
 end
 
+
+local function fakeTurbo(has_crop, has_scale)
+    local lib = {
+        tj3Init = function() return nil end,
+        tj3InitVersion = function() return nil end,
+        tj3Decompress8 = function() return -1 end,
+        tj3DecompressHeader = function() return -1 end,
+        tj3Destroy = function() end,
+        tj3Get = function() return 0 end,
+        TJINIT_DECOMPRESS = 1,
+        TJPF_RGB = 0,
+        TJPF_GRAY = 6,
+        TJPARAM_JPEGWIDTH = 3,
+        TJPARAM_JPEGHEIGHT = 4,
+    }
+    if has_crop then
+        lib.tj3SetCroppingRegion = function() return -1 end
+    end
+    if has_scale then
+        lib.tj3SetScalingFactor = function() return -1 end
+    end
+    return setmetatable(lib, {
+        __index = function(_, name)
+            error("undefined symbol: " .. tostring(name))
+        end,
+    })
+end
+
+do -- 缺 tj3SetCroppingRegion 时探测不崩溃，并报告没有裁切能力
+    Fit.resetTurbo()
+    Fit.turboLoader = function()
+        return fakeTurbo(false, false)
+    end
+    local caps = Fit.turboCaps()
+    Assert.is_true(caps.ok)
+    Assert.is_false(caps.crop)
+    Assert.is_false(caps.scale)
+    Fit.turboLoader = nil
+    Fit.resetTurbo()
+end
+
+do -- 有裁切 / 缩放符号时仍走原来的能力
+    Fit.resetTurbo()
+    Fit.turboLoader = function()
+        return fakeTurbo(true, true)
+    end
+    local caps = Fit.turboCaps()
+    Assert.is_true(caps.ok)
+    Assert.is_true(caps.crop)
+    Assert.is_true(caps.scale)
+    Fit.turboLoader = nil
+    Fit.resetTurbo()
+end
+
+do -- 缺核心解压符号时不算可用
+    Fit.resetTurbo()
+    Fit.turboLoader = function()
+        return setmetatable({}, {
+            __index = function(_, name)
+                error("undefined symbol: " .. tostring(name))
+            end,
+        })
+    end
+    local caps = Fit.turboCaps()
+    Assert.is_false(caps.ok)
+    Assert.is_false(caps.crop)
+    Fit.turboLoader = nil
+    Fit.resetTurbo()
+end
+
+do -- 强制关闭裁切后，过高 JPEG 仍能按条带回退切开（不整图解码）
+    local dir = (os.getenv("TMPDIR") or "/tmp") .. "/moon-cbz-fit-band"
+    os.execute("mkdir -p '" .. dir .. "'")
+    local src = "tests/fixtures/cbz_fit/color420.jpg"
+    Fit.resetTurbo()
+    Fit.turboOverride = { ok = true, crop = false, scale = false }
+    -- 若本机有 TurboJPEG，用它解压抽出的条带；没有则跳过这条集成测试。
+    local has_turbo = false
+    do
+        local ok, ffi = pcall(require, "ffi")
+        if ok then
+            local loaded, lib = pcall(function()
+                return ffi.loadlib("turbojpeg", "0.5.0", "turbojpeg", "0.4.0", "turbojpeg", "0.3.0", "turbojpeg")
+            end)
+            if not loaded or not lib then
+                loaded, lib = pcall(function() return ffi.load("turbojpeg") end)
+            end
+            if loaded and lib then
+                Fit.turboOverride.lib = lib
+                has_turbo = true
+            end
+        end
+    end
+    if not has_turbo then
+        Fit.turboOverride = nil
+        Fit.resetTurbo()
+        os.execute("rm -rf '" .. dir .. "'")
+        Assert.skip("no system turbojpeg for band fallback")
+    end
+    -- 48x160 在 48x40 的“屏幕”上需要切片（两屏高=80，源图 160）。
+    local pages, err = Fit.materialize(src, dir, 1, 48, 40)
+    Fit.turboOverride = nil
+    Fit.resetTurbo()
+    Assert.is_true(pages ~= nil, err)
+    Assert.is_true(#pages >= 2)
+    Assert.eq(pages[1].name, "0001.jpg")
+    Assert.eq(pages[2].name, "0002.jpg")
+    for _, page in ipairs(pages) do
+        Assert.is_true((tonumber(require("libs/libkoreader-lfs").attributes(page.path, "size")) or 0) > 0)
+        if page.temp then os.remove(page.path) end
+    end
+    os.execute("rm -rf '" .. dir .. "'")
+end
+
 return true
