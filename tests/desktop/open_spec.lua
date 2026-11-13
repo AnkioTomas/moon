@@ -279,3 +279,62 @@ do
     package.loaded["reader.session.derived_note"] = nil
     os.execute("rm -rf " .. dir)
 end
+
+-- 已有 CBZ 直接交给阅读器；即使旁边有旧备份，也不检查、改写或弹恢复窗。
+do
+    local original_cbz = package.loaded["source.cbz"]
+    local original_preload = package.preload["source.cbz"]
+    package.loaded["source.cbz"] = nil
+    package.preload["source.cbz"] = function() error("已有 CBZ 不得进入页图组装器") end
+    local dir = require("support.config").dir() .. "/desktop-existing-cbz-spec"
+    assert(require("utils.paths").ensureDir(dir))
+    local path = dir .. "/book.cbz"
+    local function write(file_path, data)
+        local file = assert(io.open(file_path, "wb"))
+        file:write(data)
+        file:close()
+    end
+    local function read(file_path)
+        local file = assert(io.open(file_path, "rb"))
+        local data = file:read("*a")
+        file:close()
+        return data
+    end
+    write(path, "existing comic")
+    write(path .. ".old", "existing backup")
+    local cached = { source_id = book.source_id, stable_id = book.stable_id, path = path }
+    ReaderUI.instance = nil
+    local confirms, progress = #Themed.all("confirm"), #Themed.all("progress_dialog")
+    local finished
+    Open.book({ desktop = {} }, cached, function(ok) finished = ok end)
+    open_callbacks[#open_callbacks](path)
+    Stubs.flush()
+    Assert.is_true(finished)
+    Assert.eq(shown[#shown], path)
+    Assert.eq(read(path), "existing comic")
+    Assert.eq(read(path .. ".old"), "existing backup")
+    Assert.len(Themed.all("confirm"), confirms)
+    Assert.len(Themed.all("progress_dialog"), progress)
+    os.remove(path)
+    os.remove(path .. ".old")
+    assert(require("libs/libkoreader-lfs").rmdir(dir))
+    package.loaded["source.cbz"] = original_cbz
+    package.preload["source.cbz"] = original_preload
+end
+
+-- 同步完成的源不能挂回死句柄，后续打开只取消仍在飞的请求。
+do
+    local original_open = source.openBookAsync
+    local source_cancels = 0
+    source.openBookAsync = function(_self, _identity, _opts, cb)
+        cb("/library/cached.cbz")
+        return { cancel = function() source_cancels = source_cancels + 1 end }
+    end
+    Open.book({ desktop = {} }, book)
+    Assert.is_nil(Open.pending_job)
+    Open.book({ desktop = {} }, book)
+    Assert.eq(source_cancels, 0)
+    Stubs.flush()
+    Assert.eq(shown[#shown], "/library/cached.cbz")
+    source.openBookAsync = original_open
+end

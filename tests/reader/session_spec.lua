@@ -1160,6 +1160,36 @@ do
     resolved_source = nil
 end
 
+-- 切到已经组装好的漫画章节，不经过 CBZ 检查或重切。
+do
+    local original_cbz, original_preload = package.loaded["source.cbz"], package.preload["source.cbz"]
+    local original_reader = package.loaded["apps/reader/readerui"]
+    package.loaded["source.cbz"] = nil
+    package.preload["source.cbz"] = function() error("切章不得处理已有 CBZ") end
+    local switched
+    package.loaded["apps/reader/readerui"] = {
+        instance = { switchDocument = function(_self, path) switched = path end },
+    }
+    resolved_source = {
+        type = "chapter",
+        openBookAsync = function(_self, _identity, opts, cb)
+            Assert.eq(opts.chapter_idx, 2)
+            return asyncChapter("/cache/2.cbz", cb)
+        end,
+        prefetchChaptersAsync = function() return { cancel = function() end } end,
+    }
+    stored_toc.chapters = { { idx = 1 }, { idx = 2 } }
+    local plugin = mkPlugin("/cache/1.html")
+    Session.onReaderReady(plugin)
+    Assert.is_true(Session.gotoChapter(2))
+    Stubs.flush()
+    Assert.eq(switched, "/cache/2.cbz")
+    Session.onCloseDocument(plugin)
+    resolved_source = nil
+    package.loaded["source.cbz"], package.preload["source.cbz"] = original_cbz, original_preload
+    package.loaded["apps/reader/readerui"] = original_reader
+end
+
 -- 换源后继续读旧书：源跟身份走（identity.source），不碰 current（串书修复）
 do
     local plugin, emitted = mkPlugin("/x/book.epub")

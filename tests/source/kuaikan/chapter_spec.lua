@@ -75,3 +75,18 @@ Chapter.materializeAsync(identity, { uid = "2", vip = true }, nil, function(path
     Assert.is_nil(path)
     Assert.eq(err, "本章未购买")
 end)
+
+-- 已有 CBZ 只复用缓存，不取页图、不重新组装。
+require("source.cbz").ready = function() return true end
+require("source.cbz").build = function() error("缓存 CBZ 不得重新组装") end
+require("source.kuaikan.client").imagesAsync = function() error("缓存命中不得下载页图") end
+local cached
+Chapter.materializeAsync(identity, { uid = "cached" }, nil, function(path) cached = path end)
+Stubs.flush()
+Assert.matches(cached, "/cached%.cbz$")
+local cancelled_cache = false
+local cached_handle = Chapter.materializeAsync(identity, { uid = "cached" }, nil,
+    function() cancelled_cache = true end)
+cached_handle.cancel()
+Stubs.flush()
+Assert.is_false(cancelled_cache, "缓存交接也尊重取消")

@@ -137,7 +137,9 @@ function Open.book(plugin, book, on_done, opts)
         book = book,
     }
     local started_at = Perf.now()
-    Open.pending_job = source:openBookAsync(identity, opts, function(path, open_err, meta)
+    local source_settled = false
+    local source_job = source:openBookAsync(identity, opts, function(path, open_err, meta)
+        source_settled = true
         if generation ~= Open.generation then return end
         Open.pending_job = nil
         logger.dbg("book.perf open.source", Perf.elapsedMs(started_at), "ms", book.source_id, path ~= nil)
@@ -156,30 +158,15 @@ function Open.book(plugin, book, on_done, opts)
         end
         -- 原书上次读的是衍生版（排版 / 双语）且文件还在：改开那个版本。
         local open_path = require("reader.session.derived_note").last(path) or path
-        local dialog
-        local job
-        job = require("source.cbz").ensureAsync(open_path, function(fitted, fit_err)
-            if dialog then dialog:close(); dialog = nil end
-            if generation ~= Open.generation then return end
-            if Open.pending_job == job then Open.pending_job = nil end
-            if not fitted then
-                Toast:new{ text = fit_err or _("无法打开书籍") }:show()
-                done(false)
-                return
-            end
-            showReader(plugin, fitted, generation, done)
-        end, {
-            on_rebuild = function()
-                if generation ~= Open.generation then return end
-                dialog = require("ui.themes.widgets.progress_dialog"):new{
-                    title = _("正在准备…"),
-                    dismissable = false,
-                }
-                dialog:show()
-            end,
-        })
-        Open.pending_job = job
+        showReader(plugin, open_path, generation, done)
     end)
+    if not source_settled then
+        if generation == Open.generation then
+            Open.pending_job = source_job
+        elseif source_job and source_job.cancel then
+            source_job:cancel()
+        end
+    end
 end
 
 return Open
