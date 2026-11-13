@@ -71,8 +71,16 @@ end
 ---@param title string
 ---@param text string
 ---@param imageUrl fun(src: string): string 相对图片地址补全（Client.imageUrl）
+---@param reviews boolean|nil 保存阅读 App 的段落编号
 ---@return string
-function Mapper.chapterHtml(title, text, imageUrl)
+function Mapper.chapterHtml(title, text, imageUrl, reviews)
+    if reviews then
+        local paragraph = 0
+        text = (text:gsub("\n+", "\n") .. "\n"):gsub("(.-)\n", function(line)
+            paragraph = paragraph + 1
+            return line .. "\2" .. paragraph .. "\2\n"
+        end)
+    end
     local imgs = {}
     text = text:gsub("<img%s[^>]*>", function(tag)
         local src = tag:match('src%s*=%s*"([^"]*)"') or tag:match("src%s*=%s*'([^']*)'")
@@ -81,7 +89,15 @@ function Mapper.chapterHtml(title, text, imageUrl)
         imgs[#imgs + 1] = '<img src="' .. Text.xmlEscape(imageUrl(Text.xmlDecode(src))) .. '"/>'
         return "\1" .. #imgs .. "\1"
     end)
-    return (Text.chapterHtml(title, text):gsub("\1(%d+)\1", function(n) return imgs[tonumber(n)] end))
+    local html = Text.chapterHtml(title, text)
+    if reviews then
+        html = html:gsub("<p>(.-)\2(%d+)\2</p>", function(body, paragraph)
+            body = Text.rtrim(body)
+            if body == "" then return "" end
+            return '<p id="moon-legado-paragraph-' .. paragraph .. '">' .. body .. "</p>"
+        end)
+    end
+    return (html:gsub("\1(%d+)\1", function(n) return imgs[tonumber(n)] end))
 end
 
 --- reader3 本地 EPUB 资源 → 正文片段；图片按章节 URL 解析并规范化属性，供公共 Assets 落地。

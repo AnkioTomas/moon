@@ -94,6 +94,25 @@ do -- 回复页走 paragraphReviewRepliesAsync，评论 id 在 spot.range
     Assert.is_false(fake.more)
 end
 
+do -- 阅读 API 只返回分页列表，总数沿用热点，不冒充当前页长度。
+    local fake = setmetatable({
+        identity = { source = { paragraphReviewPageAsync = function(_self, _identity, _range, _max_idx, cb)
+            cb({ items = { { id = "comment" } }, max_idx = "next", more = true })
+            return { cancel = function() end }
+        end } },
+        spot = { range = "paragraph", text = "原句", total = 9 },
+        more = true, max_idx = 0, items = {}, page = 1,
+        paginate = function(self) self.pages = { { 1, #self.items } } end,
+        refresh = function() end,
+    }, { __index = Sheet })
+    fake:load()
+    Assert.eq(fake.total, 9)
+    Assert.eq(fake.spot.total, 9)
+    fake:load()
+    Assert.eq(fake.total, 9)
+    Assert.len(fake.items, 2)
+end
+
 do
     local offsets = {}
     local fake = setmetatable({

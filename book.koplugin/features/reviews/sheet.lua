@@ -387,9 +387,10 @@ function Sheet:load()
             if not self.loaded then self:close() end
             return
         end
-        if not self.loaded then self.spot.total = page.total end
+        local total = page.total or self.total or self.spot.total
+        if not self.loaded then self.spot.total = total end
         for _idx, item in ipairs(page.items) do self.items[#self.items + 1] = item end
-        self.loaded, self.total, self.max_idx = true, page.total, page.max_idx
+        self.loaded, self.total, self.max_idx = true, total, page.max_idx
         self.more = page.more
         self:paginate()
         if self.turn_after_load and self.page < #self.pages then self.page = self.page + 1 end

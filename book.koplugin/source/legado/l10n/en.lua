@@ -1,4 +1,11 @@
 return {
+    ["本章讨论"] = "Chapter discussion",
+    ["章节评论"] = "Chapter comments",
+    ["他人段评（阅读 App）"] = "Paragraph comments (Legado app)",
+    ["段评仅支持阅读 App 的 Web 服务"] = "Paragraph comments require the Legado app's web service",
+    ["阅读段评位置无效"] = "Invalid Legado comment location",
+    ["阅读段评分页位置无效"] = "Invalid Legado comment page position",
+    ["阅读段评响应无效"] = "Invalid Legado comment response",
     ["书架与章节正文"] = "Bookshelf and chapter content",
     ["从服务端书架删除"] = "Remove from the server bookshelf",
     ["目录及整本缓存"] = "Table of contents and full-book caching",

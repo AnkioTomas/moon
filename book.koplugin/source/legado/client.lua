@@ -288,6 +288,49 @@ function Client.contentAsync(book_url, index, origin, cb)
     end)
 end
 
+local function reviewCall(path, params, cb)
+    if Client.mode() ~= "app" then
+        return require("source.base").defer(cb, nil, _("段评仅支持阅读 App 的 Web 服务"))
+    end
+    return call(path, params, 1, "read", cb)
+end
+
+---@param book_url string
+---@param index integer 阅读目录里的 0 基序号
+---@param cb function
+---@return { cancel: fun() }
+function Client.reviewSummaryAsync(book_url, index, cb)
+    return reviewCall("/getReviewSummary", { url = book_url, index = index }, cb)
+end
+
+---@param book_url string
+---@param index integer
+---@param paragraph integer
+---@param data string
+---@param page integer
+---@param cursor string|nil
+---@param cb function
+---@return { cancel: fun() }
+function Client.reviewDetailAsync(book_url, index, paragraph, data, page, cursor, cb)
+    return reviewCall("/getReviewDetail", {
+        url = book_url, index = index, paraIndex = paragraph, paraData = data, page = page, cursor = cursor,
+    }, cb)
+end
+
+---@param book_url string
+---@param index integer
+---@param paragraph integer
+---@param data string
+---@param review_id string
+---@param page integer
+---@param cb function
+---@return { cancel: fun() }
+function Client.reviewRepliesAsync(book_url, index, paragraph, data, review_id, page, cb)
+    return reviewCall("/getReviewReplies", {
+        url = book_url, index = index, paraIndex = paragraph, paraData = data, reviewId = review_id, page = page,
+    }, cb)
+end
+
 --- 上报阅读位置。row 是书架原行（name / author / bookUrl / origin）。
 ---@param row table
 ---@param pos { index: integer, title: string|nil, offset: integer }

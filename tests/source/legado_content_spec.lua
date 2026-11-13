@@ -68,7 +68,9 @@ for _idx, address in ipairs({ "http://reader.example/reader3", "http://reader.ex
     cfg.server_address = address
     start()
     requests[1].cb(wire("Documentation is at index.html"))
-    Assert.eq(payload.html, "<h1>章</h1>\n<p>Documentation is at index.html</p>")
+    Assert.eq(payload.html, address == "http://reader.example"
+        and '<h1>章</h1>\n<p id="moon-legado-paragraph-1">Documentation is at index.html</p>'
+        or "<h1>章</h1>\n<p>Documentation is at index.html</p>")
     Assert.len(requests, 1)
 end
 cfg.server_address = "http://reader.example/reader3"
