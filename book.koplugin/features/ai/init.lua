@@ -12,19 +12,45 @@ local _ = require("gettext")
 
 local Ai = {}
 
+---@class BookSummaryPlugin: BookPlugin
+---@field _summary_watch { cancel: fun() }|nil
+---@field _summary_error string|nil
+
+---@param plugin BookSummaryPlugin
+local function resumeSummaries(plugin)
+    local _count, err = require("features.ai.summary").resume()
+    if err == "queue_full" then
+        require("utils.log").dbg("ai.summary restore deferred; queue full")
+    elseif err and err ~= plugin._summary_error then
+        require("ui.themes.widgets.toast"):new{ text = err }:show()
+    end
+    plugin._summary_error = err
+end
+
 ---@param plugin BookPlugin
 local function onPage(plugin)
     require("features.ai.summary").onPage(plugin.ui)
 end
 
 --- 登记「问书」手势，事件由下面的 events 接住。
-function Ai.onCreate()
+function Ai.onCreate(plugin)
     require("dispatcher"):registerAction("book_ai_ask", {
         category = "none",
         event = "BookAiAsk",
         title = _("问书"),
         reader = true,
     })
+    if plugin._summary_watch then plugin._summary_watch:cancel() end
+    plugin._summary_watch = require("workers.tasks").watch(function() resumeSummaries(plugin) end)
+    resumeSummaries(plugin)
+end
+
+---@param plugin BookSummaryPlugin
+function Ai.onExit(plugin)
+    if plugin._summary_watch then
+        plugin._summary_watch:cancel()
+        plugin._summary_watch = nil
+    end
 end
 
 --- 翻页不拦截（返回 nil），其它模块照常收到。
@@ -44,8 +70,9 @@ Ai.events = {
 }
 
 --- 往划词菜单加「AI 解释」；按钮键沿用 `12_ai_explain`，已保存的长按菜单顺序与开关照旧生效。
----@param plugin BookPlugin
+---@param plugin BookSummaryPlugin
 function Ai.onReaderReady(plugin)
+    resumeSummaries(plugin)
     require("features.ai.recap").onReaderReady()
     local ui = plugin.ui
     ui.highlight:addToHighlightDialog("12_ai_explain", function(this)

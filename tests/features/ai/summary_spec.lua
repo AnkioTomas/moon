@@ -3,6 +3,9 @@
 --[[-- features.ai.summary：顺读进下一章才入队、跳读不入队、已有摘要不重复、按章文件取正文、任务写库。 --]]
 
 local Assert = require("support.assert")
+local Themed = require("support.theme_stubs")
+Themed.install()
+package.preload["json"] = function() return require("support.json_stub") end
 
 package.preload["l10n"] = function() return { apply = function() end } end
 package.preload["gettext"] = function() return function(value) return value end end
@@ -30,21 +33,30 @@ package.preload["ai"] = function()
     }
 end
 
-local stored, puts = {}, {}
+local stored, puts, pending = {}, {}, {}
 package.preload["ai.summary_db"] = function()
     return {
         get = function(source_id, stable_id, idx) return stored[source_id .. stable_id .. idx] end,
-        put = function(source_id, stable_id, idx, title, summary)
+        getPending = function(source_id, stable_id, idx) return pending[source_id .. stable_id .. idx] end,
+        putPending = function(source_id, stable_id, idx, title, messages)
+            pending[source_id .. stable_id .. idx] = { source_id = source_id, stable_id = stable_id,
+                chapter_idx = idx, title = title, messages = messages, error = "" }
+            return true
+        end,
+        finishPending = function(source_id, stable_id, idx, title, summary)
             puts[#puts + 1] = { source_id = source_id, stable_id = stable_id, idx = idx, title = title, summary = summary }
+            pending[source_id .. stable_id .. idx] = nil
             return true
         end,
     }
 end
 
-local queued = {}
+local queued, by_key = {}, {}
 package.preload["workers.tasks"] = function()
-    return { enqueue = function(spec)
+    return { get = function(key) return by_key[key] end, enqueue = function(spec)
+        spec.state, spec.token = "running", {}
         queued[#queued + 1] = spec
+        by_key[spec.key] = spec
         return spec
     end }
 end
@@ -58,8 +70,7 @@ package.preload["reader.context"] = function()
     end }
 end
 
-local tmp_dir = os.tmpname()
-os.remove(tmp_dir)
+local tmp_dir = require("support.config").dir() .. "/ai-summary-spec"
 os.execute("mkdir -p '" .. tmp_dir .. "'")
 package.preload["utils.paths"] = function()
     return { chapterPath = function(stable_id, idx, source_id)
@@ -127,19 +138,19 @@ Assert.matches(prompt, "《边城》")
 Assert.matches(prompt, "章节：第一章")
 Assert.matches(prompt, "他走进了城门")
 Assert.matches(chats[1].messages[1].content, "不透露后文")
-chats[1].cb("**翠翠**在渡口等人。")
+-- 失败不写库、不撤销快照；下一次尝试仍可使用同一份正文。
+local before_puts = #puts
+chats[1].cb(nil, "timeout")
+Assert.is_false(task.result.ok)
+Assert.eq(task.result.err, "timeout")
+Assert.eq(#puts, before_puts)
+Assert.not_nil(pending["local/a.epub1"])
+task.run(function() end, function(result) task.result = result end)
+chats[#chats].cb("**翠翠**在渡口等人。")
 Assert.is_true(task.result.ok)
 Assert.eq(puts[1].idx, 1)
 Assert.eq(puts[1].title, "第一章")
 Assert.eq(puts[1].summary, "翠翠在渡口等人。")
-
--- 失败（含离线）：done 报失败，交给队列决定等网络还是放弃，不写库
-local before_puts = #puts
-task.run(function() end, function(result) task.result = result end)
-chats[#chats].cb(nil, "timeout")
-Assert.is_false(task.result.ok)
-Assert.eq(task.result.err, "timeout")
-Assert.eq(#puts, before_puts)
 
 -- 已有摘要：不重复入队
 stored["local/a.epub2"] = { summary = "已有" }
@@ -205,6 +216,19 @@ Assert.matches(body, "……")
 Assert.matches(body, "甲甲甲")
 Assert.matches(body, "乙乙乙")
 Assert.is_true(#body < #long, "超长正文被截短")
+
+local before_failed_save = #queued
+local SummaryDB = require("ai.summary_db")
+local put_pending = SummaryDB.putPending
+local failed_save_calls = 0
+SummaryDB.putPending = function() failed_save_calls = failed_save_calls + 1; return false end
+local unwritable = { source_id = "local", stable_id = "/unwritable.epub", book = {} }
+turn(1, 9, unwritable)
+turn(2, 10, unwritable)
+SummaryDB.putPending = put_pending
+Assert.eq(failed_save_calls, 1)
+Assert.len(queued, before_failed_save, "不能先调用 AI 再尝试保存待办")
+Assert.eq(Themed.last("toast").text, "无法保存摘要待办，未发起 AI 请求")
 
 os.execute("rm -rf '" .. tmp_dir .. "'")
 return true

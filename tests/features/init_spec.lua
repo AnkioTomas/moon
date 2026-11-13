@@ -175,7 +175,7 @@ Assert.is_false(Features.handleEvent(event("Boom"), plugin))
 Assert.eq(guarded[1].label, "feature e1.events.Boom")
 
 -- scan：扫真实 features/ 目录，返回提供某约定文件的目录名（按名字排序，不看 list），同一文件只扫一次
-Assert.eq(table.concat(Features.scan("events"), ","), "xray")
+Assert.eq(table.concat(Features.scan("events"), ","), "ai,xray")
 Assert.eq(table.concat(Features.scan("panel"), ","), "ai,animation,bluetooth,demo,fontmap,ime,nightmode,rare,reflow,remote,reviews,translate,xray")
 local settings = Features.scan("setting")
 Assert.contains(settings, "nightmode")
@@ -186,5 +186,6 @@ Assert.eq(Features.scan("events"), Features.scan("events"), "同一文件只扫�
 
 -- listeners：按扫描顺序 require 出各 feature 的约定文件
 local listeners = Features.listeners("events")
-Assert.len(listeners, 1)
-Assert.eq(listeners[1], require("features.xray.events"))
+Assert.len(listeners, 2)
+Assert.eq(listeners[1], require("features.ai.events"))
+Assert.eq(listeners[2], require("features.xray.events"))
