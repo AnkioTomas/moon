@@ -6,18 +6,27 @@
 ---@diagnostic disable: undefined-field, missing-fields, redundant-parameter, missing-parameter, inject-field, assign-type-mismatch, param-type-mismatch, cast-type-mismatch, return-type-mismatch, cast-local-type
 
 local Assert = require("support.assert")
+local JSON = require("support.json_stub")
+package.preload["json"] = function() return JSON end
 
--- injectComic 不读这些，但 prefs.lua 模块加载时会 require。
+local global_data, saved = {}, {}
 _G.G_reader_settings = {
-    data = {},
-    readSetting = function() end,
-    has = function() return false end,
-    saveSetting = function() end,
-    delSetting = function() end,
+    data = global_data,
+    readSetting = function(_self, key) return global_data[key] end,
+    has = function(_self, key) return global_data[key] ~= nil end,
+    saveSetting = function(_self, key, value) global_data[key] = value end,
+    delSetting = function(_self, key) global_data[key] = nil end,
     flush = function() end,
 }
 package.preload["book.books_db"] = function()
-    return { getReaderPrefs = function() end, setReaderPrefs = function() end, mergeReaderPrefs = function() end }
+    return {
+        getReaderPrefs = function(sid, stable_id) return saved[sid .. "\0" .. stable_id] end,
+        setReaderPrefs = function(sid, stable_id, raw) saved[sid .. "\0" .. stable_id] = raw; return true end,
+        mergeReaderPrefs = function(update)
+            for key, raw in pairs(saved) do saved[key] = update(raw) end
+            return true
+        end,
+    }
 end
 package.preload["ui.fonts"] = function()
     return { faceNameForId = function() end, faceForId = function() end }
@@ -26,7 +35,11 @@ package.preload["ui.fonts.reader"] = function()
     return { supports = function() return false end }
 end
 package.preload["book.store"] = function()
-    return { ensureIdentity = function() end, identityFor = function() end }
+    return { ensureIdentity = function() end, identityFor = function(file)
+        if file:match("^/cache/comic/") then
+            return { source_id = "kuaikan", stable_id = "comic", chapter_idx = 2 }
+        end
+    end }
 end
 package.preload["utils.log"] = function()
     return { warn = function() end }
@@ -112,3 +125,54 @@ Assert.eq(fitted.data.zoom_mode, "contentwidth")
 Assert.eq(fitted.data.kopt_page_scroll, 0)
 Assert.is_false(ReaderPrefs.injectComic(fitted, { file = "/cache/kuaikan/4783.cbz" }))
 Assert.eq(fitted.data.kopt_page_gap_height, 0)
+
+-- 没有月读标记的旧章也不能把明确选择的分页覆盖成连续。
+local paged = sidecar({ kopt_page_scroll = 0 })
+ReaderPrefs.injectComic(paged, { file = "/books/paged.cbz" })
+Assert.eq(paged.data.kopt_page_scroll, 0)
+
+-- 漫画没有 CRE 字体模块，仍须在切章前保存当前阅读模式，而不是旧 sidecar 值。
+local identity = { source_id = "kuaikan", stable_id = "comic", chapter_idx = 1 }
+local saves = 0
+local ui = {
+    document = { file = "/cache/comic/1.cbz", configurable = { page_scroll = 0 } },
+    config = { options = { prefix = "kopt" } },
+    doc_settings = sidecar({ kopt_page_scroll = 1 }),
+    handleEvent = function(self, event)
+        Assert.eq(event.handler, "onSaveSettings")
+        saves = saves + 1
+        self.doc_settings:saveSetting("kopt_page_scroll", self.document.configurable.page_scroll)
+    end,
+}
+Assert.is_true(ReaderPrefs.captureAndSave(ui, identity))
+Assert.eq(saves, 1)
+Assert.eq(ReaderPrefs.load(identity).kopt.page_scroll, 0)
+local next_chapter = sidecar()
+ReaderPrefs.injectComic(next_chapter, { file = "/cache/comic/2.cbz" })
+Assert.eq(next_chapter.data.kopt_page_scroll, 0, "新章节必须继承当前书的分页选择")
+Assert.eq(next_chapter.data.zoom_mode, "pagewidth")
+Assert.eq(next_chapter.data.kopt_page_gap_height, 0)
+local old_chapter = sidecar({ book_comic_cbz_fit = true, book_comic_cbz_nogap = true, kopt_page_scroll = 1 })
+ReaderPrefs.injectComic(old_chapter, { file = "/cache/comic/old.cbz" })
+Assert.eq(old_chapter.data.kopt_page_scroll, 0, "已缓存章节的旧模式也不能压过全书偏好")
+local other = sidecar()
+ReaderPrefs.injectComic(other, { file = "/cache/other/1.cbz" })
+Assert.eq(other.data.kopt_page_scroll, 1, "不能把某一本的选择变成全局默认")
+
+-- 保存为默认与普通切章不同：更新全局和已有漫画模式，但不清掉 CRE 排版。
+saved["moon\0novel"] = JSON.encode({ copt = { font_size = 22 }, font_face = "Novel Font" })
+ui.document.configurable.page_scroll = 1
+Assert.is_true(ReaderPrefs.saveDefaults(ui))
+Assert.eq(global_data.kopt_page_scroll, 1)
+Assert.eq(ReaderPrefs.load(identity).kopt.page_scroll, 1)
+Assert.eq(JSON.decode(saved["moon\0novel"]).copt.font_size, 22)
+Assert.eq(JSON.decode(saved["moon\0novel"]).font_face, "Novel Font")
+global_data.kopt_page_scroll = 0
+local default_paged = sidecar()
+ReaderPrefs.injectComic(default_paged, { file = "/books/default.cbz" })
+Assert.eq(default_paged.data.kopt_page_scroll, 0, "明确设置的全局分页优先于漫画默认")
+Assert.is_true(ReaderPrefs.captureAndSave(ui, identity))
+local continued = sidecar()
+ReaderPrefs.injectComic(continued, { file = "/cache/comic/3.CBT" })
+Assert.eq(continued.data.kopt_page_scroll, 1, "手动切回连续同样跨章保留")
+Assert.eq(global_data.kopt_page_scroll, 0, "普通切章不能修改全局分页默认")

@@ -1,5 +1,5 @@
 --[[--
-全书阅读排版偏好：字体 + CRE 边距/字号，按 source_id + stable_id 存 books.reader_prefs。
+全书阅读排版偏好：字体 + CRE 边距/字号、漫画分页/连续模式，按 source_id + stable_id 存 books.reader_prefs。
 
 连续章节每章是独立物理文件；本模块在关书/休眠/切章前捕获当前排版，开章时按书身份写回 sidecar。
 「保存为默认」写 G_reader_settings，并同步覆盖所有已有 reader_prefs；无 per-book 快照的章节书
@@ -42,6 +42,14 @@ local DOC_KEYS = {
 
 --- native_font.lua 为渲染字体选项塞进 configurable 的临时键，不属于排版偏好。
 local SKIP_COPT_KEY = "book_font_face"
+local COMIC_EXT = { cbz = true, cbt = true }
+
+---@param file string|nil
+---@return boolean
+local function isComicArchive(file)
+    local ext = type(file) == "string" and file:match("%.([^.]+)$")
+    return type(ext) == "string" and COMIC_EXT[ext:lower()] == true
+end
 
 local function copyValue(value)
     if type(value) ~= "table" then
@@ -72,11 +80,12 @@ local function idMatchesFace(id, face)
     return Fonts.faceNameForId(id) == face
 end
 
---- 从当前 ReaderUI 采集字体与 copt 排版。
+--- 从当前 ReaderUI 采集 CRE 排版或漫画阅读模式。
 ---@param ui table|nil
 ---@return table|nil
 function M.capture(ui)
-    if not FontReader.supports(ui) then
+    local comic = ui and ui.document and isComicArchive(ui.document.file)
+    if not comic and not FontReader.supports(ui) then
         return nil
     end
     local config = ui.document.configurable
@@ -88,6 +97,9 @@ function M.capture(ui)
     -- 语种/断字、词典偏好、高亮样式…）全是菜单改完尚未落盘的旧值。先广播一次 SaveSettings，
     -- 让各模块把活状态写进内存里的 doc_settings，再采（真正 flush 仍由原生关书路径做）。
     ui:handleEvent(require("ui/event"):new("SaveSettings"))
+    if comic then
+        return { kopt = { page_scroll = config.page_scroll } }
+    end
     -- configurable 就是整套 copt_ 排版状态；逐键白名单会丢字重、字间距等设置。
     local copt = {}
     for key, value in pairs(config) do
@@ -281,6 +293,9 @@ function M.write(doc_settings, prefs)
     for key, value in pairs(prefs.copt or {}) do
         doc_settings:saveSetting("copt_" .. key, copyValue(value))
     end
+    for key, value in pairs(prefs.kopt or {}) do
+        doc_settings:saveSetting("kopt_" .. key, copyValue(value))
+    end
     -- 旧版本存的偏好没有 doc 字段：不动这章自己的微调。有 doc 时缺席即「全书没设」，要清掉。
     if prefs.doc then
         for _idx, key in ipairs(DOC_KEYS) do
@@ -344,8 +359,12 @@ function M.saveDefaults(ui)
     if prefs then
         local merged = BookDB.mergeReaderPrefs(function(raw)
             local existing = decode(raw) or {}
-            existing.copt = copyValue(prefs.copt)
-            existing.font_id, existing.font_name, existing.font_face = prefs.font_id, prefs.font_name, prefs.font_face
+            if prefs.kopt then
+                if existing.kopt then existing.kopt = copyValue(prefs.kopt) end
+            else
+                existing.copt = copyValue(prefs.copt)
+                existing.font_id, existing.font_name, existing.font_face = prefs.font_id, prefs.font_name, prefs.font_face
+            end
             return JSON.encode(existing)
         end)
         if not merged then
@@ -362,16 +381,9 @@ end
 --- 于是每页按内容框 fit width。条漫切片画布同宽、接缝本应对齐，空白更多的一页
 --- 会被放大并左右错开。连续滚动默认还有 kopt_page_gap_height=8 的灰条缝。
 --- 只写 CBZ/CBT，不动 PDF。对齐与去缝各记一次标记，之后尊重用户改动。
+--- 分页/连续模式按书身份恢复，不能把每章的首次默认当成全书的用户选择。
 local COMIC_FIT_KEY = "book_comic_cbz_fit"
 local COMIC_GAP_KEY = "book_comic_cbz_nogap"
-local COMIC_EXT = { cbz = true, cbt = true }
-
----@param file string|nil
----@return boolean
-local function isComicArchive(file)
-    local ext = type(file) == "string" and file:match("%.([^.]+)$")
-    return type(ext) == "string" and COMIC_EXT[ext:lower()] == true
-end
 
 --- DocSettingsLoad：在原生 ReadSettings 之前写入 kopt 默认。
 ---@param doc_settings table
@@ -382,12 +394,22 @@ function M.injectComic(doc_settings, document)
         return false
     end
     local changed = false
+    local identity = Store.identityFor(document.file)
+    local prefs = identity and identity.chapter_idx and M.load(identity)
+    local mode = prefs and prefs.kopt and prefs.kopt.page_scroll
+    if mode ~= nil and doc_settings:readSetting("kopt_page_scroll") ~= mode then
+        doc_settings:saveSetting("kopt_page_scroll", mode)
+        changed = true
+    end
     if not doc_settings:readSetting(COMIC_FIT_KEY) then
         -- 3=none，4=page，1=width：与 koptoptions / ReaderZooming 的取值一致。
         doc_settings:saveSetting("kopt_trim_page", 3)
         doc_settings:saveSetting("kopt_zoom_mode_genus", 4)
         doc_settings:saveSetting("kopt_zoom_mode_type", 1)
-        doc_settings:saveSetting("kopt_page_scroll", 1)
+        if doc_settings:readSetting("kopt_page_scroll") == nil then
+            local default = G_reader_settings:readSetting("kopt_page_scroll")
+            doc_settings:saveSetting("kopt_page_scroll", default ~= nil and default or 1)
+        end
         doc_settings:saveSetting("zoom_mode", "pagewidth")
         doc_settings:saveSetting(COMIC_FIT_KEY, true)
         changed = true
