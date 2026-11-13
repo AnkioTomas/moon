@@ -18,6 +18,7 @@ package.preload["device"] = function()
             scaleBySize = function(_, n) return n end,
         },
         hasWifiToggle = function() return true end,
+        hasGSensor = function() return false end,
     }
 end
 -- registry 一次性加载全部动作模块，font 动作会拉真身 ui.fonts（ui/font + fontlist）
