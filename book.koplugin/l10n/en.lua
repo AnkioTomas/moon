@@ -1,4 +1,5 @@
 return {
+    ["漫画备份尚未恢复，请先恢复：%s"] = "The comic backup has not been restored. Restore it first: %s",
     ["数据清理"] = "Data cleanup",
     ["选择书源，清理本机书籍或阅读记录"] = "Choose a source and clear local book or reading records",
     ["书籍本地记录"] = "Local book records",
