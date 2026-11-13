@@ -52,6 +52,7 @@ package.preload["device"] = function()
             getHeight = function() return 800 end,
         },
         hasWifiToggle = function() return true end,
+        hasGSensor = function() return false end,
         hasFrontlight = function() return has_frontlight end,
         hasNaturalLight = function() return has_natural_light end,
         canSuspend = function() return can_suspend end,

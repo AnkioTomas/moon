@@ -388,6 +388,7 @@ function Kit.install(theme)
             },
             hasKeys = function() return false end,
             hasFewKeys = function() return false end,
+            hasGSensor = function() return false end,
             hasEinkScreen = function() return true end,
             isSDL = function() return false end,
             input = { group = { Back = "Back" } },
