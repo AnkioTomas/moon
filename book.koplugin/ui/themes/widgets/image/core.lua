@@ -25,6 +25,7 @@ UI 图标请用 ui.themes.widgets.icon（Material Icons 字体），不要走本
 
   Image.fetchAsync(url, headers, function(path, err) end)  -- 只下载不显示（刮削封面）
   Image.invalidate(path)  -- 原地替换过的文件，之后绕过按路径的位图缓存
+  Image.releaseCachedBitmaps()  -- 只释放缓存位图，供 fork 子进程瘦身
   Image.await(root, cb)  -- 已构建树内的图片落定后回调（锁屏写 PNG）
   box:cancel()  -- 只取消这一张的下载
 
@@ -113,6 +114,25 @@ function Image.invalidateAll()
         replaced[item.path] = true
         dropBitmap(key)
     end
+end
+
+--- 释放本进程位图缓存里的 BlitBuffer 并清空表。不标记文件已替换。
+--- 只给 fork 子进程瘦身用；父进程调用会拆掉仍在显示的封面位图。
+---@param release fun(bb: table)|nil 缺省直接 bb:free()
+---@return integer 释放的张数
+function Image.releaseCachedBitmaps(release)
+    local n = 0
+    for key, item in pairs(bitmaps) do
+        local bb = item.bb
+        dropBitmap(key)
+        if release then
+            release(bb)
+        elseif bb and bb.free then
+            bb:free()
+        end
+        n = n + 1
+    end
+    return n
 end
 
 --- 标记文件内容已被替换（刮削换封面），之后显示该路径不再命中旧位图。

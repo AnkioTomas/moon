@@ -509,6 +509,45 @@ do
     fit:free()
 end
 
+-- fork 子进程瘦身：只释放缓存位图，不把路径标成已替换。
+do
+    local slim_path = Config.dir() .. "/image-slim-test.png"
+    local slim_file = assert(io.open(slim_path, "wb"))
+    slim_file:write("slim")
+    slim_file:close()
+    local slim_frees, slim_renders, fail_free = 0, 0, false
+    package.loaded["ui/renderimage"].renderImageFile = function(_, path, _, w, h)
+        slim_renders = slim_renders + 1
+        return {
+            stride = w * px_bytes,
+            h = h,
+            free = function()
+                if fail_free then error("bitmap free failed") end
+                slim_frees = slim_frees + 1
+            end,
+        }
+    end
+    Image.releaseCachedBitmaps()
+    local slim_w = big()
+    local first = Image.widget{ src = slim_path, width = slim_w, height = 200 }
+    Stubs.flush()
+    Assert.eq(slim_renders, 1)
+    Assert.eq(Image.releaseCachedBitmaps(), 1)
+    Assert.eq(slim_frees, 1)
+    first:free()
+    local second = Image.widget{ src = slim_path, width = slim_w, height = 200 }
+    Stubs.flush()
+    Assert.eq(slim_renders, 2, "缓存已清空，需要重新解码")
+    local third = Image.widget{ src = slim_path, width = slim_w, height = 200 }
+    Assert.eq(slim_renders, 2, "未标记替换，同尺寸应再次命中缓存")
+    second:free()
+    third:free()
+    fail_free = true
+    Assert.errors(function() Image.releaseCachedBitmaps() end, "bitmap free failed")
+    Assert.eq(slim_frees, 1, "失败不能当成释放成功")
+    os.remove(slim_path)
+end
+
 os.remove(image_path)
 os.remove(cached_file)
 package.loaded["ui/renderimage"] = nil

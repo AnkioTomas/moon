@@ -8,6 +8,7 @@
 
 Job.run 对 fork 任务只做发布；workers.system 按设备性能限流。
 子进程禁止碰 sqlite；库操作必须走 instant。
+fork 之后、跑任务之前会定向丢掉位图缓存（workers.slim），结束仍走 runInSubProcess 的 _exit。
 
 结果经 JSON 回传（函数 / userdata / 循环引用传不回，单帧上限 Protocol.MAX_FRAME 4MB）；progress 每调一次写一帧，调用方自己节流。
 on_done / on_failed / on_cancelled 恰好触发一个；排队中的 fork 任务也能取消。子进程里 Job.inSubProcess() 为真。
@@ -232,6 +233,12 @@ function Job:_start()
     self.decoder = Protocol.newDecoder()
     local pid, read_fd = ffiUtil.runInSubProcess(function(_pid, write_fd)
         in_child = true
+        local slim_ok, slim_err = pcall(function()
+            require("workers.slim").afterFork()
+        end)
+        if not slim_ok then
+            logger.warn("book.worker slim failed", slim_err)
+        end
         local function send(message) return writeFrame(write_fd, message) end
         local ok, result = xpcall(worker, debug.traceback, function(value)
             send({ type = "progress", value = value })
