@@ -406,4 +406,66 @@ Stubs.flush()
 Assert.eq(raced.state, "done")
 Assert.eq(#warnings, warnings_before)
 util.on_collect = nil
+
+-- fork 子进程先瘦身再跑 worker；同一进程里的假 child 会把 in_child 留下，测完要拨回去。
+local Posix = require("ffi/posix")
+local slim_order = {}
+package.loaded["workers.slim"] = {
+    afterFork = function() slim_order[#slim_order + 1] = "slim" end,
+}
+Posix.write = function(_, buffer, size)
+    util.pending = util.pending .. require("ffi").string(buffer, size)
+    return size
+end
+util.alive = false
+util.pending = ""
+util.run = function(func)
+    func(99, 7)
+    return 99, 8
+end
+local slim_result
+local slimmed = Job.run(function()
+    slim_order[#slim_order + 1] = "worker"
+    Assert.is_true(Job.inSubProcess())
+    return { ok = true }
+end, {
+    name = "test.slim",
+    kind = "light",
+    on_done = function(value) slim_result = value end,
+})
+Stubs.flush()
+Assert.eq(slim_order[1], "slim")
+Assert.eq(slim_order[2], "worker")
+Assert.len(slim_order, 2)
+Assert.eq(slimmed.state, "done")
+Assert.is_true(slim_result.ok)
+
+-- 瘦身异常必须记录，但不能把用户任务一起判失败。
+package.loaded["workers.slim"].afterFork = function() error("slim release failed") end
+util.pending = ""
+local warning_count = #warnings
+local fallback_result
+local fallback = Job.run(function() return { ok = true } end, {
+    name = "test.slim-failed",
+    kind = "light",
+    on_done = function(value) fallback_result = value end,
+})
+Stubs.flush()
+Assert.eq(fallback.state, "done")
+Assert.is_true(fallback_result.ok)
+Assert.eq(#warnings, warning_count + 1)
+Assert.matches(warnings[#warnings], "book.worker slim failed")
+Assert.matches(warnings[#warnings], "slim release failed")
+
+local in_fn = Job.inSubProcess
+for i = 1, 8 do
+    local name = debug.getupvalue(in_fn, i)
+    if name == "in_child" then
+        debug.setupvalue(in_fn, i, false)
+        break
+    end
+end
+Assert.is_false(Job.inSubProcess())
+package.loaded["workers.slim"] = nil
+
 ffi.C = real_c
