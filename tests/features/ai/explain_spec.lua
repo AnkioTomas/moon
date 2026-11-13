@@ -6,6 +6,9 @@ local Assert = require("support.assert")
 
 package.preload["l10n"] = function() return { apply = function() end } end
 package.preload["gettext"] = function() return function(value) return value end end
+package.preload["utils.settings"] = function()
+    return { get = function() return { ai_chapter_summary = false } end }
+end
 package.preload["ffi/util"] = function()
     return { template = function(fmt, a) return (fmt:gsub("%%1", tostring(a))) end }
 end
