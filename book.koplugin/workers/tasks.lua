@@ -29,6 +29,7 @@ restartable 的任务归队列所有，队列可以随时中断并从头重跑�
       end,
       retryable = function(result) end,     -- 可省；真则退避重试（最多 3 次；result.progressed 为真的尝试不计数）
       on_done = function(result) end,       -- 可省；最终结束时调一次，取消不调
+      on_cancel = function(reason) end,     -- 可省；主动取消 / 排队替换时调，休眠暂停不调
   }
   task.cancel()
 
@@ -61,6 +62,7 @@ local Tasks = {}
 ---@field run fun(report: fun(text: string|nil, count: integer|nil, total: integer|nil), done: fun(result: table)): table|nil
 ---@field retryable (fun(result: table): boolean)|nil
 ---@field on_done fun(result: table)|nil
+---@field on_cancel fun(reason: "cancelled"|"replaced")|nil
 ---@field state "queued"|"running"|"retry_wait"|"waiting"|"finished"|"cancelled"|nil
 ---@field done boolean|nil
 ---@field result table|nil
@@ -118,7 +120,7 @@ local function syncAwake()
     Awake.hold("tasks", want)
 end
 
---- 通知观察者；订阅者只是 UI，绝不拥有或取消任务。
+--- 通知观察者：刷新界面、补入业务待办；观察句柄不拥有任务。
 local function flushChanged()
     change_scheduled = false
     syncAwake()
@@ -292,7 +294,8 @@ start = function(task)
 end
 
 ---@param task BookTask
-local function cancel(task)
+---@param reason "cancelled"|"replaced"|nil
+local function cancel(task, reason)
     if task.done then return end
     task.done = true
     task.state = "cancelled"
@@ -304,6 +307,9 @@ local function cancel(task)
     task.handle = nil
     remove(task)
     if handle then handle:cancel() end
+    if task.on_cancel then
+        Guard.call("task on_cancel " .. task.kind, task.on_cancel, reason or "cancelled")
+    end
     changed()
     startNext()
 end
@@ -319,7 +325,7 @@ function Tasks.enqueue(spec)
     local existing = by_key[spec.key]
     if existing then
         if existing.state ~= "queued" then return nil, "running" end
-        cancel(existing)
+        cancel(existing, "replaced")
     end
     -- 同类并行时在跑的也会无限增长，上限按全部未结束任务算。
     if #list >= MAX_PENDING then return nil, "queue_full" end

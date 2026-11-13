@@ -39,6 +39,22 @@ end
 
 local Tasks = require("workers.tasks")
 
+do -- 取消通知只对应取消，不能把休眠暂停误当成用户撤销。
+    local reasons = {}
+    local task = Tasks.enqueue{
+        key = "cancel-hook", kind = "cache", restartable = true,
+        run = function() return { cancel = function() end } end,
+        on_cancel = function(reason) reasons[#reasons + 1] = reason end,
+    }
+    Tasks.onSuspend()
+    Assert.len(reasons, 0)
+    Tasks.onResume()
+    task.cancel()
+    Assert.eq(reasons[1], "cancelled")
+    task.cancel()
+    Assert.len(reasons, 1)
+end
+
 --- 造一个手动控制完成的任务；runs 记录每次启动的 { report, done, cancelled }。
 local function spec(key, kind, extra)
     local runs = {}
@@ -472,6 +488,26 @@ do
     Assert.not_nil(Tasks.get("dirty\0wechat2"))
     Tasks.get("dirty\0wechat2").cancel()
     Assert.len(Tasks.tasks(), 0)
+end
+
+do
+    local blocker = Tasks.enqueue(spec("cancel-blocker", "sync"))
+    local reason
+    local old = Tasks.enqueue(spec("replace-hook", "cache", {
+        on_cancel = function(value) reason = value end,
+    }))
+    Assert.eq(old.state, "queued")
+    local replacement = Tasks.enqueue(spec("replace-hook", "cache"))
+    Assert.eq(reason, "replaced")
+    Assert.eq(Tasks.get("replace-hook"), replacement)
+    replacement.cancel()
+    local broken = Tasks.enqueue(spec("broken-cancel-hook", "cache", {
+        on_cancel = function() error("cancel hook failed") end,
+    }))
+    broken.cancel()
+    Assert.contains(guarded, "task on_cancel cache")
+    Assert.is_nil(Tasks.get("broken-cancel-hook"))
+    blocker.cancel()
 end
 
 -- 未结束任务满 64 个后拒绝入队，带 queue_full（同类并行时在跑的也算）。

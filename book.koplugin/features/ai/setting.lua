@@ -36,6 +36,12 @@ function Setting.entries(desktop)
                             callback = function()
                                 cfg[key] = not on
                                 MoonSettings.save("ai", cfg)
+                                if key == "ai_chapter_summary" and cfg[key] then
+                                    local _count, err = require("features.ai.summary").resume()
+                                    if err and err ~= "queue_full" then
+                                        require("ui.themes.widgets.toast"):new{ text = err }:show()
+                                    end
+                                end
                                 desktop:updateView()
                             end,
                         })
@@ -46,7 +52,7 @@ function Setting.entries(desktop)
                         title = _("阅读助手"),
                         rows = {
                             toggle("ai_chapter_summary", "summarize", _("读完章节自动生成摘要"),
-                                _("顺着读完一章后在后台生成，会消耗 API 额度")),
+                                _("顺读后后台生成，退出可续；长按「回顾前文」重试，会消耗 API 额度")),
                             toggle("ai_recap", "history", _("开书时显示前情提要"),
                                 _("隔 3 天以上再读时显示最近几章摘要")),
                         },

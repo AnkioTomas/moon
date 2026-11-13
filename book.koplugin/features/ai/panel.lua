@@ -27,6 +27,9 @@ function Panel.actions()
             run = function()
                 require("features.ai.recap").show()
             end,
+            hold = function()
+                require("features.ai.summary").retryCurrent()
+            end,
         },
         {
             id = "ai_report",

@@ -210,7 +210,8 @@ Assert.eq(#Themed.all("input"), inputs_before)
 Assert.eq(shown[#shown].text, "网络不可用，请先连接 Wi-Fi")
 
 -- 手势：登记 book_ai_ask；没文档不处理，未配置提示，配置好弹问书
-Ai.onCreate()
+local plugin = { ui = ui }
+Ai.onCreate(plugin)
 Assert.eq(actions.book_ai_ask.event, "BookAiAsk")
 Assert.is_true(actions.book_ai_ask.reader)
 Assert.is_false(Ai.events.BookAiAsk({ ui = {} }))
@@ -221,3 +222,4 @@ Assert.eq(shown[#shown].text, "请先在月读设置中配置 AI 服务")
 configured = true
 Assert.is_true(Ai.events.BookAiAsk({ ui = ui }))
 Assert.eq(Themed.last("input").title, "问书")
+Ai.onExit(plugin)
