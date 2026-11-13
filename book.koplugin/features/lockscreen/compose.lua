@@ -161,6 +161,8 @@ function M.build(plan, cb)
                 if not ok then
                     return { ok = false, err = render_err and tostring(render_err) or "render failed" }
                 end
+                -- 留存最近若干张，供远程管理预览/下载；失败不影响本次合成结果。
+                require("features.lockscreen.history").record(COMPOSE_PATH)
                 return { ok = true, transparent = transparent or false }
             end, {
                 name = "lockscreen.compose",

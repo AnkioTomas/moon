@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<!-- 锁屏壁纸历史页（features/lockscreen 经 web.routes 开放；顶栏入口由 /js.js 按 /api/pages 补上；逻辑在 /lockscreen.js，接口 /api/lockscreen/list） -->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>锁屏壁纸历史 - 远程管理</title>
+<link rel="icon" href="/favicon.ico?v=2" sizes="16x16 32x32 48x48">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png?v=2">
+<meta name="theme-color" content="#263a52">
+<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/lockscreen.css">
+<script>try{var t=localStorage.getItem('moon-theme');if(t==='light'||t==='dark')document.documentElement.setAttribute('data-theme',t);var l=localStorage.getItem('moon-lang');if(l&&!/^zh_CN/.test(l))document.documentElement.classList.add('i18n-wait')}catch(e){}</script>
+</head>
+<body class="file-page lockscreen-page">
+<header class="appbar"><div class="appbar-inner">
+<a class="appbar-brand" href="/"><img src="/logo.jpg" alt="" width="28" height="28"><span>月读远程管理</span></a>
+<nav class="appbar-nav" aria-label="页面导航"><a href="/"><span>首页</span></a><a href="/file.html"><span>文件</span></a><a href="/input.html"><span>输入</span></a><a href="/clipboard.html"><span>剪贴板</span></a><a href="/settings.html"><span>配置</span></a><a href="/update.html"><span>更新</span></a></nav>
+<button type="button" id="theme-toggle" class="icon-btn" aria-label="切换主题" title="主题：跟随系统"><svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 18V4a8 8 0 0 1 0 16z"/></svg></button>
+</div></header>
+
+<main class="file-main">
+<div class="command-bar">
+<h1 id="list-title">锁屏壁纸历史</h1>
+<span id="status" class="count-badge" aria-live="polite">正在加载…</span>
+</div>
+<div id="grid" class="lockscreen-grid"></div>
+</main>
+
+<div id="toasts" class="sub-toasts" aria-live="polite"></div>
+
+<script src="/js.js"></script>
+<script src="/lockscreen.js"></script>
+</body>
+</html>

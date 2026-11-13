@@ -1,0 +1,41 @@
+/* 锁屏壁纸历史页：外壳沿用 /style.css，这里只画网格卡片。 */
+.lockscreen-page .file-main { max-width: 1280px; }
+.lockscreen-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 14px;
+    padding: 14px 16px;
+}
+.lockscreen-card {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    overflow: hidden;
+    border: 1px solid var(--row-rule);
+    border-radius: var(--radius);
+    background: var(--surface);
+}
+.lockscreen-card:hover { background: var(--hover); }
+.lockscreen-card img {
+    width: 100%;
+    height: 240px;
+    object-fit: contain;
+    background: var(--pill-bg);
+}
+.lockscreen-meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 8px;
+    padding: 8px 10px;
+    font-size: 12px;
+}
+.lockscreen-time { flex: 1 1 auto; min-width: 0; overflow: hidden; color: var(--fg); text-overflow: ellipsis; white-space: nowrap; }
+.lockscreen-size { color: var(--dim); }
+.lockscreen-meta .file-action { min-height: 28px; padding: 0 10px; font-size: 12px; text-decoration: none; }
+.lockscreen-empty { grid-column: 1 / -1; padding: 32px 16px; color: var(--dim); text-align: center; }
+.lockscreen-empty strong { display: block; margin-bottom: 6px; color: var(--fg); font-size: 15px; font-weight: 500; }
+@media (max-width: 720px) {
+    .lockscreen-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; padding: 10px; }
+    .lockscreen-card img { height: 180px; }
+}

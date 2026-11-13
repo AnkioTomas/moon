@@ -19,6 +19,7 @@ Setting.defaults = {
     lock_screen_poster_sort = "recent_read",
     lock_screen_insight_page = "random",
     lock_screen_custom_message = "读书不觉已春深，一寸光阴一寸金。",
+    lock_screen_history_limit = "20",
 }
 
 --- 无默认值的持久键：当天生成标记、高亮轮换、用户选的自定义图 / 壁纸文件夹、背景主体拆分迁移标记、文字海报版式与字体。

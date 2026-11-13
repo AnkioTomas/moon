@@ -72,14 +72,16 @@ local function navRow(opts)
 end
 
 --- 单选行：选中新值写配置并重出图；apply 返回 false 表示还没定（如另开了选择器），不重出图。
+--- opts.no_recompose：设置不影响锁屏图内容，只重建设置页。
 ---@param desktop table
----@param opts table Row.choice 参数（width / on_select 由本函数补上）外加 apply: fun(value: string): boolean|nil
+---@param opts table Row.choice 参数（width / on_select 由本函数补上）外加 apply: fun(value: string): boolean|nil、no_recompose?: boolean
 ---@return fun(iw: number): table
 local function choiceRow(desktop, opts)
     return function(iw)
         opts.width = iw
         opts.on_select = function(value)
             if opts.apply(value) == false then return end
+            if opts.no_recompose then return desktop:updateView() end
             refreshAfterChange(desktop)
         end
         return Row.choice(opts)
@@ -309,6 +311,19 @@ function Lockscreen:rows(desktop)
             end,
         }
     end
+
+    local History = require("features.lockscreen.history")
+    local tier = History.tier()
+    rows[#rows + 1] = choiceRow(desktop, {
+        icon = "history", title = _("历史壁纸"), status = History.limitLabel(tier),
+        items = {
+            { text = History.limitLabel("off"), value = "off" },
+            { text = History.limitLabel("10"), value = "10" },
+            { text = History.limitLabel("20"), value = "20" },
+            { text = History.limitLabel("50"), value = "50" },
+        },
+        current = tier, apply = Settings.setHistoryLimit, no_recompose = true,
+    })
 
     local path = generatedPath()
     if path then

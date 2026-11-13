@@ -8,6 +8,7 @@ KOReader 先 Screensaver:setup/show 再广播 Suspend。电源键路径上绝不
 @module koplugin.book.features.lockscreen
 --]]
 
+local Ext = require("utils.extension")
 local lfs = require("libs/libkoreader-lfs")
 local Compose = require("features.lockscreen.compose")
 local Cycle = require("features.lockscreen.cycle")
@@ -15,6 +16,22 @@ local Settings = require("features.lockscreen.settings")
 local MoonSettings = require("utils.settings")
 local Perf = require("utils.perf")
 local logger = require("utils.log")
+
+-- 远程管理页与接口（/lockscreen.html、/api/lockscreen/list）；顶层只碰挂点，不拉界面模块。
+Ext.add("web.routes", {
+    name = "lockscreen",
+    dir = (debug.getinfo(1, "S").source:match("^@(.+)/[^/]+$") or ".") .. "/web",
+    assets = { "lockscreen.html", "lockscreen.js", "lockscreen.css" },
+    page = {
+        href = "/lockscreen.html", title = "锁屏壁纸", title_long = "锁屏壁纸历史", tile = "tile-slate",
+        desc = "预览与下载最近生成的锁屏壁纸。",
+        icon = "M3 3h8v8H3V3zm10 0h8v8h-8V3zM3 13h8v8H3v-8zm10 0h8v8h-8v-8z",
+    },
+    l10n = "features.lockscreen.l10n.web",
+    handle = function(method, action, params, cb)
+        require("features.lockscreen.remote").handle(method, action, params, cb)
+    end,
+})
 
 local M = {}
 local job

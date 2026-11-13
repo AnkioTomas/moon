@@ -233,6 +233,15 @@ function M.setBillPeriod(period)
     if require("features.lockscreen.components.bill").validPeriod(period) then save("lock_screen_bill_period", period) end
 end
 
+--- 设置历史壁纸保留数量；非法值忽略。
+--- 不走 save()：历史档位不影响锁屏图内容，不该让当前图失效再重出一次。
+---@param tier string "off"|"10"|"20"|"50"
+function M.setHistoryLimit(tier)
+    if not require("features.lockscreen.history").validLimit(tier) then return end
+    MoonSettings.get("features.lockscreen").lock_screen_history_limit = tier
+    MoonSettings.save("features.lockscreen")
+end
+
 --- 设置海报墙风格；非法值忽略。
 ---@param style string
 function M.setPosterStyle(style)

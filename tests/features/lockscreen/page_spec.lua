@@ -128,7 +128,7 @@ local desktop = {
 
 has_ads = true
 local ad_rows = Lockscreen:rows(desktop)
-Assert.len(ad_rows, 4, "广告版 Kindle 多一行去广告提醒")
+Assert.len(ad_rows, 5, "广告版 Kindle 多一行去广告提醒")
 ad_rows[2]({}).callback()
 local ad_confirm = Themed.last("confirm")
 remove_ok = false
@@ -144,7 +144,7 @@ log = {}
 has_ads = false
 
 local rows = Lockscreen:rows(desktop)
-Assert.len(rows, 3, "非海报墙背景没有「海报风格」行")
+Assert.len(rows, 4, "非海报墙背景没有「海报风格」行")
 rows[2]({}).callback()
 local popup = Themed.last("list")
 Assert.not_nil(popup)
@@ -171,7 +171,7 @@ Assert.eq(log[#log], "show:生成失败: boom")
 -- 海报墙背景：背景下面多「海报风格」「海报排序」，选中后写配置并走同一条刷新链路。
 background_mode = "poster"
 local poster_rows = Lockscreen:rows(desktop)
-Assert.len(poster_rows, 5)
+Assert.len(poster_rows, 6)
 local style_row = poster_rows[3]({})
 Assert.eq(style_row.title, "海报风格")
 Assert.eq(style_row.status, "竖屏排版")
@@ -200,7 +200,7 @@ Assert.len(ticks, 1)
 -- 自定义背景：多一行「选择图片」，只列图片文件；所在目录不存在时从主目录开始。
 component_id, background_mode = "current", "custom"
 local custom_rows = Lockscreen:rows(desktop)
-Assert.len(custom_rows, 4)
+Assert.len(custom_rows, 5)
 local pick = custom_rows[3]({})
 Assert.eq(pick.title, "选择图片")
 Assert.matches(pick.subtitle, "^/nonexistent/custom%.png · 600 × 800$")
@@ -268,7 +268,7 @@ package.preload["ui.hitokoto_settings"] = function()
 end
 component_id, background_mode = "hitokoto", "bing"
 local hitokoto_rows = Lockscreen:rows(desktop)
-Assert.len(hitokoto_rows, 5, "一言主体多「联网刷新」和「句子类型」两行")
+Assert.len(hitokoto_rows, 6, "一言主体多「联网刷新」和「句子类型」两行")
 local ttl_row = hitokoto_rows[4]({})
 Assert.eq(ttl_row.title, "联网刷新")
 Assert.eq(ttl_row.status, "1 小时")
