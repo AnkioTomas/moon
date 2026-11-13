@@ -377,31 +377,20 @@ local function requestChapter(chapter, idx, opts)
         end
         UIManager:nextTick(function()
             if chapter_session ~= chapter then return end
-            require("source.cbz").ensureAsync(path, function(fitted, fit_err)
-                if chapter_session ~= chapter then return end
-                if not fitted then
-                    span:finish(Chapter.SLOW_SWITCH_MS, idx, "failed")
-                    chapter.target = nil
-                    failRequest(chapter, fit_err or _("章节打开失败"))
-                    return
-                end
-                path = fitted
-                chapter.target.path = fitted
-                chapter.switching = true
-                local ok, switch_err = pcall(function()
-                    if ReaderUI.instance then
-                        ReaderUI.instance:switchDocument(path, true)
-                    else
-                        ReaderUI:showReader(path, nil, true)
-                    end
-                end)
-                span:lap("switch"):finish(Chapter.SLOW_SWITCH_MS, idx)
-                if not ok and chapter_session == chapter then
-                    chapter.switching = false
-                    chapter.target = nil
-                    failRequest(chapter, tostring(switch_err or _("章节打开失败")))
+            chapter.switching = true
+            local ok, switch_err = pcall(function()
+                if ReaderUI.instance then
+                    ReaderUI.instance:switchDocument(path, true)
+                else
+                    ReaderUI:showReader(path, nil, true)
                 end
             end)
+            span:lap("switch"):finish(Chapter.SLOW_SWITCH_MS, idx)
+            if not ok and chapter_session == chapter then
+                chapter.switching = false
+                chapter.target = nil
+                failRequest(chapter, tostring(switch_err or _("章节打开失败")))
+            end
         end)
     end)
 end
