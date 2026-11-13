@@ -159,6 +159,9 @@ function Setting.rows()
             })
         end,
     }
+    if require("source.legado.client").mode() == "app" then
+        rows[#rows + 1] = require("source.review_setting").row(SOURCE_ID)
+    end
     if require("source.legado.client").base() ~= nil then
         rows[#rows + 1] = require("source.logout").row(SOURCE_ID, _("确定退出开源阅读？"), function()
             local settings = require("utils.settings")

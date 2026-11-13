@@ -193,7 +193,7 @@ end
 Source.refreshTocAsync = fetchTocAsync
 
 ---@return ChapterFetchContent
-local function contentFetcher()
+local function contentFetcher(reviews)
     return function(identity, chapter, done)
         local cancelled = false
         ---@type { job: CancelHandle|nil }|nil
@@ -244,10 +244,11 @@ local function contentFetcher()
                 fetchAsset(text)
                 return
             end
-            local html = Mapper.chapterHtml(chapter.title, text, Client.imageUrl)
+            local html = Mapper.chapterHtml(chapter.title, text, Client.imageUrl, Client.mode() == "app")
             -- 只有 <h1> 没有段落 = 服务器给的是空白正文，不能当成功落盘缓存。
             if not html:find("<p", 1, true) then done(nil, _("阅读章节内容为空")); return end
-            done({ title = chapter.title, html = html })
+            done({ title = chapter.title,
+                html = reviews and require("book.review_locate").prepareChapterEnd(html) or html })
         end)
         return { cancel = function()
             cancelled = true
@@ -260,21 +261,101 @@ end
 
 function Source:openBookAsync(identity, opts, cb)
     local Chapter = require("source.chapter")
+    local reviews = self:paragraphReviewsEnabled()
     local open = opts and opts.chapter_idx and Chapter.openAsync or Chapter.openWithUi
     return open(self, identity, identity.book, opts, {
         loadToc = function(ref, done) return self:loadTocAsync(ref, done) end,
-        fetchContent = contentFetcher(),
+        fetchContent = contentFetcher(reviews),
+        reuse = reviews and require("book.review_locate").reuseChapterEnd or nil,
     }, cb)
 end
 
 function Source:prefetchChaptersAsync(identity, toc, from_idx, count, cb)
+    local reviews = self:paragraphReviewsEnabled()
     return require("source.chapter").prefetchAsync(identity, identity.book, toc, from_idx, count, {
-        fetchContent = contentFetcher(),
+        fetchContent = contentFetcher(reviews),
+        reuse = reviews and require("book.review_locate").reuseChapterEnd or nil,
     }, cb)
 end
 
 function Source:cacheAllChaptersAsync(identity, on_progress, cb, range)
-    return require("source.chapter").cacheAllAsync(self, identity, contentFetcher(), on_progress, cb, 0, range)
+    return require("source.chapter").cacheAllAsync(self, identity, contentFetcher(self:paragraphReviewsEnabled()),
+        on_progress, cb, 0, range)
+end
+
+function Source:paragraphReviewsEnabled()
+    return Client.mode() == "app" and require("source.review_setting").enabled(self.id)
+end
+
+local function hotspotsAsync(self, identity, cb)
+    return require("book.review_cache").hotspotsAsync(identity, function(done)
+        return require("source.with_chapter_uid").run(self, identity, _("缺少阅读章节位置"), function(uid, finish)
+            return Client.reviewSummaryAsync(identity.stable_id, tonumber(uid), function(data, err)
+                if data == nil then finish(nil, err or _("阅读段评响应无效")); return end
+                finish(require("source.legado.reviews").hotspots(data))
+            end)
+        end, done)
+    end, cb)
+end
+
+function Source:paragraphHotspotsAsync(identity, cb)
+    return hotspotsAsync(self, identity, function(list, err)
+        if not list then cb(nil, err); return end
+        local out = {}
+        for _idx, spot in ipairs(list) do
+            if spot.paragraph > 0 then out[#out + 1] = spot end
+        end
+        cb(out)
+    end)
+end
+
+function Source:chapterReviewHotspotsAsync(identity, cb)
+    return hotspotsAsync(self, identity, function(list, err)
+        if not list then cb(nil, err); return end
+        local out = {}
+        for _idx, spot in ipairs(list) do
+            if spot.paragraph == -1 then
+                out[#out + 1] = { range = spot.range, text = _("本章讨论"), total = spot.total,
+                    badge = tostring(spot.total), heading = _("章节评论"),
+                    anchor = require("book.review_locate").CHAPTER_ANCHOR }
+            end
+        end
+        cb(out)
+    end)
+end
+
+function Source:locateHotspots(hotspots, html)
+    return require("source.legado.reviews").locate(hotspots, html)
+end
+
+local function reviewPageAsync(self, identity, range, max_idx, reply, cb)
+    local Reviews = require("source.legado.reviews")
+    local context, err = Reviews.context(range, reply)
+    if not context then return SourceBase.defer(cb, nil, err) end
+    local page, cursor, reason = Reviews.pagination(max_idx)
+    if not page then return SourceBase.defer(cb, nil, reason) end
+    return require("book.review_cache").pageAsync(identity, (reply and "reply:" or "") .. range, max_idx, function(done)
+        return require("source.with_chapter_uid").run(self, identity, _("缺少阅读章节位置"), function(uid, finish)
+            local function onPage(data, error)
+                if data == nil then finish(nil, error or _("阅读段评响应无效")); return end
+                finish(Reviews.page(data, context, page))
+            end
+            if reply then
+                return Client.reviewRepliesAsync(identity.stable_id, tonumber(uid), context[1], context[2],
+                    context[3], page, onPage)
+            end
+            return Client.reviewDetailAsync(identity.stable_id, tonumber(uid), context[1], context[2],
+                page, cursor, onPage)
+        end, done)
+    end, cb)
+end
+
+function Source:paragraphReviewPageAsync(identity, range, max_idx, cb)
+    return reviewPageAsync(self, identity, range, max_idx, false, cb)
+end
+
+function Source:paragraphReviewRepliesAsync(identity, review_id, max_idx, cb)
+    return reviewPageAsync(self, identity, review_id, max_idx, true, cb)
 end
 
 return Legado
