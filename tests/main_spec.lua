@@ -137,6 +137,10 @@ local READING_EVENTS = {
 local session_stub = {
     onSuspend = function() calls.session = calls.session or {} ; calls.session.suspend = true end,
     onResume = function() calls.session = calls.session or {} ; calls.session.resume = true end,
+    onNetworkConnected = function(host)
+        calls.session = calls.session or {}
+        calls.session.network = host
+    end,
 }
 local reading = {}
 for _, name in ipairs(READING_EVENTS) do
@@ -275,6 +279,7 @@ do
     plugin.ui = { menu = menu } -- FM
     local before = #source_hooks
     plugin:onNetworkConnected()
+    Assert.eq(calls.session.network, plugin, "联网通知阅读会话补刷目录")
     Assert.eq(source_hooks[#source_hooks], "pushDirty:moon")
     Assert.eq(#source_hooks - before, 1, "联网推脏行")
     Assert.eq(calls.lock_refresh, 0, "锁屏刷新由 feature onNetworkConnected 负责")
@@ -424,7 +429,7 @@ Assert.eq(reader_settings.start_with, "filemanager", "取消即回到文件管�
 for _, label in ipairs({
     "init", "onShow", "addToMainMenu", "openShelf",
     "tasks.onSuspend", "session.onSuspend", "tasks.onResume", "session.onResume",
-    "tasks.onNetworkConnected", "sources.pushDirty",
+    "tasks.onNetworkConnected", "session.onNetworkConnected", "sources.pushDirty",
 }) do
     Assert.is_true(guard_labels[label] or false, label .. " 经 guard")
 end

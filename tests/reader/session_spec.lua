@@ -120,6 +120,7 @@ package.preload["book.store"] = function()
         }
 end
 local toc_allow_refresh = true
+local toc_refresh_checks = 0
 package.preload["source.toc"] = function()
     return {
         peek = function(_source_id, stable_id)
@@ -138,7 +139,10 @@ package.preload["source.toc"] = function()
             if stale then return stored_toc[stable_id] or stale_toc[stable_id] end
             return stored_toc[stable_id]
         end,
-        allowRefresh = function() return toc_allow_refresh end,
+        allowRefresh = function()
+            toc_refresh_checks = toc_refresh_checks + 1
+            return toc_allow_refresh
+        end,
     }
 end
 
@@ -954,6 +958,164 @@ do
     Stubs.flush()
     Assert.eq(refresh_count, 2, "剩余 5 章（10-5）再刷")
     Session.onCloseDocument(plugin)
+    resolved_source = nil
+end
+
+-- 离线开书不消耗节流；联网补刷，失败后翻页重试，跨章回包更新当前快照。
+do
+    local toc = {}
+    for i = 1, 10 do toc[i] = { idx = i, title = "第" .. i } end
+    stored_toc.chapters = toc
+    toc_allow_refresh = true
+    local NetworkMgr = require("ui/network/manager")
+    local old_connected = NetworkMgr.isConnected
+    local connected = false
+    NetworkMgr.isConnected = function() return connected end
+    local refresh_count, callback = 0, nil
+    resolved_source = {
+        type = "chapter",
+        refreshTocAsync = function(_self, _identity, done)
+            refresh_count, callback = refresh_count + 1, done
+            return { cancel = function() end }
+        end,
+        openBookAsync = function(_self, _identity, opts, done)
+            return asyncChapter("/cache/" .. opts.chapter_idx .. ".html", done)
+        end,
+        putProgressAsync = default_source.putProgressAsync,
+        syncProgressAsync = default_source.syncProgressAsync,
+        syncNotesAsync = default_source.syncNotesAsync,
+        syncStatsAsync = default_source.syncStatsAsync,
+    }
+    local plugin = mkPlugin("/cache/1.html")
+    local checks_before = toc_refresh_checks
+    Session.onReaderReady(plugin)
+    Assert.eq(refresh_count, 0)
+    Assert.eq(toc_refresh_checks, checks_before, "离线不记联网尝试")
+    Assert.is_true(Session.current().chapter.open_refresh)
+    connected = true
+    Session.onNetworkConnected({ ui = {} })
+    Assert.eq(refresh_count, 0, "文件管理器实例不触发阅读请求")
+    Session.onNetworkConnected(plugin)
+    Assert.eq(refresh_count, 1)
+    Session.onPageUpdate(plugin)
+    Session.onNetworkConnected(plugin)
+    Assert.eq(refresh_count, 1, "在途请求不能被翻页或联网事件取消重启")
+    callback(nil, "网络失败")
+    Assert.is_nil(Session.current().chapter.toc_job)
+    Assert.is_true(Session.current().chapter.open_refresh, "失败不丢重试意图")
+    Assert.eq(Session.toc(), toc, "失败保留旧目录")
+    toc_allow_refresh = false
+    Session.onPageUpdate(plugin)
+    Assert.eq(refresh_count, 1, "失败重试仍遵守节流")
+    toc_allow_refresh = true
+    Session.onPageUpdate(plugin)
+    Assert.eq(refresh_count, 2, "节流结束后翻页补刷，不必等到末章")
+    Assert.is_true(Session.gotoChapter(2))
+    Stubs.flush()
+    local next_plugin = mkPlugin("/cache/2.html")
+    next_plugin.ui.handleEvent = function() end
+    Session.onReaderReady(next_plugin)
+    Stubs.flush()
+    Assert.eq(refresh_count, 2, "跨章仍复用在途刷新")
+    local refreshed = {}
+    for i = 1, 11 do refreshed[i] = { idx = i, title = "新" .. i } end
+    callback(refreshed)
+    Assert.eq(Session.toc(), refreshed)
+    Assert.is_nil(Session.current().chapter.open_refresh)
+    Assert.is_nil(Session.current().chapter.toc_job)
+    Assert.eq(calls.progress[#calls.progress][2], Session.current().identity,
+        "回包通知当前章快照，不能继续用已关闭的上一章")
+    Session.onPageUpdate(next_plugin)
+    Session.onNetworkConnected(next_plugin)
+    current_resume_plugin = next_plugin
+    Session.onResume(next_plugin)
+    current_resume_plugin = nil
+    Assert.eq(refresh_count, 2, "成功后中间章不反复拉目录")
+    Session.onCloseDocument(next_plugin)
+    connected = false
+    stored_toc.chapters, stale_toc.chapters = nil, nil
+    plugin = mkPlugin("/cache/1.html")
+    Session.onReaderReady(plugin)
+    Stubs.flush()
+    Assert.eq(refresh_count, 2, "离线且无目录也不发请求")
+    Assert.eq(calls.progress[#calls.progress][1], "toc_ready")
+    Assert.eq(calls.progress[#calls.progress][3], "网络不可用，请先连接 Wi-Fi",
+        "无目录时必须解除进度恢复对目录的等待")
+    Session.onCloseDocument(plugin)
+    NetworkMgr.isConnected = old_connected
+    resolved_source = nil
+end
+
+-- 留在旧目录末章，越过节流后翻到章末也会拉新，不需要重新开书。
+do
+    stored_toc.chapters = { { idx = 1, title = "旧末章" } }
+    toc_allow_refresh = false
+    local refresh_count, callback, opened_idx = 0, nil, nil
+    resolved_source = {
+        type = "chapter",
+        refreshTocAsync = function(_self, _identity, done)
+            refresh_count, callback = refresh_count + 1, done
+            return { cancel = function() end }
+        end,
+        openBookAsync = function(_self, _identity, opts)
+            opened_idx = opts.chapter_idx
+            return { cancel = function() end }
+        end,
+        putProgressAsync = default_source.putProgressAsync,
+        syncProgressAsync = default_source.syncProgressAsync,
+        syncNotesAsync = default_source.syncNotesAsync,
+        syncStatsAsync = default_source.syncStatsAsync,
+    }
+    local plugin = mkPlugin("/cache/1.html")
+    plugin.ui.status = { onEndOfBook = function() end }
+    Session.onReaderReady(plugin)
+    plugin.ui.status:onEndOfBook()
+    Assert.eq(refresh_count, 0, "末章也遵守节流")
+    toc_allow_refresh = true
+    plugin.ui.status:onEndOfBook()
+    Assert.eq(refresh_count, 1, "末章越界不能直接跳过目录刷新")
+    plugin.ui.status:onEndOfBook()
+    Assert.eq(refresh_count, 1, "连翻末页共用在途请求")
+    callback({ { idx = 1, title = "旧末章" }, { idx = 2, title = "新章" } })
+    end_dialog_identity = nil
+    plugin.ui.status:onEndOfBook()
+    Assert.eq(opened_idx, 2, "刷新后可继续进入新章")
+    Assert.is_nil(end_dialog_identity)
+    Session.onCloseDocument(plugin)
+    resolved_source = nil
+end
+
+-- 唤醒补刷，关书取消刷新，迟到回包不能复活已销毁的会话。
+do
+    local toc = { { idx = 1 } }
+    stored_toc.chapters = toc
+    toc_allow_refresh = false
+    local callback, cancelled
+    resolved_source = {
+        type = "chapter",
+        refreshTocAsync = function(_self, _identity, done)
+            callback = done
+            return { cancel = function() cancelled = true end }
+        end,
+        putProgressAsync = default_source.putProgressAsync,
+        syncProgressAsync = default_source.syncProgressAsync,
+        syncNotesAsync = default_source.syncNotesAsync,
+        syncStatsAsync = default_source.syncStatsAsync,
+    }
+    local plugin = mkPlugin("/cache/1.html")
+    Session.onReaderReady(plugin)
+    Assert.is_nil(callback)
+    toc_allow_refresh = true
+    current_resume_plugin = plugin
+    Session.onResume(plugin)
+    current_resume_plugin = nil
+    Assert.not_nil(callback, "唤醒补试末章刷新")
+    local chapter = Session.current().chapter
+    Session.onCloseDocument(plugin)
+    Assert.is_true(cancelled)
+    callback({ { idx = 1 }, { idx = 2 } })
+    Assert.is_nil(Session.current())
+    Assert.eq(chapter.toc, toc, "关书后回包不能再改会话目录")
     resolved_source = nil
 end
 

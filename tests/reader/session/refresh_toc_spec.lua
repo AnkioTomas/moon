@@ -87,7 +87,7 @@ do
             end,
         },
     }
-    local chapter = { identity = identity, toc = { { idx = 1 }, { idx = 2 } } }
+    local chapter = { identity = identity, toc = { { idx = 1 }, { idx = 2 } }, open_refresh = true }
     local snap = { ui = { dialog = {} }, identity = identity, chapter = chapter }
     dirty, toc_ready = 0, 0
     Assert.is_true(Chapter.refreshToc(snap))
@@ -95,10 +95,17 @@ do
     Assert.is_true(chapter.refreshing_toc)
     cb({ { idx = 1 }, { idx = 2 }, { idx = 3 } })
     Assert.is_nil(chapter.refreshing_toc)
+    Assert.is_nil(chapter.open_refresh, "手动成功也清除自动刷新重试意图")
     Assert.eq(#chapter.toc, 3)
     Assert.eq(toc_ready, 1)
     Assert.eq(dirty, 1)
     Assert.eq(Themed.last("toast").text, "目录已更新（3 章）")
+    identity.source.refreshTocAsync = function(_self, _identity, done)
+        done(chapter.toc)
+        return { cancel = function() end }
+    end
+    Assert.is_true(Chapter.refreshToc(snap))
+    Assert.is_nil(chapter.toc_job, "同步完成不能留下已结束的句柄阻塞自动刷新")
 end
 
 do

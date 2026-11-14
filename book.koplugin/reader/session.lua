@@ -402,6 +402,7 @@ function Session.onPageUpdate(plugin, page)
             position = session.position,
         })
     end
+    ChapterMode.refreshTocIfNeeded(session)
     Perf.slow("page.update", started_at)
     require("reader.page_diag").notePageUpdate(started_at, session.page)
 end
@@ -464,6 +465,14 @@ function Session.onResume(plugin)
             position = require("reader.session.progress").position(session),
         })
     end
+    ChapterMode.refreshTocIfNeeded(session)
+end
+
+--- 联网后补试当前章节书的目录；离线开书不会消耗联网节流。
+---@param plugin table
+function Session.onNetworkConnected(plugin)
+    if not plugin.ui.document then return end
+    ChapterMode.refreshTocIfNeeded(Session._snapshot)
 end
 
 --- 从目录或其他阅读 UI 切换到指定章节；只有连续章节会话能切，整书返回 false。

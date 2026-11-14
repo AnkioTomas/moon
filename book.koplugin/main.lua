@@ -128,11 +128,12 @@ function BookPlugin:onResume()
     Wake.timed("hooks.onResume", Features.emit, "onResume", self)
 end
 
---- 网络恢复：续跑等网络的后台任务、源推脏、feature 自己刷新；桌面若在等半联网重试则立刻再同步。
+--- 网络恢复：续跑后台任务、源推脏、阅读目录补刷与 feature 刷新；桌面若在等半联网重试则立刻再同步。
 function BookPlugin:onNetworkConnected()
     logger.info("book lifecycle network_connected")
     Guard.call("tasks.onNetworkConnected", Tasks.onNetworkConnected)
     Guard.call("sources.pushDirty", pushDirty)
+    Guard.call("session.onNetworkConnected", Session.onNetworkConnected, self)
     Features.emit("onNetworkConnected", self)
     if self.desktop then
         Guard.call("desktop.sync.onNetworkConnected", require("desktop.sync").onNetworkConnected, self.desktop)
