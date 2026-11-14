@@ -251,11 +251,11 @@ function Bars.syncBottomHeight(ui)
     if not footer or type(footer.refreshFooter) ~= "function" then
         return
     end
-    local settings = footer.settings
-    local base = Screen:scaleBySize((settings and settings.container_height) or 14)
+    local footer_settings = footer.settings
+    local base = Screen:scaleBySize((footer_settings and footer_settings.container_height) or 14)
     local need = base
     if Bars.bottomBarPreference() and Layout.replace("bottom") then
-        need = math.max(base, Layout.bottomPaintHeight(settings))
+        need = math.max(base, Layout.bottomPaintHeight(footer_settings))
     end
     if footer.height == need then
         return
@@ -480,10 +480,10 @@ local function hijackFooter(ui)
     local orig_container = footer.updateFooterContainer
     if type(orig_container) == "function" then
         footer.updateFooterContainer = function(self)
-            local settings = self.settings
-            local base = Screen:scaleBySize((settings and settings.container_height) or 14)
+            local footer_settings = self.settings
+            local base = Screen:scaleBySize((footer_settings and footer_settings.container_height) or 14)
             if ours(self) then
-                self.height = math.max(base, Layout.bottomPaintHeight(settings))
+                self.height = math.max(base, Layout.bottomPaintHeight(footer_settings))
             else
                 self.height = base
             end
