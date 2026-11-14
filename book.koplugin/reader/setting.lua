@@ -6,6 +6,7 @@
 
 return {
     defaults = {
+        refresh_diagnostics = false,
         auto_mark_read_at_99 = false,
         chapter_switch_notice = true,
         margin_popup = false,

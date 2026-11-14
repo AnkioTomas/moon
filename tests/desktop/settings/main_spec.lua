@@ -202,18 +202,6 @@ package.preload["features.panel.settings"] = function()
         preview = function() return { dimen = { h = 20 } } end,
     }
 end
-package.preload["desktop.pages.setting.maintenance"] = function()
-    local function row(title)
-        return function(width)
-            return require("ui.themes.widgets.row").widget({
-                width = width, chevron = false, kind = "action", title = title,
-            })
-        end
-    end
-    return {
-        closeRow = function() return row("关闭桌面") end,
-    }
-end
 
 local previous_settings = _G.G_reader_settings
 _G.G_reader_settings = {
@@ -401,6 +389,23 @@ Assert.is_nil(maintenance_joined:find(",关于,", 1, true))
 Assert.is_nil(maintenance_joined:find(",存储空间,", 1, true))
 Assert.is_nil(("," .. table.concat(system_titles, ",") .. ","):find(",运行状态,", 1, true))
 Assert.is_true(maintenance_joined:find(",关闭桌面,", 1, true) ~= nil)
+Assert.is_true(maintenance_joined:find(",刷新诊断,", 1, true) ~= nil)
+
+local refresh_settings = { refresh_diagnostics = false }
+local saved_owner
+package.loaded["utils.settings"].get = function() return refresh_settings end
+package.loaded["utils.settings"].save = function(owner) saved_owner = owner end
+local updated = 0
+local diag_row = require("desktop.pages.setting.maintenance"):refreshDiagRow({
+    updateView = function() updated = updated + 1 end,
+})
+Assert.is_false(diag_row(600).toggle)
+diag_row(600).callback()
+Assert.is_true(diag_row(600).toggle)
+Assert.eq(saved_owner, "reader")
+diag_row(600).callback()
+Assert.is_false(diag_row(600).toggle)
+Assert.eq(updated, 2)
 
 -- 阅读中直达「阅读」组：无桌面时建轻量宿主；有桌面复用。
 opened = nil
