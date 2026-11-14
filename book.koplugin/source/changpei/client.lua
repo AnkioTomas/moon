@@ -3,7 +3,7 @@
 
 走官网网页的 JSON 接口（www.gongzicp.com/webapi），请求头照网页端：`Client: pc` + 桌面浏览器 UA。
 正文是 AES 密文，解密放子进程。data.check > 1 表示需要人机验证，不表示登录失效；
-用户开章时经远程管理完成验证。官网：check < 3 验完沿用已解密正文，≥ 3 才重拉；
+用户开章时经远程管理完成验证，成功后使用同一会话重取正文；
 后台预取只返回错误，不弹窗、不缓存待验证正文。
 登录态是网页 Cookie（setting.lua：扫码 / 浏览器授权 / 粘贴），Cookie 失效回包 code 9996；没买的 VIP 章不出正文。
 
@@ -46,16 +46,22 @@ function Client.cookie()
     return type(cookie) == "string" and cookie ~= "" and cookie or nil
 end
 
+-- 凭据身份不含 moon_token / moon_refresh（请求头 token 与续期凭据，续期会变，不该让会话重置）。
+---@param cookie string|nil
+---@return CookieJar|nil
+local function jarFor(cookie)
+    if not cookie then return nil end
+    local login = cookie:gsub(";?%s*moon_token=[^;%s]+", ""):gsub(";?%s*moon_refresh=[^;%s]+", "")
+    return require("http.cookie_jar").session(SOURCE_ID, login)
+end
+
 ---@param cookie string|nil
 ---@return table<string, string>
 local function headers(cookie)
-    local out = { ["Cookie"] = cookie }
+    local out = {}
     local token = cookie and cookie:match("moon_token=([^;%s]+)")
-    if token then
-        -- 扫码登录拿到的是网页端 sessionStorage 里的 token（请求头 token），不是 Cookie；借 Cookie 串带着存
-        out["Cookie"] = cookie:gsub(";?%s*moon_token=[^;%s]+", ""):gsub(";?%s*moon_refresh=[^;%s]+", ""):gsub("^;%s*", "")
-        out["token"] = token
-    end
+    -- 扫码登录拿到的是网页端 sessionStorage 里的 token（请求头 token），不是 Cookie；借 Cookie 串带着存
+    if token then out["token"] = token end
     for key, value in pairs(HEADERS) do out[key] = value end
     return out
 end
@@ -65,7 +71,8 @@ end
 ---@param cb fun(ok: boolean, err: string|nil)
 function Client.renewAsync(cb)
     local cookie = Client.cookie()
-    local refresh = cookie and (cookie:match("moon_refresh=([^;%s]+)") or cookie:match("ukey=([^;%s]+)"))
+    local jar = jarFor(cookie)
+    local refresh = cookie and (cookie:match("moon_refresh=([^;%s]+)") or jar:get("ukey"))
     local imei = cookie and cookie:match("_c_n_=([^;%s]+)")
     if not refresh or not imei then cb(false); return end
     local cancelled = false
@@ -78,6 +85,7 @@ function Client.renewAsync(cb)
     head["_c_n_"] = imei
     local job = Request.post("https://www.gongzicp.com/cp.UserExternal/get_token", QRLogin.frame(refresh, 5), {
         headers = head,
+        jar = jar,
         content_type = "application/grpc-web+proto",
         timeout = require("http.timeout").net(0.5),
     }, function(body, err, res)
@@ -148,6 +156,7 @@ local function get(path, query, cookie, cb, renewed, cache_ttl)
     local initial = Request.get(API .. path .. "?" .. query, {
         accept = "application/json",
         headers = headers(cookie),
+        jar = jarFor(cookie),
         timeout = require("http.timeout").net(0.5),
         cache_ttl = cache_ttl or 0,
     }, function(raw, err)
@@ -212,6 +221,7 @@ local function post(path, params, body, cb, renewed)
         local posted = Request.post(API .. path, body, {
             accept = "application/json",
             headers = head,
+            jar = jarFor(cookie),
             content_type = "application/json",
             timeout = require("http.timeout").net(0.5),
         }, function(raw, reason)
@@ -344,28 +354,38 @@ function Client.historyAsync(cb)
     return get("/usernovel/getHistory", "", Client.cookie(), cb)
 end
 
---- 取一章即在服务端记为「读到这里」（登录 Cookie 下网页接口自动写阅读历史）。
+--- 已对齐历史就不再取章；否则取章后回读确认，减少重复触发阅读风控。
 ---@param chapter_id string
 ---@param cb fun(ok: boolean|nil, err: string|nil)
 ---@return HttpJob
 function Client.markReadAsync(chapter_id, cb)
     local cancelled, job, pending = false, nil, true
-    local initial = get("/novel/chapterGetInfo", "cid=" .. chapter_id .. "&server=0", Client.cookie(), function(wire, err)
-        pending = false
+    ---@return boolean|nil
+    local function confirm(history, err)
         if cancelled then return end
-        if not wire then cb(nil, err); return end
-        if type(wire.data) ~= "table" or type(wire.data.chapterInfo) ~= "table" then
-            cb(nil, _("响应无效")); return
+        if not history then cb(nil, err); return end
+        for _id, uid in pairs(Mapper.history(history)) do
+            if uid == tostring(chapter_id) then cb(true); return true end
         end
-        if (tonumber(wire.data.check) or 0) > 1 then cb(nil, Client.VERIFY_REQUIRED); return end
-        job = Client.historyAsync(function(history, reason)
+        return false
+    end
+    local initial = Client.historyAsync(function(history, err)
+        pending = false
+        if confirm(history, err) ~= false then return end
+        local loading = true
+        local content = get("/novel/chapterGetInfo", "cid=" .. chapter_id .. "&server=0", Client.cookie(), function(wire, reason)
+            loading = false
             if cancelled then return end
-            if not history then cb(nil, reason); return end
-            for _id, uid in pairs(Mapper.history(history)) do
-                if uid == tostring(chapter_id) then cb(true); return end
+            if not wire then cb(nil, reason); return end
+            if type(wire.data) ~= "table" or type(wire.data.chapterInfo) ~= "table" then
+                cb(nil, _("响应无效")); return
             end
-            cb(nil, _("长佩阅读进度未确认"))
+            if (tonumber(wire.data.check) or 0) > 1 then cb(nil, Client.VERIFY_REQUIRED); return end
+            job = Client.historyAsync(function(updated, message)
+                if confirm(updated, message) == false then cb(nil, _("长佩阅读进度未确认")) end
+            end)
         end)
+        if loading then job = content end
     end)
     if pending then job = initial end
     return { cancel = function()
@@ -392,9 +412,9 @@ end
 
 local LOGIN_HINT = _("还没登录长佩。打开「设置 → 书库 → 账号 → 长佩文学 → 长佩账号」，用长佩 App 扫二维码。也可以点「粘贴 Cookie」，把网页里的 Cookie 贴进去。")
 
---- 取章并解密；on_done 收到 Mapper.content 的打包结果（含 check）。
+--- 取章并解密；on_done 收到 Mapper.content 的打包结果。
 ---@param chapter_id string
----@param on_done fun(res: { text: string|nil, err: string|nil, kind: "unpaid"|"verify"|nil, check: integer|nil })
+---@param on_done fun(res: { text: string|nil, err: string|nil, kind: "unpaid"|"verify"|nil })
 ---@param on_failed fun(reason: string)
 ---@return { cancel: fun() }
 local function fetchContent(chapter_id, on_done, on_failed)
@@ -404,8 +424,8 @@ local function fetchContent(chapter_id, on_done, on_failed)
         if cancelled then return end
         if not wire then on_failed(err or _("请求失败")); return end
         job = Job.run(function()
-            local text, reason, kind, check = Mapper.content(wire)
-            return { text = text, err = reason, kind = kind, check = check }
+            local text, reason, kind = Mapper.content(wire)
+            return { text = text, err = reason, kind = kind }
         end, {
             name = "changpei_content",
             kind = "light",
@@ -439,7 +459,7 @@ function Client.contentAsync(_novel_id, chapter_id, cb)
     end, function(reason) cb(nil, reason) end)
 end
 
---- 只有用户开章才等扫码验证。对齐官网：check < 3 且已有正文则验完直接用；≥ 3 或无正文才重拉一次。
+--- 只有用户开章才等扫码验证；验后重取，拒绝继续使用验证前的正文。
 ---@param _novel_id string
 ---@param chapter_id string
 ---@param cb fun(text: string|nil, err: string|nil, kind: "unpaid"|"verify"|nil)
@@ -448,7 +468,6 @@ function Client.openContentAsync(_novel_id, chapter_id, cb)
     local cancelled, job = false, nil
     local function accept(res)
         if res.kind == "verify" then
-            if res.text and (res.check or 0) < 3 then cb(res.text); return end
             cb(nil, Client.VERIFY_REQUIRED, "verify")
             return
         end
@@ -460,15 +479,11 @@ function Client.openContentAsync(_novel_id, chapter_id, cb)
         if cancelled then return end
         if res.kind ~= "verify" then accept(res); return end
         if not Client.cookie() then cb(nil, LOGIN_HINT); return end
-        -- 官网 check < 3：验完只关弹窗，正文早已解密；≥ 3 才 location.reload 重取。
-        local held = res.text
-        local reload = (res.check or 0) >= 3 or not held
         local verifying = true
         local verification = require("source.changpei.verify").new(function(ok, verify_err)
             verifying = false
             if cancelled then return end
             if not ok then cb(nil, verify_err); return end
-            if not reload then cb(held); return end
             job = fetchContent(chapter_id, function(again)
                 if not cancelled then accept(again) end
             end, function(reason) if not cancelled then fail(reason) end end)

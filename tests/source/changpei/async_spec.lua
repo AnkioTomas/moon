@@ -7,6 +7,8 @@ local Json = require("support.json_stub")
 local cfg = { cookie = "PHPSESSID=old; _c_n_=device; moon_refresh=refresh; moon_token=old" }
 local late, expired, cancelled, phase, history_uid = nil, false, false, "renew", "123"
 local user_data
+local chapter_requests = 0
+local after_read_uid
 package.preload["utils.settings"] = function()
     return { getSource = function() return cfg end, saveSource = function() end }
 end
@@ -25,6 +27,8 @@ package.preload["http.request"] = function()
                 else late = function() cb(Json.encode({ code = 200, data = { list = {} } })) end end
             elseif phase == "read" then
                 if url:find("chapterGetInfo", 1, true) then
+                    chapter_requests = chapter_requests + 1
+                    if after_read_uid then history_uid = after_read_uid end
                     cb(Json.encode({ code = 200, data = { check = 1, chapterInfo = {} } }))
                 else
                     cb(Json.encode({ code = 200, data = { list = {
@@ -46,6 +50,7 @@ package.preload["http.request"] = function()
             return { cancel = function() cancelled = true end }
         end,
         header = function() return "0" end,
+        headerAll = function() return {} end,
     }
 end
 local Client = require("source.changpei.client")
@@ -75,10 +80,24 @@ Assert.is_false(called, "同步续期不能覆盖重发请求的句柄")
 phase = "read"
 Client.markReadAsync("123", function(value, reason) ok, err = value, reason end)
 Assert.is_true(ok)
+Assert.eq(chapter_requests, 0, "历史已对齐时不再取章触发验证")
 history_uid = "999"
 Client.markReadAsync("123", function(value, reason) ok, err = value, reason end)
 Assert.is_nil(ok)
 Assert.eq(err, "长佩阅读进度未确认")
+Assert.eq(chapter_requests, 1)
+after_read_uid = "123"
+Client.markReadAsync("123", function(value, reason) ok, err = value, reason end)
+Assert.is_true(ok, "历史不一致时仍取章并回读确认")
+Assert.eq(chapter_requests, 2)
+
+phase, cancelled, called = "read-late", false, false
+handle = Client.markReadAsync("123", function() called = true end)
+late()
+handle:cancel()
+Assert.is_true(cancelled, "历史返回后，取消应停止后续取章请求")
+late()
+Assert.is_false(called)
 
 phase, user_data = "user", { info = { show_uid = 111, nick_name = "测试" }, verify = true }
 local account

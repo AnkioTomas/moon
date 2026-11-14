@@ -14,6 +14,10 @@ local settings = { cookie = "PHPSESSID=s; _c_n_=device; _c_n_n_=device; moon_ref
 local expired
 local check = 3
 local read_check_code = 200
+local get_cookies, post_cookies
+local content_text = "chapter text"
+local renewed_token = "new"
+local defer_content, delayed_content
 local signed
 package.preload["ffi/sha2"] = function()
     return { md5 = function(value) signed = value; return "signature" end }
@@ -22,8 +26,8 @@ package.preload["source.changpei.mapper"] = function()
     return {
         content = function(wire)
             local level = wire.data.check
-            if level > 1 then return "chapter text", nil, "verify", level end
-            return "chapter text"
+            if level > 1 then return content_text, nil, "verify" end
+            return content_text
         end,
     }
 end
@@ -51,28 +55,48 @@ end
 package.preload["source.changpei.qrlogin"] = function()
     return {
         frame = function() return "refresh-request" end,
-        decode = function() return { [3] = "new" } end,
+        decode = function() return { [3] = renewed_token } end,
     }
+end
+-- 模拟 Request.request 的 opts.jar 接线：发前带 Cookie，回包收 Set-Cookie
+local function viaJar(url, options, callback, deliver)
+    local jar, since = options.jar, options.jar and options.jar.seq
+    local headers = {}
+    for key, value in pairs(options.headers or {}) do headers[key] = value end
+    headers.Cookie = headers.Cookie or (jar and jar:header(url))
+    return headers, function(body, err, res)
+        if jar and res then jar:absorb(url, res.headers["Set-Cookie"] or {}, since) end
+        callback(body, err, res)
+    end
 end
 package.preload["http.request"] = function()
     return {
         get = function(url, options, callback)
-            requests[#requests + 1] = { url = url, headers = options.headers }
+            local headers
+            headers, callback = viaJar(url, options, callback)
+            requests[#requests + 1] = { url = url, headers = headers }
             local body = Json.encode({ code = 200, data = url:find("/system/init", 1, true)
                 and { timestamp = 123456 } or { check = check } })
-            callback(body)
+            local cookies = get_cookies
+            local function respond() callback(body, nil, { headers = { ["Set-Cookie"] = cookies } }) end
+            if defer_content and url:find("/novel/chapterGetInfo", 1, true) then delayed_content = respond
+            else respond() end
             return { cancel = function() end }
         end,
         post = function(_url, _body, options, callback)
-            posts[#posts + 1] = { url = _url, body = _body, headers = options.headers }
+            local headers
+            headers, callback = viaJar(_url, options, callback)
+            posts[#posts + 1] = { url = _url, body = _body, headers = headers }
             if _url:find("/novel/readCheck", 1, true) then
-                callback(Json.encode({ code = 200, data = { code = read_check_code } }))
+                callback(Json.encode({ code = 200, data = { code = read_check_code } }),
+                    nil, { headers = { ["Set-Cookie"] = post_cookies } })
             else
-                callback("grpc-body", nil, {})
+                callback("grpc-body", nil, { headers = {} })
             end
             return { cancel = function() end }
         end,
         header = function() return "0" end,
+        headerAll = function(res) return res.headers and res.headers["Set-Cookie"] or {} end,
     }
 end
 
@@ -124,18 +148,20 @@ package.preload["source.changpei.verify"] = function()
         end,
     }
 end
--- check == 2：官网验完只关弹窗，沿用已解密正文，不重拉。
+-- check == 2 也必须重取，不能把验证前的可疑正文写进缓存。
 check, result, message, verification_done = 2, nil, nil, nil
+content_text = "untrusted before verification"
 local first_job = #jobs + 1
 local before = #requests
 Client.openContentAsync("n", "c", function(text, err) result, message = text, err end)
 jobs[first_job]()
 Assert.not_nil(verification_done, "用户开章遇验证才打开扫码页")
 Assert.is_nil(message, "等待验证时不提前结束开书")
+check, content_text = 1, "chapter text"
 verification_done(true)
-Assert.eq(#requests, before + 1, "check < 3 验完不重取章节")
-Assert.eq(#jobs, first_job, "check < 3 验完不再跑解密任务")
-Assert.eq(result, "chapter text", "验完直接用开章时已解密的正文")
+Assert.eq(#requests, before + 2, "check < 3 验完也重取章节")
+jobs[first_job + 1]()
+Assert.eq(result, "chapter text", "只能交付验证后重新取得的正文")
 Assert.is_nil(message)
 
 -- check >= 3：验完像官网 reload，重取一次；重取降到 1 则成功。
@@ -186,3 +212,66 @@ jobs[#jobs]()
 Assert.is_nil(result)
 Assert.eq(message, Client.VERIFY_REQUIRED)
 Assert.eq(result_kind, "verify")
+
+-- 普通登录请求与 readCheck 回包轮换会话；后续每章复用，不要求用户重扫。
+check, read_check_code, verification_done = 1, 200, nil
+local saved_cookie = settings.cookie
+get_cookies = { "PHPSESSID=bootstrap; Path=/; HttpOnly" }
+Client.chaptersAsync("n", function() end)
+get_cookies = { "PHPSESSID=anonymous-init; Path=/" }
+post_cookies = { "PHPSESSID=verified; Path=/; HttpOnly", "reader_pass=ok; Path=/" }
+Client.readCheckAsync("proof", function(ok) verified = ok end)
+Assert.is_true(verified)
+Assert.matches(posts[#posts].headers.Cookie, "PHPSESSID=bootstrap", "验证沿用登录请求建立的会话")
+Assert.eq(settings.cookie, saved_cookie, "会话轮换不修改保存的登录凭据")
+get_cookies, post_cookies = nil, nil
+first_job = #jobs + 1
+Client.openContentAsync("n", "next", function(text, err) result, message = text, err end)
+Assert.matches(requests[#requests].headers.Cookie, "PHPSESSID=verified")
+Assert.matches(requests[#requests].headers.Cookie, "reader_pass=ok")
+jobs[first_job]()
+Assert.is_nil(verification_done)
+Assert.eq(result, "chapter text")
+
+-- 验证前发出的预取回包不能把已验证的新会话覆盖回旧会话。
+defer_content = true
+get_cookies = { "PHPSESSID=stale-prefetch; Path=/" }
+Client.contentAsync("n", "prefetch", function() end)
+defer_content, get_cookies = false, nil
+post_cookies = { "PHPSESSID=verified-new; Path=/" }
+Client.readCheckAsync("new-proof", function(ok) verified = ok end)
+post_cookies = nil
+delayed_content()
+jobs[#jobs]()
+Client.contentAsync("n", "next", function() end)
+Assert.matches(requests[#requests].headers.Cookie, "PHPSESSID=verified%-new",
+    "旧请求迟到时不得回滚扫码后建立的会话")
+jobs[#jobs]()
+
+get_cookies = { "PHPSESSID=anonymous; Path=/" }
+Client.detailAsync("n", function() end)
+get_cookies = nil
+renewed_token = "newer"
+Client.renewAsync(function(ok) renewed = ok end)
+Assert.is_true(renewed)
+Client.contentAsync("n", "next", function() end)
+Assert.matches(requests[#requests].headers.Cookie, "PHPSESSID=verified%-new",
+    "匿名请求不能覆盖已验证会话，token 续期也要保留它")
+Assert.eq(requests[#requests].headers.token, "newer")
+jobs[#jobs]()
+
+for _idx, age in ipairs({ "060", "-1", "0" }) do
+    get_cookies = { "reader_pass=value; Max-Age=" .. age .. "; Path=/" }
+    Client.contentAsync("n", "next", function() end)
+    jobs[#jobs]()
+    get_cookies = nil
+    Client.contentAsync("n", "next", function() end)
+    Assert.eq(requests[#requests].headers.Cookie:find("reader_pass=", 1, true) ~= nil, tonumber(age) > 0,
+        "仅保留正 Max-Age 会话 Cookie")
+    jobs[#jobs]()
+end
+settings.cookie = "PHPSESSID=another-account; moon_token=other"
+Client.contentAsync("n", "next", function() end)
+Assert.eq(requests[#requests].headers.Cookie, "PHPSESSID=another-account", "换号不能继承旧验证 Cookie")
+Assert.eq(requests[#requests].headers.token, "other")
+jobs[#jobs]()
