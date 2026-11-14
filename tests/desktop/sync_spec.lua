@@ -175,6 +175,35 @@ do
     Assert.eq(Themed.last("toast").text, "Could not connect: Connection refused")
 end
 
+-- Turbo 连接失败不一定带可识别的原因；后台拉取 / 推送都静默，手动刷新保留错误。
+do
+    for _idx, err in ipairs({
+        "Could not connect",
+        "Could not connect: -1",
+        "Could not connect: timeout",
+        "无法连接 WebDAV 服务器：Could not connect: socket closed",
+        "COULD NOT CONNECT: unknown",
+    }) do
+        for _mode, pushing in ipairs({ false, true }) do
+            Themed.made = {}
+            source.syncBooksAsync = function(_, _, cb)
+                if pushing then
+                    cb({ skipped = true, push_error = err })
+                else
+                    cb(nil, err)
+                end
+                return { cancel = function() end }
+            end
+            local before = view_updates
+            Sync.open(desktop)
+            Assert.is_nil(Themed.last("toast"), "后台连接失败不打扰：" .. err)
+            Assert.eq(view_updates, before, "连接失败不重建本地书架")
+            Sync.refresh(desktop)
+            Assert.eq(Themed.last("toast").text, err, "手动刷新保留连接错误")
+        end
+    end
+end
+
 -- 半联网后台失败后延迟重试：成功不弹；仍失败保持静默；不叠加、不无限重试；关桌面取消。
 do
     local UIManager = require("ui/uimanager")
@@ -200,7 +229,7 @@ do
     source.syncBooksAsync = function(_, _, cb)
         calls = calls + 1
         if calls == 1 then
-            cb(nil, "Could not connect: Connection refused")
+            cb(nil, "Could not connect: -1")
         else
             cb({ skipped = true })
         end
@@ -219,7 +248,7 @@ do
     Themed.made = {}
     source.syncBooksAsync = function(_, _, cb)
         calls = calls + 1
-        cb(nil, "Could not connect: connection refused")
+        cb(nil, "Could not connect")
         return { cancel = function() end }
     end
     Sync.open(desktop)
@@ -313,7 +342,7 @@ do
     UIManager.scheduleIn, UIManager.unschedule = orig_in, orig_un
 end
 
--- 对端超时 / 原因不明的连接失败不算本机断网：后台照常提示。
+-- 不带 Could not connect 的对端超时保留原有提示。
 do
     Themed.made = {}
     source.syncBooksAsync = function(_, _, cb)

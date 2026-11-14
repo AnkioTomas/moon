@@ -65,8 +65,8 @@ local function inScope(desktop, source)
     return desktop.source == source
 end
 
---- 本机网络栈还没就绪（唤醒后常见：isConnected 已真，TCP/路由还不通）。
---- 跟没联网一样，后台同步不弹，并延迟再试；认证错误仍提示。
+--- 连接暂不可用（唤醒后常见：isConnected 已真，TCP/路由还不通，错误也可能只有 -1）。
+--- 后台同步不弹，并延迟再试；认证错误仍提示。
 ---@param err any
 ---@return boolean
 local function localNetDown(err)
@@ -76,6 +76,7 @@ local function localNetDown(err)
     end
     local lower = err:lower()
     for _idx, needle in ipairs({
+        "could not connect",
         "network is unreachable", "no route to host", "network is down",
         "host is unreachable", "connection refused",
     }) do
