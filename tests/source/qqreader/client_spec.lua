@@ -2,6 +2,7 @@
 ---@diagnostic disable: undefined-field, missing-fields, param-type-mismatch
 
 local Assert = require("support.assert")
+local CookieOf = require("support.cookie")
 local JSON = require("support.json_stub")
 local cfg, requests, replies, late, cancelled = {}, {}, {}, nil, {}
 local fock_delay, fock_called, fock_cancelled, fock_uid = false, 0, false, nil
@@ -69,7 +70,7 @@ do
     Client.contentAsync("9", "1", function(value, reason) text, err = value, reason end)
     Assert.eq(text, "decoded fixture")
     Assert.is_nil(err)
-    for idx = 1, 3 do Assert.eq(requests[idx].opts.headers.Cookie, "ywguid=111") end
+    for idx = 1, 3 do Assert.eq(CookieOf(requests[idx]), "ywguid=111") end
     Assert.matches(requests[3].url, "fuid=1234567890123456")
     Assert.eq(fock_uid, "1234567890123456")
     Assert.is_nil(requests[4].opts.headers, "字体请求不带账号 Cookie")
@@ -156,7 +157,7 @@ do
     Assert.is_true(more)
     Assert.matches(requests[1].url, "keyWord=fixture")
     Assert.matches(requests[1].url, "pageNo=2")
-    Assert.is_nil(requests[1].opts.headers.Cookie)
+    Assert.is_nil(CookieOf(requests[1]))
     Assert.is_nil(requests[1].opts.headers.Origin, "同源 GET 不发送 Origin")
     replies = { { body = '{"code":0,"data":{}}' } }
     Client.searchAsync("fixture", function(value, reason) rows, err = value, reason end)
@@ -197,7 +198,7 @@ do
     Assert.eq(items[1].text, "title\nfixture")
     Assert.eq(items[1].time, 1620000000)
     Assert.eq(data.commentCount, 32)
-    Assert.is_nil(requests[1].opts.headers.Cookie)
+    Assert.is_nil(CookieOf(requests[1]))
     replies = { { body = '{"code":0,"data":{"commentCount":1,"comments":[false]}}' } }
     local err
     Client.bookCommentsAsync("9", function(value, reason) data, err = value, reason end)

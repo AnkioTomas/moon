@@ -80,7 +80,8 @@ local function call(path, query, body, cookie, cb)
     local url = API .. path .. "?" .. (query ~= "" and query .. "&" or "") .. "_csrfToken=" .. Text.urlEncode(csrf)
     local opts = {
         accept = "application/json",
-        headers = { Cookie = cookie_header, Referer = "https://www.xxsypro.com/", ["User-Agent"] = UA },
+        headers = { Referer = "https://www.xxsypro.com/", ["User-Agent"] = UA },
+        jar = require("http.cookie_jar").session(SOURCE_ID, cookie_header),
         timeout = require("http.timeout").net(0.5),
         cache_ttl = 0,
     }

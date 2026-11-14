@@ -23,13 +23,14 @@ function Client.loggedIn()
         and not require("source.auth").expired(SOURCE_ID)
 end
 
+--- account 是发请求时的已保存 Cookie，回包后与当前保存值比对判断是否换号。
 local function opts(origin)
+    local cookie = require("utils.settings").getSource(SOURCE_ID).cookie
     return {
         timeout = require("http.timeout").net(1),
-        headers = {
-            Cookie = require("utils.settings").getSource(SOURCE_ID).cookie,
-            Referer = (origin or ORIGIN) .. "/",
-        },
+        account = cookie,
+        jar = require("http.cookie_jar").session(SOURCE_ID, cookie),
+        headers = { Referer = (origin or ORIGIN) .. "/" },
     }
 end
 
@@ -105,7 +106,7 @@ local function changeShelf(url, fields, cb)
         local code = tonumber(wire.resultCode)
         if code == -999 then
             local reason = _("网易云阅读登录已失效")
-            if options.headers.Cookie == require("utils.settings").getSource(SOURCE_ID).cookie then
+            if options.account == require("utils.settings").getSource(SOURCE_ID).cookie then
                 reason = require("source.auth").expire(SOURCE_ID, reason)
             end
             cb(nil, reason)
@@ -199,11 +200,11 @@ function Client.putProgressAsync(stable_id, toc, idx, fraction, cb)
     -- 官网匿名写进度也返回 1；先确认会话，避免把未同步的本地进度标成成功。
     local cancelled, job, pending = false, nil, true
     local options = opts()
-    local initial = Client.loginCheckAsync(options.headers.Cookie, function(valid, reason, expired)
+    local initial = Client.loginCheckAsync(options.account, function(valid, reason, expired)
         pending = false
         if cancelled then return end
         if not valid then
-            if expired and options.headers.Cookie == require("utils.settings").getSource(SOURCE_ID).cookie then
+            if expired and options.account == require("utils.settings").getSource(SOURCE_ID).cookie then
                 reason = require("source.auth").expire(SOURCE_ID, _("网易云阅读登录已失效"))
             end
             cb(nil, reason)

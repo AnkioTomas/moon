@@ -40,7 +40,6 @@ end
 ---@return table
 local function headers(cookie, referer)
     return {
-        Cookie = cookie,
         ["User-Agent"] = UA,
         Referer = referer or WEB .. "/book-shelf",
     }
@@ -117,6 +116,7 @@ local function call(method, path, params, body, cookie, cb, referer)
     local opts = {
         accept = "application/json",
         headers = headers(cookie, referer),
+        jar = require("http.cookie_jar").session(SOURCE_ID, cookie),
         timeout = require("http.timeout").net(1),
     }
     local function done(raw, err, res)

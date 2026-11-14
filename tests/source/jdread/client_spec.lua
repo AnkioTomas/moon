@@ -6,6 +6,7 @@
 ---@diagnostic disable: undefined-field, missing-fields, redundant-parameter, missing-parameter, inject-field, assign-type-mismatch, param-type-mismatch, cast-type-mismatch, return-type-mismatch, cast-local-type
 
 local Assert = require("support.assert")
+local CookieOf = require("support.cookie")
 local JSONStub = require("support.json_stub")
 
 package.preload["json"] = function()
@@ -62,7 +63,7 @@ do
     Assert.eq(wire[1].ebook_id, 2)
     Assert.matches(requests[1].url, "/jdread/api/bookshelf/sort%?")
     Assert.matches(requests[2].url, "/jdread/api/ebooks/lite/2,1%?")
-    Assert.eq(requests[1].opts.headers.Cookie, "thor=test")
+    Assert.eq(CookieOf(requests[1]), "thor=test")
 end
 
 do

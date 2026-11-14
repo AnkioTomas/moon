@@ -81,11 +81,16 @@ function Client:configured()
         and type(self.uuid) == "string" and self.uuid ~= ""
 end
 
+--- 会话罐：保存的 Cookie 打底，服务端轮换的会话 Cookie 留在罐里。
+---@return CookieJar|nil
+function Client:jar()
+    return require("http.cookie_jar").session("jdread", self.cookie)
+end
+
 ---@param referer string
 ---@return table
 function Client:headers(referer)
     return {
-        ["Cookie"] = self.cookie,
         ["Referer"] = referer,
         ["Origin"] = "https://e.m.jd.com",
         ["Accept"] = "application/json, text/plain, */*",
@@ -107,6 +112,7 @@ end
 function Client:apiGetAsync(path, extra, cb)
     return Request.get(self:apiUrl(path, extra), {
         headers = self:headers(API .. "/"),
+        jar = self:jar(),
     }, function(raw, err)
         cb(decodeApi(raw, err, self:configured()))
     end)
@@ -117,7 +123,6 @@ end
 ---@param cb fun(wire: table|nil, err: string|nil)
 function Client:bookCommentsAsync(book_id, page, cb)
     local headers = self:headers(API .. "/")
-    headers.Cookie = nil
     return Request.get(self:apiUrl("/jdread/api/ebook/" .. Text.urlEncode(book_id) .. "/comment", {
         page = page, page_size = 20, sort = 0,
     }), { headers = headers }, function(raw, err)
@@ -131,6 +136,7 @@ end
 function Client:checkSessionAsync(cb)
     return Request.get(self:apiUrl("/jdread/api/bookshelf/sort"), {
         headers = self:headers(API .. "/"),
+        jar = self:jar(),
         cache_ttl = 0,
     }, function(raw, err)
         cb(decodeApi(raw, err, false))
@@ -144,6 +150,7 @@ end
 function Client:apiPostAsync(path, body, cb)
     return Request.post(self:apiUrl(path), JSON.encode(body), {
         headers = self:headers(API .. "/reader/"),
+        jar = self:jar(),
         content_type = "application/json",
     }, function(raw, err)
         cb(decodeApi(raw, err, self:configured()))
@@ -355,6 +362,7 @@ function Client:downloadChapterAsync(book_id, query, cb)
     for key, value in pairs(query) do params[key] = value end
     return Request.get(API .. path .. "?" .. Text.formEncode(params), {
         headers = self:headers(API .. "/reader/"),
+        jar = self:jar(),
     }, function(raw, err)
         if not raw then cb(nil, err); return end
         local wire, decode_err, code = Protocol.decodeDownload(raw, tm)

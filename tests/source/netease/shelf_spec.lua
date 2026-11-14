@@ -6,6 +6,7 @@
 ---@diagnostic disable: undefined-field, missing-fields, param-type-mismatch
 
 local Assert = require("support.assert")
+local CookieOf = require("support.cookie")
 local JSON = require("support.json_stub")
 package.loaded["json"] = JSON
 local Text = require("utils.text")
@@ -59,7 +60,7 @@ local result, failure, calls = nil, nil, 0
 local function done(value, reason) result, failure, calls = value, reason, calls + 1 end
 Client:shelfSyncAsync(done)
 Assert.matches(pending[1].url, "https://guofeng%.yuedu%.163%.com/shelf%.do")
-Assert.eq(pending[1].opts.headers.Cookie, "NTES=fixture")
+Assert.eq(CookieOf(pending[1]), "NTES=fixture")
 Assert.eq(pending[1].opts.cache_ttl, 0, "增删后必须拉新鲜书架，不能拿旧缓存对账")
 pending[1].cb(page(row("first_4", "第一本"), 2))
 Assert.len(pending, 2)

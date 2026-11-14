@@ -6,6 +6,7 @@ QQ阅读书架分页、目录 / 正文映射与 Cookie 解析离线用例。
 ---@diagnostic disable: undefined-field, missing-fields, param-type-mismatch
 
 local Assert = require("support.assert")
+local CookieOf = require("support.cookie")
 local JSONStub = require("support.json_stub")
 
 package.preload["json"] = function()
@@ -126,7 +127,7 @@ do
     Assert.eq(rows[3].bid, 3)
     Assert.matches(requests[1].url, "pageNo=1")
     Assert.matches(requests[1].url, "pageSize=100")
-    Assert.eq(requests[1].opts.headers.Cookie, "ywguid=g")
+    Assert.eq(CookieOf(requests[1]), "ywguid=g")
     Assert.matches(requests[2].url, "pageNo=2")
 end
 

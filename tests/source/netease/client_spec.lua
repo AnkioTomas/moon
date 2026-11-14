@@ -6,6 +6,7 @@
 ---@diagnostic disable: undefined-field, missing-fields, param-type-mismatch
 
 local Assert = require("support.assert")
+local CookieOf = require("support.cookie")
 local JSON = require("support.json_stub")
 package.loaded["json"] = JSON
 local Text = require("utils.text")
@@ -58,7 +59,7 @@ Client.infoAsync("book_4", function(value, reason) result, err = value, reason e
 Assert.eq(Mapper.detail(result).title, "甲")
 Assert.is_nil(err)
 Assert.eq(requests[#requests].url, "https://yuedu.163.com/getBook.do?id=book_4")
-Assert.eq(requests[#requests].opts.headers.Cookie, "NTES=desktop")
+Assert.eq(CookieOf(requests[#requests]), "NTES=desktop")
 response = JSON.encode({ code = 0, data = { books = { { sourceUuid = "book_4", title = "甲" } } } })
 Client.searchAsync("甲", function(value) result = value end)
 Assert.eq(result[1].stable_id, "book_4")
@@ -93,7 +94,7 @@ Assert.is_nil(err)
 Assert.eq(requests[#requests].url, "https://guofeng.yuedu.163.com/subscribe.do")
 Assert.matches(requests[#requests].body, "operation=addSub")
 Assert.matches(requests[#requests].body, "id=book%%2Fa%%2Cb")
-Assert.eq(requests[#requests].opts.headers.Cookie, "NTES=desktop")
+Assert.eq(CookieOf(requests[#requests]), "NTES=desktop")
 Assert.eq(requests[#requests].opts.headers.Referer, "https://guofeng.yuedu.163.com/")
 Client:removeFromShelfAsync("book/a,b", function(value, reason) result, err = value, reason end)
 Assert.eq(result.resultCode, 0)
@@ -173,7 +174,7 @@ response = '<title>个人资料--网易云阅读</title><a id="editNickName"></a
 Client.loginCheckAsync("NTES=new", function(value, reason) result, err = value, reason end)
 Assert.is_true(result)
 Assert.eq(cfg.cookie, "NTES=desktop", "校验不能直接替换当前会话")
-Assert.eq(requests[#requests].opts.headers.Cookie, "NTES=new")
+Assert.eq(CookieOf(requests[#requests]), "NTES=new")
 response = '<title>登录--网易云阅读</title><div id="login-container"></div>'
 Client.loginCheckAsync("NTES=bad", function(value, reason) result, err = value, reason end)
 Assert.is_false(result)

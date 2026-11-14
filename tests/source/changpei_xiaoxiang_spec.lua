@@ -60,9 +60,27 @@ do
     Assert.eq(bought, "正文")
     local _t2, _e2, verify = Changpei.content({ data = { check = 2, chapterInfo = { chapterPrice = 0, content = seal("乱码") } } })
     Assert.eq(verify, "verify")
+    local gated, _gated_err, gated_kind = Changpei.content({ data = {
+        check = 2, chapterInfo = { chapterPrice = 0, content = "not-aes" },
+    } })
+    Assert.is_nil(gated, "待验证内容即使形似正文也不能交付")
+    Assert.eq(gated_kind, "verify", "验证前不应尝试解密不可信载荷")
     local none, err = Changpei.content({ msg = "访问异常" })
     Assert.is_nil(none)
     Assert.eq(err, "访问异常")
+    local invalid, invalid_err = Changpei.content({ data = {
+        chapterInfo = { chapterPrice = 0, content = seal("\255\254\128bad") },
+    } })
+    Assert.is_nil(invalid)
+    Assert.eq(invalid_err, "长佩章节解密失败", "解密得到非法 UTF-8 不能当作正文缓存")
+    local control, control_err = Changpei.content({ data = {
+        chapterInfo = { chapterPrice = 0, content = seal("前文\0后文") },
+    } })
+    Assert.is_nil(control)
+    Assert.eq(control_err, "长佩章节解密失败")
+    Assert.eq(Changpei.content({ data = {
+        chapterInfo = { chapterPrice = 0, content = seal("中文🙂\t后文") },
+    } }), "中文🙂\t后文", "合法正文保留 emoji 与制表符")
 end
 
 do
@@ -127,11 +145,13 @@ do
         return {
             get = function(url, opts, cb)
                 seen.url, seen.headers = url, opts.headers
+                seen.cookie = opts.jar and opts.jar:header(url)
                 cb(seen.reply)
                 return {}
             end,
             post = function(url, body, opts, cb)
                 seen.post_url, seen.body, seen.headers = url, body, opts.headers
+                seen.cookie = opts.jar and opts.jar:header(url)
                 cb(seen.reply)
                 return {}
             end,
@@ -154,7 +174,7 @@ do
     seen.reply = '{"code":0,"data":{"isLogin":1,"user":{"guid":"42"}}}'
     Client.userAsync("a=1", function(info) seen.info = info end)
     Assert.eq(seen.info.isLogin, 1)
-    Assert.eq(seen.headers.Cookie, "a=1; csrfToken=moon")
+    Assert.eq(seen.cookie, "a=1; csrfToken=moon")
     Assert.matches(seen.url, "_csrfToken=moon")
 
     local replies = { '{"code":0,"data":{"isLogin":1,"user":{"guid":"42"}}}', '{"code":0,"msg":"ok","data":null}' }
@@ -255,7 +275,7 @@ do
     local seen, reply = {}, '{"code":9996,"msg":"请先登录","data":[]}'
     package.loaded["http.request"] = nil
     package.preload["http.request"] = function()
-        return { get = function(_url, opts, cb) seen.headers = opts.headers; cb(reply) return {} end }
+        return { get = function(_url, opts, cb) seen.headers = opts.headers; seen.cookie = opts.jar and opts.jar:header(_url); cb(reply) return {} end }
     end
     package.loaded["source.changpei.client"] = nil
     local Settings = require("utils.settings")
@@ -267,7 +287,7 @@ do
     Auth.reset()
     local err
     Client.chaptersAsync("1", function(_wire, e) err = e end)
-    Assert.eq(seen.headers.Cookie, "PHPSESSID=T1")
+    Assert.eq(seen.cookie, "PHPSESSID=T1")
     Assert.eq(seen.headers.Client, "pc")
     Assert.matches(err, "扫码登录")
     Assert.is_true(Auth.expired("changpei"))
@@ -275,7 +295,7 @@ do
     Settings.saveSource("changpei", cfg)
     Auth.reset()
     Client.searchAsync("x", function() end)
-    Assert.is_nil(seen.headers.Cookie)
+    Assert.is_nil(seen.cookie)
     Assert.is_true(not Auth.expired("changpei"))
     package.preload["http.request"] = nil
 end
@@ -360,7 +380,7 @@ do
     local seen
     package.loaded["http.request"] = nil
     package.preload["http.request"] = function()
-        return { get = function(_url, opts, cb) seen = opts.headers; cb('{"code":200,"data":{}}') return {} end }
+        return { get = function(_url, opts, cb) seen = opts.headers; seen.Cookie = opts.jar:header(_url); cb('{"code":200,"data":{}}') return {} end }
     end
     package.loaded["source.changpei.client"] = nil
     require("source.changpei.client").userAsync("PHPSESSID=a; moon_token=TK", function() end)
@@ -376,6 +396,7 @@ do
     package.preload["http.request"] = function()
         return {
             header = function(res, name) return res and res[name] end,
+            headerAll = function() return {} end,
             get = function(_url, opts, cb)
                 tokens[#tokens + 1] = opts.headers.token
                 if opts.headers.token == "OLD" then cb('{"code":9996,"msg":"请先登录"}') else cb('{"code":200,"data":{}}') end

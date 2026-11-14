@@ -51,7 +51,8 @@ function Web.commentAuth() return "", { Cookie = Web.cookie() } end
 ---@return HttpJob
 local function get(path, cookie, cb)
     return Request.get(HOST .. path, {
-        headers = { Cookie = cookie, ["User-Agent"] = UA },
+        headers = { ["User-Agent"] = UA },
+        jar = require("http.cookie_jar").session(SOURCE_ID, cookie),
         timeout = require("http.timeout").net(0.5),
         cache_ttl = 0,
     }, function(raw, err, res)
