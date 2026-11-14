@@ -12,7 +12,7 @@ local T = require("ffi/util").template
 ---@field identity BookIdentity|nil 书籍身份与属主源
 ---@field toc BookChapter[]|nil 目录快照；冷启动异步恢复，后台刷新失败仍用这份
 ---@field fallback_fraction number|nil 目录未恢复时保留已知全书进度，不能把章内比例当全书比例
----@field open_refresh boolean|nil 新开这本书：afterBootstrap 应尝试拉目录（节流挡住则保留到下次）
+---@field open_refresh boolean|nil 本次开书仍待拉新；成功才清除，节流 / 离线 / 失败保留
 ---@field request { cancel: fun() }|nil 在途章节打开任务
 ---@field target { path: string, within: number|nil, direction: "prev"|"next"|nil, xpointer: string|nil }|nil 已下载、等待 ReaderReady 的目标
 ---@field toc_job { cancel: fun() }|nil 目录恢复 / 后台刷新任务
@@ -23,7 +23,7 @@ local T = require("ffi/util").template
 local Chapter = {}
 
 local PREFETCH_AHEAD = 3
---- 目录剩余不超过这么多章时，切章后后台再拉一次（连载追更）。
+--- 目录剩余不超过这么多章时，翻页 / 切章后后台尝试拉新（连载追更）。
 Chapter.REFRESH_REMAINING = 5
 --- 切章（取章 + switchDocument）超过这么久按 warn 落盘。
 Chapter.SLOW_SWITCH_MS = 3000
@@ -270,12 +270,25 @@ function Chapter.afterBootstrap(plugin, session)
         identity = session.identity,
         position = require("reader.session.progress").position(session),
     })
-    local identity = chapter.identity
-    if not identity then return end
     local has_toc = type(chapter.toc) == "table" and #chapter.toc > 0
     local format_ok = type(source.isTocCurrent) ~= "function" or source:isTocCurrent(chapter.toc)
     -- 格式仍认的旧目录先预取；格式过期的等刷新成功再预取，避免按旧 uid 下章。
     if has_toc and format_ok then schedulePrefetch(chapter) end
+    Chapter.refreshTocIfNeeded(session)
+end
+
+--- 开书、翻页与联网恢复共用的静默拉新；失败保留开书重试意图。
+---@param session ReaderSessionSnapshot|nil
+function Chapter.refreshTocIfNeeded(session)
+    local chapter = session and session.chapter
+    local identity = chapter and chapter.identity
+    local source = identity and identity.source
+    if not source or chapter.toc == nil or chapter.toc_job
+        or chapter.request or chapter.target or chapter.switching or chapter.refreshing_toc then
+        return
+    end
+    local has_toc = #chapter.toc > 0
+    local format_ok = type(source.isTocCurrent) ~= "function" or source:isTocCurrent(chapter.toc)
     local idx = tonumber(identity.chapter_idx)
     local remaining = has_toc and idx and (#chapter.toc - idx) or nil
     local near_end = remaining ~= nil and remaining <= Chapter.REFRESH_REMAINING
@@ -291,29 +304,39 @@ function Chapter.afterBootstrap(plugin, session)
         if not has_toc then require("reader.session.progress").onTocReady(session, _("目录为空")) end
         return
     end
-    -- 节流：刚拉过 / 刚试过就跳过；挡住时保留 open_refresh，下次切章再试。
+    if not require("ui/network/manager"):isConnected() then
+        if not has_toc then
+            require("reader.session.progress").onTocReady(session, _("网络不可用，请先连接 Wi-Fi"))
+        end
+        return
+    end
+    -- 节流挡住时保留 open_refresh，后续翻页或联网再试。
     if not require("source.toc").allowRefresh(identity.source_id, identity.stable_id) then
         if not has_toc then require("reader.session.progress").onTocReady(session, _("目录为空")) end
         return
     end
-    chapter.open_refresh = nil
-    if chapter.toc_job and chapter.toc_job.cancel then chapter.toc_job.cancel() end
-    chapter.toc_job = refresh(source, identity, function(toc, err)
+    local completed = false
+    local job = refresh(source, identity, function(toc, err)
+        completed = true
         chapter.toc_job = nil
-        if chapter_session ~= chapter or session.chapter ~= chapter then return end
+        if chapter_session ~= chapter then return end
+        local current = require("reader.session").current()
+        if not current or current.chapter ~= chapter then return end
         if type(toc) ~= "table" or #toc == 0 then
-            if not has_toc then require("reader.session.progress").onTocReady(session, err or _("目录为空")) end
+            if not has_toc then require("reader.session.progress").onTocReady(current, err or _("目录为空")) end
             -- 失败：旧目录不动、不提示；有旧目录就继续预取。
             if has_toc and format_ok then schedulePrefetch(chapter) end
             return
         end
+        chapter.open_refresh = nil
         chapter.toc = toc
         chapter.fallback_fraction = nil
-        Snapshot.refresh(session)
-        require("ui/uimanager"):setDirty(plugin.ui.dialog, "ui")
-        require("reader.session.progress").onTocReady(session)
+        Snapshot.refresh(current)
+        require("ui/uimanager"):setDirty(current.ui.dialog, "ui")
+        require("reader.session.progress").onTocReady(current)
         schedulePrefetch(chapter)
     end)
+    if not completed then chapter.toc_job = job end
 end
 
 ---@param session ReaderSessionSnapshot|nil
@@ -449,7 +472,9 @@ function Chapter.refreshToc(session)
     }
     chapter.toc_refresh_dialog = waiting
     waiting:show()
-    chapter.toc_job = refresh(source, identity, function(toc, err)
+    local completed = false
+    local job = refresh(source, identity, function(toc, err)
+        completed = true
         -- 取消 / 关书会清掉 toc_refresh_dialog；迟到回包不能再 toast 或改 toc。
         if chapter.toc_refresh_dialog ~= waiting then return end
         chapter.toc_job = nil
@@ -464,6 +489,7 @@ function Chapter.refreshToc(session)
             }:show()
             return
         end
+        chapter.open_refresh = nil
         chapter.toc = toc
         chapter.fallback_fraction = nil
         Snapshot.refresh(session)
@@ -477,6 +503,7 @@ function Chapter.refreshToc(session)
             timeout = 2,
         }:show()
     end)
+    if not completed then chapter.toc_job = job end
     return true
 end
 
@@ -515,6 +542,7 @@ function Chapter.onChapterBoundary(session, delta)
     local current = tonumber(session.identity.chapter_idx)
     if not current then return false end
     local target = current + delta
+    if target > #chapter.toc then Chapter.refreshTocIfNeeded(session) end
     if target < 1 or target > #chapter.toc then return false end
     requestChapter(chapter, target, {
         direction = delta < 0 and "prev" or "next",
