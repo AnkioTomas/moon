@@ -1,18 +1,22 @@
 --[[--
-阅读页顶栏 / 底栏组合页：替代系统栏、跟随系统开关、全宽预览、组件左右与顺序。
+阅读页顶栏 / 底栏组合页：替代系统栏、跟随系统开关、全宽预览。
+组件列表复用侧栏「页面顺序」的交互：图标、名称、设置、上移 / 下移；
+专属设置（启用、对齐、进度小数、进度条粗细）收敛到对应组件页。
 
 @module koplugin.book.features.bars.page
 --]]
 
 local UIManager = require("ui/uimanager")
-local Sheet = require("ui.themes.widgets.sheet")
-local Position = require("desktop.pages.setting.position")
+local Overlay = require("desktop.pages.setting.overlay")
+local Button = require("ui.themes.widgets.button")
 local Row = require("ui.themes.widgets.row")
 local Spin = require("ui.themes.widgets.spin")
+local Theme = require("ui.themes")
 local Bars = require("features.bars")
-local Items = require("features.bars.items")
 local Layout = require("features.bars.layout")
 local Preview = require("features.bars.preview")
+local HorizontalGroup = require("ui/widget/horizontalgroup")
+local HorizontalSpan = require("ui/widget/horizontalspan")
 local _ = require("gettext")
 local T = require("ffi/util").template
 
@@ -72,9 +76,153 @@ end
 ---@param desktop table
 local function refresh(desktop)
     local ui = readerUi()
-    if ui then Bars.syncTopMargin(ui) end
+    if ui then
+        Bars.syncTopMargin(ui)
+        Bars.syncBottomHeight(ui)
+    end
     refreshReaderUi()
     desktop:updateView()
+end
+
+--- 组件专属设置页：启用 / 对齐，以及该组件自己的显示选项。
+---@param desktop table
+---@param which string
+---@param item BookReaderBarItem
+---@return BookSettingsOverlaySpec
+function ReaderBar.itemPage(desktop, which, item)
+    local function rows()
+        local index, align = Layout.slot(which, item.id)
+        local enabled = index ~= nil
+        local out = {}
+        out[#out + 1] = function(iw)
+            return Row.widget({
+                width = iw,
+                chevron = false,
+                kind = "toggle",
+                icon = "visibility",
+                title = _("启用"),
+                subtitle = _("关闭后不在栏上显示"),
+                status = enabled and _("开") or _("关"),
+                status_on = enabled,
+                callback = function()
+                    Layout.toggle(which, item.id)
+                    refresh(desktop)
+                end,
+            })
+        end
+        if enabled then
+            out[#out + 1] = function(iw)
+                return Row.choice({
+                    width = iw,
+                    icon = "align_horizontal_left",
+                    title = _("对齐"),
+                    items = {
+                        { value = "left", text = _("靠左") },
+                        { value = "center", text = _("居中") },
+                        { value = "right", text = _("靠右") },
+                    },
+                    current = align or "left",
+                    on_select = function(value)
+                        Layout.setAlign(which, item.id, value)
+                        refresh(desktop)
+                    end,
+                })
+            end
+            if which == "bottom" then
+                local _index, _align, row = Layout.slot(which, item.id)
+                out[#out + 1] = function(iw)
+                    return Row.choice({
+                        width = iw,
+                        icon = "vertical_split",
+                        title = _("所在行"),
+                        subtitle = _("双栏时生效；单栏时所有组件仍在同一行，行归属会保留"),
+                        items = {
+                            { value = "up", text = _("上行") },
+                            { value = "down", text = _("下行") },
+                        },
+                        current = row or "up",
+                        on_select = function(value)
+                            Layout.setRow(which, item.id, value)
+                            refresh(desktop)
+                        end,
+                    })
+                end
+            end
+        end
+        if item.id == "percent" then
+            out[#out + 1] = function(iw)
+                local decimals_on = Layout.percentDecimals()
+                return Row.widget({
+                    width = iw,
+                    chevron = false,
+                    kind = "toggle",
+                    icon = "percent",
+                    title = _("总进度显示两位小数"),
+                    subtitle = _("关闭时显示整数百分比"),
+                    status = decimals_on and _("开") or _("关"),
+                    status_on = decimals_on,
+                    callback = function()
+                        Layout.setPercentDecimals(not decimals_on)
+                        refresh(desktop)
+                    end,
+                })
+            end
+        end
+        if item.id == "progress_bar" then
+            out[#out + 1] = function(iw)
+                local own = Layout.progressThickness()
+                local theme_h = Layout.themeProgressThickness()
+                local value = own or theme_h
+                local status = own and tostring(own) or T(_("跟随主题 · %1"), theme_h)
+                return Row.widget({
+                    width = iw,
+                    kind = "nav",
+                    icon = "horizontal_rule",
+                    title = _("进度条粗细"),
+                    subtitle = _("底栏进度条的厚度"),
+                    status = status,
+                    status_on = true,
+                    callback = function()
+                        Spin:new{
+                            title = _("进度条粗细"),
+                            fields = { {
+                                value = value,
+                                min = Layout.BAR_THICKNESS_MIN,
+                                max = Layout.BAR_THICKNESS_MAX,
+                            } },
+                            callback = function(v)
+                                Layout.setProgressThickness(v)
+                                refresh(desktop)
+                            end,
+                        }:show()
+                    end,
+                })
+            end
+        end
+        return out
+    end
+    return {
+        title = item.label,
+        preview = function(iw)
+            return Preview.build(iw, which)
+        end,
+        sections = function()
+            return { { title = _("显示"), rows = rows() } }
+        end,
+    }
+end
+
+--- 侧栏「页面顺序」同款：36px ghost 上移 / 下移，边界禁用，点一下即落盘并刷新。
+---@param icon string
+---@param enabled boolean
+---@param callback fun()
+---@return table
+local function arrowButton(icon, enabled, callback)
+    local size = Theme.px(36)
+    return Button:new{
+        icon = icon, variant = "ghost", width = size, height = size,
+        enabled = enabled, callback = callback,
+    }
 end
 
 ---@param desktop table
@@ -83,63 +231,46 @@ end
 ---@return fun(width: number): table
 local function itemRow(desktop, item, which)
     return function(iw)
-        local index, align = Layout.slot(which, item.id)
+        local index = Layout.slot(which, item.id)
         local enabled = index ~= nil
-        local side = align == "center" and _("中")
-            or align == "right" and _("右")
-            or _("左")
+        local dual = which == "bottom" and Layout.stackedPreferred()
+        local count = #Layout.get(which)
+        local pos = index
+        if dual and enabled then
+            pos, count = Layout.rowPosition(which, item.id)
+        end
+        local function openSettings()
+            Overlay.push(desktop, ReaderBar.itemPage(desktop, which, item))
+        end
+        local function shift(delta)
+            if dual then
+                Layout.moveInRow(which, item.id, delta)
+            else
+                Layout.move(which, item.id, delta)
+            end
+            refresh(desktop)
+        end
+        -- 右侧：设置图标 + 上移 + 下移（与侧栏页面顺序同一套按钮和间距）。
+        -- 双栏时只在同一行内排序，不跨行。
+        local trailing = HorizontalGroup:new{
+            align = "center",
+            arrowButton("settings", true, openSettings),
+            HorizontalSpan:new{ width = Theme.px(4) },
+            arrowButton("arrow_upward", enabled and pos and pos > 1, function()
+                shift(-1)
+            end),
+            HorizontalSpan:new{ width = Theme.px(4) },
+            arrowButton("arrow_downward", enabled and pos and pos < count, function()
+                shift(1)
+            end),
+        }
         return Row.widget({
-    width = iw,
-    chevron = true,
-            kind = "nav",
+            width = iw,
+            chevron = false,
             icon = item.icon,
             title = item.label,
-            status = enabled and (side .. " · " .. T(_("第 %1 位"), index)) or _("关闭"),
-            status_on = enabled,
-            callback = function()
-                --- 执行布局变更后刷新阅读页与设置页。
-                ---@param change fun()
-                ---@return fun()
-                local function apply(change)
-                    return function()
-                        change()
-                        refresh(desktop)
-                    end
-                end
-                local actions = {{
-                    text = enabled and _("停用") or _("启用"),
-                    callback = apply(function() Layout.toggle(which, item.id) end),
-                }}
-                if enabled then
-                    local count = #Layout.get(which)
-                    actions[#actions + 1] = {
-                        text = _("靠左"), enabled = align ~= "left",
-                        callback = apply(function() Layout.setAlign(which, item.id, "left") end),
-                    }
-                    actions[#actions + 1] = {
-                        text = _("居中"), enabled = align ~= "center",
-                        callback = apply(function() Layout.setAlign(which, item.id, "center") end),
-                    }
-                    actions[#actions + 1] = {
-                        text = _("靠右"), enabled = align ~= "right",
-                        callback = apply(function() Layout.setAlign(which, item.id, "right") end),
-                    }
-                    actions[#actions + 1] = {
-                        text = _("上移"), enabled = index > 1,
-                        callback = apply(function() Layout.move(which, item.id, -1) end),
-                    }
-                    actions[#actions + 1] = {
-                        text = _("下移"), enabled = index < count,
-                        callback = apply(function() Layout.move(which, item.id, 1) end),
-                    }
-                    actions[#actions + 1] = Position.item(index, count, function(delta)
-                        Layout.move(which, item.id, delta)
-                        refresh(desktop)
-                    end)
-                end
-                actions[#actions + 1] = { text = _("关闭") }
-                Sheet:new{ title = item.label, items = actions }:show()
-            end,
+            status = trailing,
+            -- 点整行不改顺序，避免和右侧按钮抢手势；进设置只走设置图标。
         })
     end
 end
@@ -157,10 +288,14 @@ function ReaderBar:page(desktop, which)
     local enable_sub = top
         and _("跟随 KOReader 系统顶栏显示")
         or _("跟随 KOReader 系统底栏显示")
-    local item_rows = {}
-    for _idx, item in ipairs(Items.catalog(which)) do
-        item_rows[#item_rows + 1] = itemRow(desktop, item, which)
+    local function catalogRows(items)
+        local out = {}
+        for i = 1, #items do
+            out[i] = itemRow(desktop, items[i], which)
+        end
+        return out
     end
+    local item_rows = catalogRows(Layout.orderedCatalog(which))
     local page = {
         preview = function(iw)
             return Preview.build(iw, which)
@@ -272,20 +407,41 @@ function ReaderBar:page(desktop, which)
             },
         },
     }
+    if not top and Layout.stackedPreferred() then
+        -- 双栏：上下行各自一段列表，各自排序；未启用的单独一段。
+        local up, down, unused = {}, {}, {}
+        for _idx, item in ipairs(Layout.orderedCatalog(which)) do
+            local index, _align, row = Layout.slot(which, item.id)
+            if not index then
+                unused[#unused + 1] = item
+            elseif row == "down" then
+                down[#down + 1] = item
+            else
+                up[#up + 1] = item
+            end
+        end
+        page.sections[2] = { title = _("上行"), rows = catalogRows(up) }
+        page.sections[3] = { title = _("下行"), rows = catalogRows(down) }
+        if #unused > 0 then
+            page.sections[4] = { title = _("未启用"), rows = catalogRows(unused) }
+        end
+    end
     if not top then
-        table.insert(page.sections[1].rows, 4, function(iw)
-            local decimals_on = Layout.percentDecimals()
-            return Row.widget({
+        -- 底栏单栏 / 双栏是显式布局，不随组件居中自动拆行。
+        table.insert(page.sections[1].rows, 3, function(iw)
+            local stacked = Layout.stackedPreferred()
+            return Row.choice({
                 width = iw,
-                chevron = false,
-                kind = "toggle",
-                icon = "percent",
-                title = _("总进度显示两位小数"),
-                subtitle = _("关闭时显示整数百分比"),
-                status = decimals_on and _("开") or _("关"),
-                status_on = decimals_on,
-                callback = function()
-                    Layout.setPercentDecimals(not decimals_on)
+                icon = "view_agenda",
+                title = _("布局"),
+                subtitle = _("双栏时每个组件可放在上行或下行，空行不留白"),
+                items = {
+                    { value = "single", text = _("单栏") },
+                    { value = "double", text = _("双栏") },
+                },
+                current = stacked and "double" or "single",
+                on_select = function(value)
+                    Layout.setStacked(value == "double")
                     refresh(desktop)
                 end,
             })

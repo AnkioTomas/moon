@@ -6,6 +6,8 @@ local Assert = require("support.assert")
 
 local font = { top = nil }
 local top_height = 12
+local stacked = false
+local bar_h = 4
 local faces = {}
 package.preload["ffi/blitbuffer"] = function() return { Color8 = function(v) return v end } end
 package.preload["ui/geometry"] = function() return { new = function(_, o) return o end } end
@@ -42,6 +44,14 @@ package.preload["features.bars.layout"] = function()
         icons = function() return true end,
         percentDecimals = function() return false end,
         divider = function() return false end,
+        stackedBottom = function() return stacked end,
+        stackedPreferred = function() return stacked end,
+        bottomPaintHeight = function(_fs, size)
+            size = size or 14
+            return size + 2 + 2 + bar_h
+        end,
+        progressBarHeight = function() return bar_h end,
+        STACK_GAP = 2,
     }
 end
 package.preload["ui/font"] = function()
@@ -89,6 +99,15 @@ Assert.eq(Preview.build(600, "top").h, 38, "30 号字 + 8")
 -- 底栏大字号撑高预览条。
 ReaderUIStub.instance.view.footer.settings.text_font_size = 60
 Assert.eq(Preview.build(600, "bottom").h, 68)
+
+-- 两行用紧凑高度，不再以 56 起步；文字余量 + 间隙 + 进度条。
+ReaderUIStub.instance.view.footer.settings.text_font_size = 14
+stacked, bar_h = true, 4
+Assert.eq(Preview.build(600, "bottom").h, 14 + 2 + 2 + 4 + 2, "默认字号两行预览 = 紧凑内容 + 2px 外框")
+Assert.is_true(Preview.build(600, "bottom").h < 56, "两行预览不按单行 56 拉高")
+stacked, bar_h = true, 40
+Assert.eq(Preview.build(600, "bottom").h, 14 + 2 + 2 + 40 + 2, "两行预览高度 = 文字 + 余量 + 间隙 + 进度条 + 外框")
+stacked, bar_h = false, 4
 
 ReaderUIStub.instance = nil
 _G.G_reader_settings = saved_g

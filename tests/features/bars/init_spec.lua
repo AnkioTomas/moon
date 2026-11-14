@@ -44,6 +44,7 @@ end
 
 local layouts = { top = {}, bottom = {} }
 local replace = { top = true, bottom = true }
+local bottom_content_h = 14
 package.preload["features.bars.layout"] = function()
     return {
         replace = function(which) return replace[which] end,
@@ -56,6 +57,11 @@ package.preload["features.bars.layout"] = function()
         TOP_MARGIN_MIN = 0, TOP_MARGIN_MAX = 60, BOTTOM_MARGIN_MIN = 0, BOTTOM_MARGIN_MAX = 49,
         BAR_HORIZONTAL_PADDING = 12,
         fontSize = function(_which, fs) return fs and fs.text_font_size or 14 end,
+        stackedBottom = function() return false end,
+        stackedPreferred = function() return false end,
+        progressBarHeight = function() return 8 end,
+        bottomPaintHeight = function() return bottom_content_h end,
+        STACK_GAP = 2,
     }
 end
 local session_current = nil
@@ -217,6 +223,10 @@ local footer = {
     rescheduleFooterAutoRefreshIfNeeded = function() end,
     getHeight = function() return 32 end,
     bottom_padding = 0,
+    settings = { container_height = 14 },
+    height = 14,
+    updateFooterContainer = function(self) self.container_height = self.height end,
+    refreshFooter = function(self) self:updateFooterContainer() end,
 }
 ui_top.view.footer = footer
 ui_top.view.footer_visible = true
@@ -235,6 +245,18 @@ Assert.eq(footer:onHoldFooter(), "original hold")
 Assert.is_false(registered_touch_zone)
 Assert.len(post_ready, 1, "偏好等 ReaderReady 收尾后再应用")
 post_ready[1]()
+
+bottom_content_h = 40
+Bars.syncBottomHeight(ui_top)
+Assert.eq(footer.height, 40, "双栏内容高度传给原生 footer")
+Assert.eq(footer.container_height, 40)
+footer.height = 14
+footer:updateFooterContainer()
+Assert.eq(footer.container_height, 40, "原生重建容器仍保留双栏高度")
+replace.bottom = false
+Bars.syncBottomHeight(ui_top)
+Assert.eq(footer.container_height, 14, "停用替代后恢复原生高度")
+replace.bottom, bottom_content_h = true, 14
 
 -- 高度为 0（页眉子项全关）：先开 cre 时钟占位再发 SetStatusLine；高度正常时零事件。
 local header_h = 0

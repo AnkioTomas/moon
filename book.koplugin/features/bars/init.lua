@@ -244,6 +244,26 @@ function Bars.syncTopMargin(ui)
     ui:handleEvent(require("ui/event"):new("SetPageMargins", ui.typeset.unscaled_margins))
 end
 
+--- 双栏底栏或更粗的进度条需要比系统状态栏默认更高的容器；只改运行时 footer.height，不写 KOReader 的 container_height。
+---@param ui table ReaderUI
+function Bars.syncBottomHeight(ui)
+    local footer = ui and ui.view and ui.view.footer
+    if not footer or type(footer.refreshFooter) ~= "function" then
+        return
+    end
+    local settings = footer.settings
+    local base = Screen:scaleBySize((settings and settings.container_height) or 14)
+    local need = base
+    if Bars.bottomBarPreference() and Layout.replace("bottom") then
+        need = math.max(base, Layout.bottomPaintHeight(settings))
+    end
+    if footer.height == need then
+        return
+    end
+    footer.height = need
+    footer:refreshFooter(true, true)
+end
+
 --- 按 Book 设置同步系统顶底栏。
 ---@param ui table ReaderUI
 function Bars.applyPreferences(ui)
@@ -251,6 +271,7 @@ function Bars.applyPreferences(ui)
     Bars.hookTopMargin(ui.document)
     Bars.syncTopMargin(ui)
     Bars.setSystemBottom(ui, Bars.bottomBarPreference())
+    Bars.syncBottomHeight(ui)
 end
 
 --- 顶栏 overlay 是否应绘制（系统 Alt Status Bar 开）。
@@ -455,6 +476,20 @@ local function hijackFooter(ui)
         Guard.call("bars save preference", savePreference, "book_reader_bottom_bar", self.view.footer_visible)
         return handled
     end
+    -- 每次重建底栏容器时按当前布局 / 粗细补足高度，避免 resetLayout 后回到系统缺省值。
+    local orig_container = footer.updateFooterContainer
+    if type(orig_container) == "function" then
+        footer.updateFooterContainer = function(self)
+            local settings = self.settings
+            local base = Screen:scaleBySize((settings and settings.container_height) or 14)
+            if ours(self) then
+                self.height = math.max(base, Layout.bottomPaintHeight(settings))
+            else
+                self.height = base
+            end
+            return orig_container(self)
+        end
+    end
     footer._book_bars_hijacked = true
 end
 
@@ -565,6 +600,7 @@ local function paint(self, bb, x, y)
                 cache = cache,
                 prefix = "top:",
                 icons = icons,
+                stacked = false,
             }
         )
         -- ReaderView 先画书签折角再画扩展层；额外顶栏高度会盖住折角，需恢复到最上层。
@@ -581,14 +617,19 @@ local function paint(self, bb, x, y)
         -- 与顶栏同一固定水平留白。不用 ReaderFooter 的 horizontal_margin + progress_margin_width：
         -- 两者叠加约 20px，progress_margin_width 还可能跟随书籍页边距，Android 缺省值又被再缩放一次。
         local margin = Screen:scaleBySize(Layout.BAR_HORIZONTAL_PADDING)
+        local pad = Screen:scaleBySize(BOTTOM_CONTENT_INSET) + (footer.bottom_padding or 0)
+        local layout = Layout.get("bottom")
+        -- 双栏时把整段 overlay 交给绘制，两行紧凑块贴底；单行仍扣掉底部内缩和 Bottom margin。
+        local paint_h = Layout.stackedBottom(layout) and rect.h or math.max(1, rect.h - pad)
         Items.paint(
             bb, rect.x + margin, rect.y, math.max(1, rect.w - margin * 2),
-            rect.h - Screen:scaleBySize(BOTTOM_CONTENT_INSET) - footer.bottom_padding,
-            Layout.get("bottom"), ctx, {
+            paint_h,
+            layout, ctx, {
                 face = bottomTextFace(footer),
                 fgcolor = Blitbuffer.COLOR_BLACK,
                 cache = cache,
-                -- 不传 bar_h：进度条用主题高度（与预览一致）。ReaderFooter.progress_bar.height 在
+                stacked = Layout.stackedPreferred(),
+                -- 不传 bar_h：高度走 Layout.progressBarHeight（用户粗细或主题）。ReaderFooter.progress_bar.height 在
                 -- KOReader 底栏「显示进度条」关掉时被 resetLayout 置 0，复用它会让进度条开着却画不出来。
                 prefix = "bottom:",
                 icons = icons,
