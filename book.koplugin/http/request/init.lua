@@ -24,6 +24,7 @@ Cache.fetch(key, ttl, load, cb) 缓存解码结果，别手写「读缓存 → �
 ---@field timeout number|nil 请求超时秒
 ---@field connect_timeout number|nil 默认「网络超时」× 2/3（缺省 20）
 ---@field allow_redirects boolean|nil 显式 true 才跟 301/302
+---@field jar CookieJar|nil 进程内 Cookie 罐：自动带 Cookie（headers 里已写 Cookie 则不覆盖），回包 Set-Cookie 自动收进去
 ---@field auth_username string|nil
 ---@field auth_password string|nil
 ---@field accept string|nil get/post 默认 Accept
@@ -130,6 +131,20 @@ end
 ---@param cb fun(res: table|nil, err: any)
 ---@return HttpJob
 function Request.request(opts, cb)
+    local jar, jar_seq = opts.jar, opts.jar and opts.jar.seq
+    if jar then
+        local explicit = false
+        for key in pairs(opts.headers or {}) do
+            if key:lower() == "cookie" then explicit = true end
+        end
+        local cookie = not explicit and jar:header(opts.url)
+        if cookie then
+            local copied = {}
+            for key, value in pairs(opts) do copied[key] = value end
+            copied.headers = Header.merge({ Cookie = cookie }, opts.headers)
+            opts = copied
+        end
+    end
     local ctx, begin_err = Fetch.begin(opts, "book.http")
     if not ctx then
         return Fetch.fail("http callback", cb, nil, begin_err)
@@ -145,6 +160,9 @@ function Request.request(opts, cb)
         state.done = true
         Fetch.closeBody(state.client)
         state.client = nil
+        if jar and res and not state.cancelled then
+            jar:absorb(opts.url, Request.headerAll(res, "Set-Cookie"), jar_seq)
+        end
         Fetch.log(ctx, err or (state.cancelled and "cancelled"), "status", res and res.code or "-",
             "bytes", res and type(res.body) == "string" and #res.body or 0)
         if not state.cancelled then
