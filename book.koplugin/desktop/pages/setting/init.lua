@@ -258,6 +258,7 @@ local function coreEntries(desktop)
             },
         },
         network,
+        { group = "maintenance", order = 80, id = "refresh_diagnostics", row = Maintenance:refreshDiagRow(desktop) },
         { group = "maintenance", order = 90, id = "close_desktop", row = Maintenance:closeRow(desktop) },
     }
 end

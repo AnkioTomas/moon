@@ -1,4 +1,6 @@
 return {
+    ["刷新诊断"] = "Refresh diagnostics",
+    ["记录触发位置和波形，重开书生效"] = "Record refresh origins and waveforms; reopen the book to apply",
     ["摘要待办内容损坏，无法恢复"] = "The pending summary request is damaged and cannot be restored",
     ["摘要待办已撤销"] = "The pending summary request was cancelled",
     ["AI 返回了空摘要"] = "AI returned an empty summary",

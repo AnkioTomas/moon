@@ -55,6 +55,17 @@ function Input:waitEvent(...)
     return wait_impl(self, ...)
 end
 package.loaded["device"] = { input = Input }
+local reader_settings = { refresh_diagnostics = false }
+_G.G_reader_settings = {
+    readSetting = function(_self, key)
+        if key == "full_refresh_count" then return 0 end
+        if key == "refresh_on_pages_with_images" then return false end
+        return nil
+    end,
+}
+package.loaded["utils.settings"] = {
+    get = function() return reader_settings end,
+}
 
 package.loaded["ui/time"] = {
     now = function()
@@ -237,3 +248,163 @@ Assert.is_true(Diag.install())
 Assert.is_true(Diag.isInstalled())
 Assert.is_true(Diag.isEnabled())
 Diag.uninstall()
+
+-- Detailed refresh tracing is opt-in and leaves callback timing and native arguments intact.
+local refresh_impl
+local dirty_impl
+UIManager._refresh_stack = {}
+UIManager.refresh_count = 0
+function UIManager:setDirty(...)
+    return dirty_impl(self, ...)
+end
+function UIManager:_refresh(...)
+    return refresh_impl(self, ...)
+end
+local native_dirty = UIManager.setDirty
+local native_refresh = UIManager._refresh
+local screen_args
+local Screen = { waveform_partial = 8, waveform_full = 2 }
+function Screen:mech_refresh(...)
+    screen_args = { n = select("#", ...), ... }
+    self.debug("mxc_update: 600x800 region @ (0, 0) with marker 9 (WFM: 8 & UPD: 1)")
+    return "sent", nil, "native-result"
+end
+Screen.debug = function(message, ...)
+    return message, nil, ...
+end
+local native_mech = Screen.mech_refresh
+local native_debug = Screen.debug
+package.loaded["device"].screen = Screen
+Assert.is_true(Diag.install())
+Assert.eq(UIManager.setDirty, native_dirty)
+Assert.eq(UIManager._refresh, native_refresh)
+Assert.eq(Screen.mech_refresh, native_mech)
+Assert.eq(Screen.debug, native_debug)
+Diag.uninstall()
+
+reader_settings.refresh_diagnostics = true
+Diag.install()
+local wrapped_dirty = UIManager.setDirty
+Diag.install()
+Assert.eq(UIManager.setDirty, wrapped_dirty, "重复安装不叠包")
+Assert.len(lines("refresh.start"), 1)
+local region = { x = 0, y = 0, w = 600, h = 800 }
+local private_widget = {
+    name = "/private/secret-book.epub", title = "PRIVATE TITLE",
+    paintTo = function() end,
+}
+local deferred_calls = 0
+local deferred
+dirty_impl = function(self, _widget, mode, rect, dither, extra)
+    if type(mode) == "function" then
+        deferred = mode
+    elseif mode then
+        self:_refresh(mode, rect, dither)
+    end
+    return true, nil, extra
+end
+refresh_impl = function(self, _mode, rect, dither)
+    self.refresh_count = self.refresh_count + 1
+    self._refresh_stack = { { mode = "full", region = rect, dither = dither } }
+    return "queued", nil, rect
+end
+local dirty_a, dirty_b, dirty_c = UIManager:setDirty(private_widget, "partial", region, true, "extra")
+Assert.is_true(dirty_a)
+Assert.is_nil(dirty_b)
+Assert.eq(dirty_c, "extra")
+local dirty_lines = lines("refresh.dirty")
+Assert.matches(dirty_lines[#dirty_lines], "mode=partial")
+Assert.matches(dirty_lines[#dirty_lines], "source=page_diag_spec%.lua:")
+local resolved = lines("refresh.resolve")
+Assert.matches(resolved[#resolved], "requested=partial")
+Assert.matches(resolved[#resolved], "queue=full@0,0,600,800:dither=true")
+Assert.matches(resolved[#resolved], "count=0%->1")
+Assert.is_nil(table.concat(logs, "\n"):find("secret-book", 1, true))
+Assert.is_nil(table.concat(logs, "\n"):find("PRIVATE TITLE", 1, true))
+Assert.is_nil(table.concat(logs, "\n"):find("/Users/", 1, true))
+
+local callback = function()
+    deferred_calls = deferred_calls + 1
+    return "partial", region, false
+end
+UIManager:setDirty(nil, callback)
+Assert.eq(deferred, callback, "传给 KOReader 的回调身份不变")
+Assert.eq(deferred_calls, 0, "诊断不得提前执行 deferred 刷新")
+dirty_lines = lines("refresh.dirty")
+Assert.matches(dirty_lines[#dirty_lines], "mode=deferred")
+Assert.matches(dirty_lines[#dirty_lines], "callback=page_diag_spec%.lua:")
+
+check_impl = function() return nil end
+UIManager:_checkTasks()
+repaint_impl = function(self)
+    local mode, rect, dither = deferred()
+    self:_refresh(mode, rect, dither)
+    Screen:mech_refresh(false, 8, 0, 0, 600, 800, false, "native-extra")
+    self._refresh_stack = {}
+    return nil, "repaint-result"
+end
+package.loaded["apps/reader/readerui"] = {
+    instance = { document = { getDrawnImagesStatistics = function() return 1, 1 end } },
+}
+local paint_a, paint_b = UIManager:_repaint()
+Assert.is_nil(paint_a)
+Assert.eq(paint_b, "repaint-result")
+Assert.eq(deferred_calls, 1)
+Assert.len(lines("refresh.screen"), 1, "一次 native 调用只记一次，不数 Imp fallback")
+Assert.matches(lines("refresh.screen")[1], "pending_requests=1%-2")
+Assert.matches(lines("refresh.screen")[1], "flashing=false waveform=8")
+Assert.matches(lines("refresh.screen")[1], "reader_images=1 reader_image_coverage=1")
+Assert.matches(lines("refresh.driver")[1], "WFM: 8 & UPD: 1")
+Assert.eq(screen_args.n, 8)
+Assert.eq(screen_args[1], false)
+Assert.eq(screen_args[2], 8)
+Assert.eq(screen_args[8], "native-extra")
+
+-- Pure refreshes (no dirty widget/afterPaint) and direct Screen calls remain visible.
+local resolved_a, resolved_b, resolved_c = UIManager:_refresh("full", region, true)
+Assert.eq(resolved_a, "queued")
+Assert.is_nil(resolved_b)
+Assert.eq(resolved_c, region)
+Assert.matches(lines("refresh.resolve")[3], "pending_requests=none requested=full")
+local sent_a, sent_b, sent_c = Screen:mech_refresh(true, 2, 0, 0, 600, 800, true)
+Assert.eq(sent_a, "sent")
+Assert.is_nil(sent_b)
+Assert.eq(sent_c, "native-result")
+Assert.matches(lines("refresh.screen")[2], "pending_requests=none flashing=true waveform=2")
+local debug_a, debug_b, debug_c = Screen.debug("ordinary debug", "extra")
+Assert.eq(debug_a, "ordinary debug")
+Assert.is_nil(debug_b)
+Assert.eq(debug_c, "extra")
+Assert.len(lines("refresh.driver"), 2, "不放大其它驱动 debug")
+Screen.debug("MXCFB_SEND_UPDATE ioctl failed:", "test-error")
+Assert.matches(lines("refresh.driver")[3], "test%-error")
+
+-- Non-file Lua chunks may contain user data: never log their source text.
+local chunk = assert(loadstring("return function() return 'PRIVATE CHUNK' end"))()
+UIManager:setDirty("all", chunk)
+Assert.matches(lines("refresh.dirty")[3], "callback=lua%-chunk")
+Assert.is_nil(table.concat(logs, "\n"):find("PRIVATE CHUNK", 1, true))
+refresh_impl = function() error("refresh-boom") end
+Assert.errors(function() UIManager:_refresh("partial", region) end, "refresh%-boom")
+
+-- A later third-party wrapper is not overwritten during uninstall.
+local previous_mech = Screen.mech_refresh
+local later_mech = function(self, ...) return previous_mech(self, ...) end
+Screen.mech_refresh = later_mech
+Diag.uninstall()
+Assert.eq(Screen.mech_refresh, later_mech)
+Assert.eq(UIManager.setDirty, native_dirty)
+Assert.eq(UIManager._refresh, native_refresh)
+Assert.eq(Screen.debug, native_debug)
+local ended = #logs
+Screen.debug("MXCFB_SEND_UPDATE ioctl failed:", "after-uninstall")
+Screen:mech_refresh(false, 8, 0, 0, 600, 800, false)
+Assert.eq(#logs, ended)
+local screen_before = #lines("refresh.screen")
+local driver_before = #lines("refresh.driver")
+Diag.install()
+Screen:mech_refresh(false, 8, 0, 0, 600, 800, false)
+Assert.eq(#lines("refresh.screen"), screen_before + 1, "重装不能复活嵌在别人 wrapper 里的旧钩子")
+Assert.eq(#lines("refresh.driver"), driver_before + 1)
+Diag.uninstall()
+reader_settings.refresh_diagnostics = false
