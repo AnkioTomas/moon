@@ -440,7 +440,14 @@ local function hijackFooter(ui)
         if force_repaint and ours(self) then
             full_repaint = true
         end
-        return orig_update(self, force_repaint, full_repaint)
+        local started = require("utils.perf").now()
+        return (function(...)
+            require("reader.page_diag").record("footer.update", started, {
+                force = force_repaint and true or false,
+                full = full_repaint and true or false,
+            })
+            return ...
+        end)(orig_update(self, force_repaint, full_repaint))
     end
     local orig_toggle = footer.onToggleFooterMode
     footer.onToggleFooterMode = function(self)
@@ -486,7 +493,9 @@ function Bars:startClock()
         if require("apps/reader/readerui").instance ~= ui then
             return
         end
+        local started = require("utils.perf").now()
         refreshBars(ui)
+        require("reader.page_diag").record("bars.clock", started)
         UIManager:scheduleIn(61 - tonumber(os.date("%S")), tick)
     end)
     self._clock = tick
@@ -600,7 +609,9 @@ end
 ---@param plugin BookPlugin
 local function onDeviceStateChanged(plugin)
     if plugin.ui.document then
+        local started = require("utils.perf").now()
         refreshBars(plugin.ui)
+        require("reader.page_diag").record("bars.device", started)
     end
 end
 

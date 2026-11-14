@@ -157,6 +157,7 @@ end
 function BookPlugin:onExit()
     logger.info("book plugin exit")
     require("ui.exit_windows").exiting = true
+    Guard.call("page_diag.uninstall", require("reader.page_diag").uninstall)
     Features.emit("onExit", self)
     Guard.call("exit.closeWindows", require("ui.exit_windows").close)
     logger.info("book plugin exit done")
