@@ -300,6 +300,9 @@ function Client:_jsonAsync(method, path, opts, cb)
     local cache_key = cache_ttl > 0 and Cache.key(method, "zlib://api" .. path, opts.form) or nil
     local deliver
     local headers = self:headers(opts.session)
+    -- 会话 Cookie 交给会话罐：手动跟随的每一跳都会收 Set-Cookie，下一跳 / 下次请求自动带上
+    local jar = headers.Cookie and require("http.cookie_jar").session("zlib", headers.Cookie)
+    headers.Cookie = nil
     if body then
         headers["Content-Type"] = "application/x-www-form-urlencoded; charset=UTF-8"
         headers["X-Requested-With"] = "XMLHttpRequest"
@@ -363,6 +366,7 @@ function Client:_jsonAsync(method, path, opts, cb)
             method = m,
             body = req_body,
             headers = withMirrorAuth(url, headers),
+            jar = jar,
             timeout = opts.timeout or require("http.timeout").net(1),
         }, function(res, err)
             if cancelled or settled then return end
