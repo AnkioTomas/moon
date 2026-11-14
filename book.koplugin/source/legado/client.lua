@@ -257,6 +257,17 @@ function Client.shelfAsync(cb, cfg)
     end, cfg)
 end
 
+--- 书架分组（用户在阅读 App 里建的分组）。轻阅读没有这个接口，回 nil 即可。
+---@param cb fun(rows: table[]|nil, err: string|nil)
+---@return { cancel: fun() }
+function Client.groupsAsync(cb)
+    if Client.mode() == "qread" then return require("source.base").defer(cb, nil, "unsupported") end
+    return call("/getBookGroups", {}, 0.5, "shelf", function(data, err)
+        if type(data) ~= "table" then cb(nil, err); return end
+        cb(data)
+    end)
+end
+
 --- 目录。book_url + 书源（轻阅读必需，其余忽略）。
 ---@param book_url string
 ---@param origin string|nil

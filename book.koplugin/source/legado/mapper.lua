@@ -21,12 +21,25 @@ local function cover(coverUrl, row)
     return coverUrl(path)
 end
 
---- 书架行 → Book[]。bookUrl 是书在阅读 App 里的唯一键。
+--- 书的 group 是分组 id 的位掩码（id 为 2 的幂）；返回命中的分组名，没有分组返回 nil。
+local function groupNames(groups, mask)
+    local names = {}
+    mask = tonumber(mask) or 0
+    for _idx, g in ipairs(groups) do
+        local id = tonumber(g.groupId)
+        if id and id > 0 and type(g.groupName) == "string" and math.floor(mask / id) % 2 == 1 then
+            names[#names + 1] = g.groupName
+        end
+    end
+    return #names > 0 and table.concat(names, ",") or nil
+end
+
+--- 书架行 → Book[]。rows.groups 有值时分类取阅读 App 的书架分组（权威：没分组就是未分类）；否则退回书源标签 kind。bookUrl 是书在阅读 App 里的唯一键。
 ---@param coverUrl fun(path: string): string 封面代理地址构造（Client.coverUrl）
 ---@param rows table[]
 ---@return Book[]
 function Mapper.shelfList(coverUrl, rows)
-    local out = {}
+    local out, groups = {}, rows.groups
     for _idx, row in ipairs(rows) do
         if type(row.bookUrl) == "string" and row.bookUrl ~= "" then
             out[#out + 1] = {
@@ -34,7 +47,8 @@ function Mapper.shelfList(coverUrl, rows)
                 stable_id = row.bookUrl,
                 title = row.name,
                 authors = row.author,
-                category = row.kind,
+                category = groups and groupNames(groups, row.group) or (not groups and row.kind or nil),
+                category_authoritative = groups and true or nil,
                 intro = row.intro and Text.stripHtml(row.intro),
                 cover = cover(coverUrl, row),
             }
