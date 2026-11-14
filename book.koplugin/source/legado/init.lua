@@ -54,7 +54,23 @@ end
 --- 书架远端：Shelf.syncAsync 要的三个冒号方法。书只能在阅读 App 里加，本地没有「加入」入口。
 local Remote = {}
 
-function Remote:shelfSyncAsync(cb) return Client.shelfAsync(cb) end
+--- 书架 + 分组：分组取不到（旧版 App / 轻阅读）不影响同步，分类退回书源标签。
+function Remote:shelfSyncAsync(cb)
+    local cancelled, job = false, nil
+    job = Client.shelfAsync(function(rows, err)
+        if cancelled then return end
+        if not rows then cb(nil, err); return end
+        job = Client.groupsAsync(function(groups)
+            if cancelled then return end
+            rows.groups = groups
+            cb(rows)
+        end)
+    end)
+    return { cancel = function()
+        cancelled = true
+        job.cancel()
+    end }
+end
 
 function Remote:addToShelfAsync(_stable_id, cb)
     return SourceBase.defer(cb, nil, _("请在阅读 App 里添加书籍"))

@@ -145,6 +145,20 @@ do
     Assert.eq(books[2].cover, "http://h:1122/cover?path=%2Flocal%2Fb.jpg")
 end
 
+-- 有书架分组时分类取分组名（位掩码，可多组；没分组=未分类且权威），不再用网站抓来的 kind。
+do
+    local rows = {
+        { bookUrl = "a", kind = "玄幻", group = 5 },
+        { bookUrl = "b", kind = "玄幻", group = 0 },
+    }
+    rows.groups = { { groupId = -1, groupName = "全部" }, { groupId = 1, groupName = "追更" },
+        { groupId = 2, groupName = "完结" }, { groupId = 4, groupName = "收藏" } }
+    local books = Mapper.shelfList(function(p) return p end, rows)
+    Assert.eq(books[1].category, "追更,收藏")
+    Assert.is_nil(books[2].category)
+    Assert.is_true(books[2].category_authoritative)
+end
+
 -- 阅读位置与目录：durChapterIndex 0 基；没读过为 nil；目录 uid 是 0 基序号。
 do
     local pos = Mapper.readPos({ durChapterIndex = 2, durChapterPos = 30, durChapterTitle = "第3章", durChapterTime = 1 })
