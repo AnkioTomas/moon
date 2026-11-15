@@ -976,6 +976,7 @@ return {
     ["章节内容获取失败"] = "Failed to fetch chapter content",
     ["章节列表为空"] = "Chapter list is empty",
     ["章节打开失败"] = "Failed to open chapter",
+    ["章节文件不存在"] = "Chapter file is missing",
     ["端口"] = "Port",
     ["第 %1 / %2 章"] = "Chapter %1 / %2",
     ["第 %1 / %2 页"] = "Page %1 of %2",

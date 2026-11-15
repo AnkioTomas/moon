@@ -82,6 +82,7 @@ local function installEndOfBookHandler(plugin, ui)
     local original = status.onEndOfBook
     status.onEndOfBook = Guard.wrap("onEndOfBook", function(self, ...)
         local snapshot = Session._snapshot
+        require("utils.log").info("book end of book", snapshot and snapshot.identity and snapshot.identity.chapter_idx)
         if ChapterMode.onChapterBoundary(snapshot, 1) then
             return true
         end

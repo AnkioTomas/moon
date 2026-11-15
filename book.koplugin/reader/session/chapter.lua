@@ -5,6 +5,7 @@
 --]]
 
 local Snapshot = require("reader.session.snapshot")
+local logger = require("utils.log")
 local _ = require("gettext")
 local T = require("ffi/util").template
 
@@ -400,6 +401,13 @@ local function requestChapter(chapter, idx, opts)
         end
         UIManager:nextTick(function()
             if chapter_session ~= chapter then return end
+            -- showReader 对不存在的文件只弹提示、不开新书；此时旧书已关，窗口栈清空后 KOReader 直接退出。
+            if require("libs/libkoreader-lfs").attributes(path, "mode") ~= "file" then
+                chapter.target = nil
+                logger.warn("chapter switch missing file", idx, path)
+                failRequest(chapter, _("章节文件不存在"))
+                return
+            end
             chapter.switching = true
             local ok, switch_err = pcall(function()
                 if ReaderUI.instance then
@@ -412,7 +420,13 @@ local function requestChapter(chapter, idx, opts)
             if not ok and chapter_session == chapter then
                 chapter.switching = false
                 chapter.target = nil
+                logger.warn("chapter switch failed", idx, tostring(switch_err))
                 failRequest(chapter, tostring(switch_err or _("章节打开失败")))
+                -- 旧书可能已在 switchDocument 里关掉：没有阅读器了就回桌面，否则窗口栈清空会退出 KOReader。
+                if not ReaderUI.instance then
+                    local fm = require("desktop").ensureFileManager()
+                    require("desktop").open(fm.book)
+                end
             end
         end)
     end)

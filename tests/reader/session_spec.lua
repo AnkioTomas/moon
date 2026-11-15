@@ -10,6 +10,16 @@ local Stubs = require("support.stubs")
 Stubs.install()
 Stubs.reset()
 
+-- 假章节路径 /cache/N.html 视作存在；切章前会校验目标文件。
+do
+    local lfs = require("libs/libkoreader-lfs")
+    local attributes = lfs.attributes
+    lfs.attributes = function(path, name)
+        if tostring(path):find("^/cache/") and name == "mode" then return "file" end
+        return attributes(path, name)
+    end
+end
+
 local calls = { tracker = {}, progress = {}, chapter = {}, reader = {}, book = {} }
 local progress_saves = 0
 -- KOReader 全局设置桩：repairMetadataArc 读写
