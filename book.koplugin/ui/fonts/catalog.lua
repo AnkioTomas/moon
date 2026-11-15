@@ -31,10 +31,16 @@ Catalog.LIST_TTL = 30 * 24 * 3600 -- 30 天
 --- 本地可选扩展名（不含 woff：微信下载落在 .moon/fonts）
 local LOCAL_EXT = { ttf = true, ttc = true, cff = true, otf = true }
 
---- 本地扫描结果（用户在前、本地在后），一个会话只扫一次：扫描要起子进程，子进程里加载的
---- FontList 回不到主进程，每次重扫就是每次都卡。KOReader 的 FontList 本身也是会话级的，新放入的字体重启后出现。
+--- 本地扫描结果（用户在前、本地在后）：扫描要起子进程，所以按设置目录 fonts 的修改时间缓存，
+--- 目录没变就不重扫；用户新放进去的字体下次打开列表即可见。
 ---@type MoonFontItem[]|nil
 local scanned
+---@type integer|nil
+local scanned_mtime
+
+local function fontsMtime()
+    return require("libs/libkoreader-lfs").attributes(Fonts.settingsFontsDir(), "modification")
+end
 
 --- 在线字体默认开启；仅当设置显式为 false 时关闭（opt-out）。
 ---@return boolean
@@ -176,6 +182,8 @@ end
 ---@param cb fun(items: MoonFontItem[], err: string|nil)
 ---@return { cancel: fun() }
 function Catalog.listAsync(cb)
+    local mtime = fontsMtime()
+    if scanned_mtime ~= mtime then scanned = nil end
     local need_scan, need_net = not scanned, Catalog.onlineEnabled()
     local cancelled, pending = false, (need_scan and 1 or 0) + (need_net and 1 or 0)
     local weread, err
@@ -199,7 +207,7 @@ function Catalog.listAsync(cb)
         name = "font.scan",
         kind = "medium",
         on_done = function(data)
-            scanned = data
+            scanned, scanned_mtime = data, mtime
             finish()
         end,
         on_failed = function(e)
