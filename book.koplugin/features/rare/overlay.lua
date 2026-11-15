@@ -132,7 +132,9 @@ local faces = {}
 local function annFace(px)
     if not faces[px] then
         local ftsize = require("ffi/freetype").newFaceSize(facePath(), px)
-        faces[px] = { ftsize = ftsize, hash = FACE .. "@px" .. px, orig_font = FACE, realname = FACE, size = px, orig_size = px }
+        -- RenderText 取回退字体（中文释义）时按 orig_size 再乘一次屏幕 DPI；这里先除掉，回退字形才是 px 大小。
+        local scale = require("device").screen:scaleBySize(100) / 100
+        faces[px] = { ftsize = ftsize, hash = FACE .. "@px" .. px, orig_font = FACE, realname = FACE, size = px, orig_size = px / scale }
     end
     return faces[px]
 end

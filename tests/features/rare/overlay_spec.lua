@@ -54,7 +54,7 @@ package.preload["workers.job"] = function()
         return { settled = true, cancel = function() end }
     end }
 end
-package.preload["device"] = function() return { screen = { bb = {} } } end
+package.preload["device"] = function() return { screen = { bb = {}, scaleBySize = function(_self, n) return n end } } end
 local Stubs = require("support.stubs")
 local Overlay = require("features.rare.overlay")
 local dirty = {}
