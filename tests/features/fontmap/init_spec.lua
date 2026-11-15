@@ -158,7 +158,7 @@ Assert.eq(reader.reloads, 0, "重开后不再次 reloadDocument")
 state:start(true)
 Assert.len(Themed.last("list").items, 3)
 Assert.eq(Themed.last("list").items[1].mandatory, "文楷")
-Assert.eq(Themed.last("list").items[2].mandatory, "本机已有")
+Assert.eq(Themed.last("list").items[2].mandatory, "书内自带")
 local previous_jobs
 stylesheet_calls, fonts_calls, updates, previous_jobs = reader.document.stylesheet_calls, reader.document.fonts_calls, reader.updates, jobs
 state:start(true)
@@ -294,3 +294,22 @@ local before_pick_saved = saved
 picker.on_select({ id = "Kai", name = "Kai", kind = "system" }, "Kai", "Kai")
 Assert.eq(saved, before_pick_saved, "关闭后字体选择的迟到结果不再保存/重载")
 FontMap.onExit({ ui = switching, path = "" })
+
+-- 内置别名：本机没有 Arial 时自动映射到已有的无衬线字体；手动映射优先；符号字体不提示。
+do
+    settings.enabled = true
+    mappings.Absent = nil
+    local auto = ui(1)
+    auto.document.engineInit = function()
+        return { getFontFaces = function() return { "Noto Sans", "Noto Serif" } end }
+    end
+    open(auto)
+    local st = auto._book_fontmap
+    Assert.eq(st.auto.arial, "Noto Sans")
+    Assert.eq(st.auto["times new roman"], "Noto Serif")
+    Assert.is_nil(st.auto["courier new"], "本机没有等宽候选就不映射")
+    Assert.matches(auto.document.appended_css, 'font%-family:"arial";src:local%("Noto Sans"%)')
+    st.names = { "Arial", "Symbol", "Courier New", "Weird" }
+    Assert.eq(table.concat(st:missing(), ","), "Courier New,Weird")
+    FontMap.onExit({ ui = auto, path = "" })
+end

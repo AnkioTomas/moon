@@ -14,6 +14,7 @@ local T = require("ffi/util").template
 ---@field ui table
 ---@field names string[]|nil
 ---@field active table<string, string>
+---@field auto table<string, string> 内置别名自动映射的结果（键为小写源字体名）
 ---@field alias_css string
 ---@field job BookJob|nil
 ---@field dialog table|nil
@@ -24,6 +25,27 @@ local T = require("ffi/util").template
 ---@field setFontFamilyFontFaces function|nil
 local FontMap = {}
 FontMap.__index = FontMap
+
+-- 常见的 Office / 出版方字体名 → 本机候选字体（按序取第一个已安装的）。
+local SANS = { "Noto Sans", "Noto Sans CJK SC", "Liberation Sans", "FreeSans", "DejaVu Sans" }
+local SERIF = { "Noto Serif", "Noto Serif CJK SC", "Liberation Serif", "FreeSerif", "DejaVu Serif" }
+local MONO = { "Noto Sans Mono", "Liberation Mono", "FreeMono", "DejaVu Sans Mono" }
+local SONG = { "Noto Serif CJK SC", "Source Han Serif SC", "Noto Serif SC", "Songti SC" }
+local HEI = { "Noto Sans CJK SC", "Source Han Sans SC", "Noto Sans SC", "PingFang SC" }
+local KAI = { "Kaiti SC", "AR PL UKai CN", "Noto Serif CJK SC" }
+FontMap.AUTO = {}
+for _idx, group in ipairs({
+    { SANS, "arial", "helvetica", "tahoma", "verdana", "calibri", "franklin gothic medium cond" },
+    { SERIF, "times new roman", "times", "century schoolbook", "cambria", "georgia", "garamond", "palatino linotype" },
+    { MONO, "courier", "courier new", "consolas", "lucida console" },
+    { SONG, "宋体", "simsun", "nsimsun", "songti sc", "fangsong", "仿宋", "仿宋_gb2312" },
+    { HEI, "黑体", "simhei", "微软雅黑", "microsoft yahei", "pingfang sc" },
+    { KAI, "楷体", "kaiti", "楷体_gb2312", "kaiti sc" },
+}) do
+    for idx = 2, #group do FontMap.AUTO[group[idx]] = group[1] end
+end
+-- 符号 / 数学字体：正文几乎不用，不提示也不映射。
+FontMap.IGNORED = { symbol = true, ["cambria math"] = true, wingdings = true, ["segoe ui symbol"] = true }
 
 function FontMap:prepare()
     if self.prepared then return end
@@ -37,7 +59,23 @@ function FontMap:prepare()
         end
         if faces[mapping.id] then self.active[name] = faces[mapping.id] end
     end
+    self:autoMap()
     self.alias_css = FontMap.css(self.active)
+end
+
+--- 没有手动映射、本机也没有同名字体时，按内置别名表映射到本机已有的相近字体。
+function FontMap:autoMap()
+    local faces, installed, manual = {}, self:installed(), {}
+    for name in pairs(self.active) do manual[name:lower()] = true end
+    for _idx, face in ipairs(self.ui.document:engineInit().getFontFaces()) do faces[face:lower()] = face end
+    for name, candidates in pairs(FontMap.AUTO) do
+        if not manual[name] and not installed[name] then
+            for _idx, candidate in ipairs(candidates) do
+                local face = faces[candidate:lower()]
+                if face then self.active[name] = face; self.auto[name] = face; break end
+            end
+        end
+    end
 end
 
 --- KOReader a72790090 首次更新了支持用户样式表 @font-face 的 CRE。
@@ -82,7 +120,7 @@ end
 ---@param ui table
 ---@return BookFontMap
 function FontMap.new(ui)
-    local self = setmetatable({ ui = ui, active = {}, alias_css = "", closed = false, requested = false }, FontMap)
+    local self = setmetatable({ ui = ui, active = {}, auto = {}, alias_css = "", closed = false, requested = false }, FontMap)
     local document = ui.document
     self.setStyleSheet = document.setStyleSheet
     document.setStyleSheet = function(doc, file, appended)
@@ -127,7 +165,10 @@ function FontMap:missing()
     self:prepare()
     local installed, missing = self:installed(), {}
     for _idx, name in ipairs(self.names or {}) do
-        if not installed[name:lower()] and not self.active[name] then missing[#missing + 1] = name end
+        local key = name:lower()
+        if not installed[key] and not self.active[name] and not self.auto[key] and not FontMap.IGNORED[key] then
+            missing[#missing + 1] = name
+        end
     end
     return missing
 end
@@ -160,11 +201,14 @@ end
 function FontMap:items(names)
     local mappings = require("utils.settings").get("features.fontmap").mappings
     local installed, items = self:installed(), {}
+    local embedded = {}
+    for name in pairs(self.ui.document:getEmbeddedFontList()) do embedded[name:lower()] = true end
     for _idx, name in ipairs(names) do
         items[#items + 1] = {
             text = name,
-            mandatory = self.active[name] and mappings[name].name
-                or (installed[name:lower()] and _("本机已有") or _("缺失字体")),
+            mandatory = mappings[name] and self.active[name] and mappings[name].name
+                or self.auto[name:lower()] and T(_("自动：%1"), self.auto[name:lower()])
+                or (embedded[name:lower()] and _("书内自带") or installed[name:lower()] and _("本机已有") or _("缺失字体")),
             keep_open = true, chevron = true,
             callback = function()
                 if not mappings[name] then self:pick(name); return end
