@@ -60,6 +60,7 @@ package.preload["apps/reader/readerui"] = function()
 end
 
 local mem_free = 80 * 1024 * 1024 -- 阈值 = clamp(free/4)=20MB
+package.preload["reader.engine_progress"] = function() return { patchOpen = function() end } end
 package.preload["utils.mem"] = function()
     local MB = 1024 * 1024
     return {

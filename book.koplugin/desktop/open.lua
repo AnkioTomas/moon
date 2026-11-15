@@ -58,6 +58,7 @@ end
 ---@param done fun(ok: boolean) 交接给 ReaderUI 时 true，因用户已在读别的文档而放弃时 false
 local function showReader(plugin, path, generation, done)
     local ReaderUI = require("apps/reader/readerui")
+    require("reader.engine_progress").patchOpen()
     UIManager:nextTick(require("ui.guard").wrap("open document", function()
         if generation ~= Open.generation then return end
         local ui = ReaderUI.instance

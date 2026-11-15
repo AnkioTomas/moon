@@ -36,6 +36,7 @@ function Reader.onCreate(plugin, span)
     end
     ui._book_reader_attached = true
     applyMarginPopup()
+    require("reader.engine_progress").install(ui.rolling)
     require("desktop.reader_exit").attach(ui)
 
     -- 面板、顶底栏和侧栏要在首绘之前装上。
