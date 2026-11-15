@@ -13,6 +13,20 @@ local Setting = {}
 
 local FONT_MIN, FONT_MAX = 80, 200
 
+local STYLES = { "dashed", "solid", "dotted" }
+local function styleLabel(style)
+    if style == "solid" then return _("实线") end
+    if style == "dotted" then return _("点状") end
+    return _("虚线")
+end
+
+local function nextStyle(style)
+    for i, name in ipairs(STYLES) do
+        if name == style then return STYLES[i % #STYLES + 1] end
+    end
+    return STYLES[1]
+end
+
 --- 已启用、且能力清单里有「他人段评」的源。
 --- 段评方法在源实例上，require 到的是门面，不能拿来判断。
 ---@return BookSourceMeta[]
@@ -30,11 +44,16 @@ local function reviewAccounts()
     return out
 end
 
--- book_reviews_mark_style：dashed 虚线 / solid 实线。
+-- book_reviews_mark_style：dashed 虚线 / solid 实线 / dotted 点状。
+-- mark_offset：线相对默认位置的上下微调（像素，-10–10，负数靠近文字）。
+-- mark_gray：线的灰度（深浅，0 白–100 黑）；mark_opacity：线的不透明度（10–100），与底色混合。
 -- font_scale：段评列表正文字号百分比（80–200，设置页「段评字号」调整）。
 -- chapter_links：章会话的书（微信读书、京东读书）借段评用的关联，按「源 id\0书目 id」记，见 features.reviews.linked。
 Setting.defaults = {
     book_reviews_mark_style = "dashed",
+    mark_gray = 73,
+    mark_opacity = 100,
+    mark_offset = 0,
     font_scale = 100,
     chapter_links = {},
 }
@@ -57,7 +76,31 @@ function Setting.entries(desktop)
                     local ReviewSetting = require("source.review_setting")
                     local Row = require("ui.themes.widgets.row")
                     local reviews = MoonSettings.get("features.reviews")
-                    local solid = reviews.book_reviews_mark_style == "solid"
+                    local function redraw()
+                        MoonSettings.save("features.reviews", reviews)
+                        local ui = require("apps/reader/readerui").instance
+                        if ui and ui.dialog then require("ui/uimanager"):setDirty(ui.dialog, "ui") end
+                        desktop:updateView()
+                    end
+                    local function percentRow(icon, title, key, min)
+                        return function(iw)
+                            return require("ui.themes.widgets.row").widget({
+                                width = iw, chevron = true, kind = "nav", icon = icon, title = title,
+                                status = reviews[key] .. "%",
+                                callback = function()
+                                    require("ui.themes.widgets.spin"):new{
+                                        title = title,
+                                        fields = { { value = reviews[key], min = min, max = 100, step = 5,
+                                            format = function(v) return v .. "%" end } },
+                                        callback = function(pct)
+                                            reviews[key] = pct
+                                            redraw()
+                                        end,
+                                    }:show()
+                                end,
+                            })
+                        end
+                    end
                     local accounts = {}
                     for _idx, meta in ipairs(reviewAccounts()) do
                         accounts[#accounts + 1] = function(iw)
@@ -87,16 +130,33 @@ function Setting.entries(desktop)
                                 return Row.widget({
                                     width = iw, chevron = true,
                                     kind = "nav", icon = "border_style", title = _("段评下划线样式"),
-                                    status = solid and _("实线") or _("虚线"),
+                                    status = styleLabel(reviews.book_reviews_mark_style),
                                     callback = function()
-                                        reviews.book_reviews_mark_style = solid and "dashed" or "solid"
-                                        MoonSettings.save("features.reviews", reviews)
-                                        local ui = require("apps/reader/readerui").instance
-                                        if ui and ui.dialog then require("ui/uimanager"):setDirty(ui.dialog, "ui") end
-                                        desktop:updateView()
+                                        reviews.book_reviews_mark_style = nextStyle(reviews.book_reviews_mark_style)
+                                        redraw()
                                     end,
                                 })
                             end,
+                            function(iw)
+                                return Row.widget({
+                                    width = iw, chevron = true,
+                                    kind = "nav", icon = "vertical_align_center", title = _("段评下划线位置"),
+                                    status = string.format("%+d px", reviews.mark_offset),
+                                    callback = function()
+                                        require("ui.themes.widgets.spin"):new{
+                                            title = _("段评下划线位置（负数靠近文字）"),
+                                            fields = { { value = reviews.mark_offset, min = -10, max = 10, step = 1,
+                                                format = function(v) return string.format("%+d px", v) end } },
+                                            callback = function(px)
+                                                reviews.mark_offset = px
+                                                redraw()
+                                            end,
+                                        }:show()
+                                    end,
+                                })
+                            end,
+                            percentRow("contrast", _("段评下划线灰度"), "mark_gray", 0),
+                            percentRow("opacity", _("段评下划线透明度"), "mark_opacity", 10),
                             function(iw)
                                 return Row.widget({
                                     width = iw, chevron = true,

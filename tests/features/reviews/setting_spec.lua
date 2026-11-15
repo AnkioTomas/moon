@@ -5,7 +5,7 @@ local Assert = require("support.assert")
 package.preload["ui.themes.widgets.row"] = function()
     return { widget = function(opts) return opts end }
 end
-local conf = { book_reviews_mark_style = "dashed", font_scale = 100 }
+local conf = { book_reviews_mark_style = "dashed", mark_gray = 73, mark_opacity = 100, mark_offset = 0, font_scale = 100 }
 local sources = { wechat = {}, qidian = { show_paragraph_reviews = true }, zhihu = {} }
 local saved = {}
 package.preload["utils.settings"] = function()
@@ -63,7 +63,7 @@ Assert.eq(entries[1].page.sections()[1].rows[1](600).status, "开")
 
 local style = sections[2]
 Assert.eq(style.title, "段评")
-Assert.len(style.rows, 2)
+Assert.len(style.rows, 5)
 Assert.eq(style.rows[1](600).status, "虚线")
 
 style.rows[1](600).callback()
@@ -73,9 +73,17 @@ Assert.eq(updates, 2)
 Assert.eq(entries[1].page.sections()[2].rows[1](600).status, "实线")
 
 entries[1].page.sections()[2].rows[1](600).callback()
+Assert.eq(conf.book_reviews_mark_style, "dotted")
+Assert.eq(entries[1].page.sections()[2].rows[1](600).status, "点状")
+
+entries[1].page.sections()[2].rows[1](600).callback()
 Assert.eq(conf.book_reviews_mark_style, "dashed")
 
-local size = entries[1].page.sections()[2].rows[2](600)
+Assert.eq(style.rows[2](600).status, "+0 px")
+Assert.eq(style.rows[3](600).status, "73%")
+Assert.eq(style.rows[4](600).status, "100%")
+
+local size = entries[1].page.sections()[2].rows[5](600)
 Assert.eq(size.status, "100%")
 local spin
 package.preload["ui.themes.widgets.spin"] = function()
