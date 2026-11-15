@@ -121,7 +121,19 @@ local function hookScreensaver()
         if event == nil then
             require("ui.guard").call("lockscreen.suspend", prepareSuspend)
         end
-        return native_setup(self, event, ...)
+        local result = native_setup(self, event, ...)
+        if event == nil then
+            logger.warn("book.lockscreen setup", "type", tostring(self.screensaver_type),
+                "image", tostring(self.image_file), "ui", self.ui ~= nil)
+        end
+        return result
+    end
+    local native_show = Screensaver.show
+    Screensaver.show = function(self, ...)
+        local result = native_show(self, ...)
+        logger.warn("book.lockscreen show", "type", tostring(self.screensaver_type),
+            "widget", self.screensaver_widget ~= nil)
+        return result
     end
 end
 
