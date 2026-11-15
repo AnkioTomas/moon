@@ -65,11 +65,12 @@ end
 
 --- 没有手动映射、本机也没有同名字体时，按内置别名表映射到本机已有的相近字体。
 function FontMap:autoMap()
-    local faces, installed, manual = {}, self:installed(), {}
+    local faces, manual = {}, {}
     for name in pairs(self.active) do manual[name:lower()] = true end
+    -- 加载文档时调用：此时 DOM 还没建好，不能碰 getEmbeddedFontList（会原生崩溃），只看引擎字体表。
     for _idx, face in ipairs(self.ui.document:engineInit().getFontFaces()) do faces[face:lower()] = face end
     for name, candidates in pairs(FontMap.AUTO) do
-        if not manual[name] and not installed[name] then
+        if not manual[name] and not faces[name] then
             for _idx, candidate in ipairs(candidates) do
                 local face = faces[candidate:lower()]
                 if face then self.active[name] = face; self.auto[name] = face; break end
