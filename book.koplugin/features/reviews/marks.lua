@@ -384,13 +384,16 @@ end
 ---@return PageMark[]
 function ReviewMarks:marks()
     self:updateView()
-    local solid = require("utils.settings").get("features.reviews").book_reviews_mark_style == "solid"
+    local conf = require("utils.settings").get("features.reviews")
+    local style = conf.book_reviews_mark_style
+    local gray = math.floor((100 - conf.mark_gray) * 255 / 100 + 0.5)
+    local alpha = math.floor(conf.mark_opacity * 255 / 100 + 0.5)
     for i = #self.current, 1, -1 do
         local mark = self.current[i]
         if mark.spot.total == 0 and not mark.heading then
             table.remove(self.current, i)
         else
-            mark.solid = solid
+            mark.style, mark.gray, mark.alpha, mark.offset = style, gray, alpha, conf.mark_offset
         end
     end
     return self.current

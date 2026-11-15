@@ -2,7 +2,7 @@
 
 local Assert = require("support.assert")
 
-package.preload["ffi/blitbuffer"] = function() return { COLOR_DARK_GRAY = 1, COLOR_WHITE = 0, Color8 = function(v) return v end } end
+package.preload["ffi/blitbuffer"] = function() return { COLOR_DARK_GRAY = 1, COLOR_WHITE = 0, Color8 = function(v) return v end, ColorRGB32 = function(v) return v end } end
 package.preload["ui/size"] = function() return { line = { thick = 2 } } end
 local reported = {}
 package.preload["ui.guard"] = function()
@@ -223,6 +223,33 @@ do
     local bb = newBB()
     inst:paintTo(bb)
     Assert.eq(bb.rects[1].y, 19)
+end
+
+do
+    -- 点状：每点 2px、间隔 2px；不透明度 <255 走混合，不走 paintRect。
+    local ui = newUi()
+    local inst = PageMarks.add(ui, "reviews", 20, layer({
+        { boxes = { { x = 0, y = 0, w = 10, h = 20 } }, style = "dotted", alpha = 128, gray = 0x20,
+            tap = function() end },
+    }))
+    local bb = newBB()
+    local blended = {}
+    bb.blendRectRGB32 = function(_bb, x, _y, w) blended[#blended + 1] = { x = x, w = w } end
+    inst:paintTo(bb)
+    Assert.len(bb.rects, 0, "半透明不走 paintRect")
+    Assert.eq(blended[1].w, 2)
+    Assert.eq(blended[2].x - blended[1].x, 4)
+end
+
+do
+    -- offset 上下微调线位置，负数靠近文字。
+    local ui = newUi()
+    local inst = PageMarks.add(ui, "reviews", 20, layer({
+        { boxes = { { x = 0, y = 0, w = 40, h = 20 } }, solid = true, offset = -3, tap = function() end },
+    }))
+    local bb = newBB()
+    inst:paintTo(bb)
+    Assert.eq(bb.rects[1].y, 16)
 end
 
 do

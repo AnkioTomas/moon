@@ -16,7 +16,11 @@ local Guard = require("ui.guard")
 --- 一条页内标记。
 ---@class PageMark
 ---@field boxes table[] 屏幕框（每行一段）
----@field solid boolean|nil 实线下划线（缺省虚线）
+---@field solid boolean|nil 实线下划线（缺省虚线；`style` 优先）
+---@field style "dashed"|"solid"|"dotted"|nil 下划线样式
+---@field gray integer|nil 线色灰度 0（黑）–255（白），缺省深灰 0x44
+---@field offset integer|nil 下划线上下微调（像素，负数靠近文字），缺省 0
+---@field alpha integer|nil 线的不透明度 0–255，缺省 255（不混合底色）
 ---@field badge string|nil 有则不画下划线，在末行文字右侧画带这行字的气泡（只用最后一个框），点按气泡
 ---@field heading string|nil 有则在框内画独立分隔线、标题和数量气泡，整行可点
 ---@field tap fun() 点按回调
@@ -356,20 +360,31 @@ end
 --- 在段底画下划线（缺省虚线）。``delta`` 是相对行框底边的偏移。
 ---@param bb any Blitbuffer
 ---@param rect table
----@param solid boolean|nil
+---@param mark PageMark
 ---@param delta number
 ---@param thick number
-local function underline(bb, rect, solid, delta, thick)
-    local color = require("ffi/blitbuffer").COLOR_DARK_GRAY
-    local line_y = rect.y + rect.h + delta
+local function underline(bb, rect, mark, delta, thick)
+    local Blitbuffer = require("ffi/blitbuffer")
+    local gray = mark.gray or 0x44
+    local alpha = mark.alpha or 0xFF
+    local function stroke(x, w)
+        if alpha >= 0xFF then
+            bb:paintRect(x, rect.line_y, w, thick, Blitbuffer.Color8(gray))
+        else
+            bb:blendRectRGB32(x, rect.line_y, w, thick, Blitbuffer.ColorRGB32(gray, gray, gray, alpha))
+        end
+    end
+    local line_y = rect.y + rect.h + delta + (mark.offset or 0)
     if line_y < rect.y then line_y = rect.y + rect.h - 1 end
     rect.line_y = line_y
-    if solid then
-        bb:paintRect(rect.x, line_y, rect.w, thick, color)
-        return
-    end
-    for i = rect.x, rect.x + rect.w - 8, 10 do
-        bb:paintRect(i, line_y, 6, thick, color)
+    local style = mark.style or (mark.solid and "solid" or "dashed")
+    if style == "solid" then
+        stroke(rect.x, rect.w)
+    elseif style == "dotted" then
+        local dot = math.max(thick, 2)
+        for i = rect.x, rect.x + rect.w - dot, dot * 2 do stroke(i, dot) end
+    else
+        for i = rect.x, rect.x + rect.w - 8, 10 do stroke(i, 6) end
     end
 end
 
@@ -504,7 +519,7 @@ local function drawGroup(group, bb, delta, thick, painted, body_size)
                 or bubble(bb, item.badge, item.mark.badge, body_size) }
         else
             pieces = item.pieces
-            for _piece_idx, piece in ipairs(pieces) do underline(bb, piece, item.mark.solid, delta, thick) end
+            for _piece_idx, piece in ipairs(pieces) do underline(bb, piece, item.mark, delta, thick) end
         end
         if #pieces > 0 then painted[#painted + 1] = { mark = item.mark, pieces = pieces } end
     end
