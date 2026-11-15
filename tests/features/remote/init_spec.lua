@@ -411,6 +411,19 @@ local url1, share_err = Remote.shareUrl(shared_file)
 Assert.is_nil(share_err)
 Assert.eq(url1, "http://192.168.1.2:9528/download?path=" .. encoded .. "&v=0-1")
 
+-- 分享后自动删除：keep=true（用户自己保存的文件）不登记删除。
+do
+    local orig = Remote.deleteAfterShareOn
+    Remote.deleteAfterShareOn = function() return true end
+    Remote._once = {}
+    Remote.shareUrl(shared_file, true)
+    Assert.is_nil(next(Remote._once))
+    Remote.shareUrl(shared_file)
+    Assert.is_true(Remote._once[shared_file])
+    Remote.deleteAfterShareOn = orig
+    Remote._once = {}
+end
+
 -- 其它模块引导用户去某个网页：二维码直达该页，说明与地址都写在底部。
 Remote.openPage("/wechat_import.html", "微信书架导入", "请扫码")
 Assert.eq(qr_opts.text, "http://192.168.1.2:9528/wechat_import.html")

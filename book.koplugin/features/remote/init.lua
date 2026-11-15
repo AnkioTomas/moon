@@ -1637,9 +1637,10 @@ Remote._shared = {}
 
 --- 启动服务并给受控文件生成局域网下载地址。
 ---@param path string
+---@param keep boolean|nil 为真时不套用「分享后自动删除」（用户自己保存的文件）
 ---@return string|nil url
 ---@return string|nil err
-function Remote.shareUrl(path)
+function Remote.shareUrl(path, keep)
     -- 截图目录和保护路径可在服务运行期间被改；分享时重建布局，快捷入口和保护名单跟着走。
     Remote._layout = storageLayout()
     if Remote._server then
@@ -1657,7 +1658,7 @@ function Remote.shareUrl(path)
     if not ip then
         return nil, "local IP unavailable"
     end
-    if Remote.deleteAfterShareOn() then
+    if not keep and Remote.deleteAfterShareOn() then
         Remote._once[real] = true
     end
     Remote._shared[real] = true

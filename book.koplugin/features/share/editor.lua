@@ -450,9 +450,10 @@ function Editor:shareImage()
             Toast:new{ text = T(_("书摘图生成失败：%1"), tostring(err)), timeout = 3 }:show()
             return
         end
+        if self.share_path then os.remove(self.share_path) end
         self.share_path = path
     end
-    require("features.remote.screenshot").share(path)
+    require("features.remote.screenshot").share(path, nil, self.saved_path ~= nil)
 end
 
 return Editor

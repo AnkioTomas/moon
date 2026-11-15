@@ -22,12 +22,13 @@ end
 --- 经远程管理把本地文件分享为局域网下载链接，弹二维码。
 ---@param path string 要分享的本地文件
 ---@param on_url fun()|nil 拿到链接、弹二维码之前调用（让出全屏的上一步页面）
-function M.share(path, on_url)
+---@param keep boolean|nil 为真时下载后不自动删除
+function M.share(path, on_url, keep)
     local _ = require("gettext")
     -- 分享走局域网下载，只要求已拿到网络连接（没连时先问是否开 Wi-Fi）；
     -- 不能用 isOnline，否则无外网/DNS 的局域网会被误判为不可分享。
     require("ui/network/manager"):runWhenConnected(function()
-        local url, err = require("features.remote").shareUrl(path)
+        local url, err = require("features.remote").shareUrl(path, keep)
         if not url then
             require("ui.themes.widgets.toast"):new{ text = tostring(err), timeout = 3 }:show()
             return
