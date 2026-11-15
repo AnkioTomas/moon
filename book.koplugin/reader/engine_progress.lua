@@ -45,6 +45,9 @@ function EngineProgress.patchOpen()
             ReaderUI._book_open_dialog = newDialog(_("正在打开"))
             ReaderUI._book_open_dialog:show()
             UIManager:forceRePaint()
+        else
+            -- 切章时旧书已关，窗口栈里没有别的窗口就会让 KOReader 退出：保留原生不可见的占位消息。
+            UIManager:show(require("ui/widget/infomessage"):new{ text = "", timeout = 0.0, invisible = true })
         end
         UIManager:nextTick(function()
             local co = coroutine.create(function()

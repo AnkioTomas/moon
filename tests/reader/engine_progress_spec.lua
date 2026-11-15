@@ -6,11 +6,15 @@ local now_ms = 0
 package.preload["ui/time"] = function()
     return { s = function(n) return n * 1000 end, ms = function(n) return n end, now = function() return now_ms end }
 end
-local dialogs, forced, ticks = {}, 0, {}
+local dialogs, forced, ticks, placeholders = {}, 0, {}, {}
+package.preload["ui/widget/infomessage"] = function()
+    return { new = function(_s, o) return o end }
+end
 package.preload["ui/uimanager"] = function()
     return {
         forceRePaint = function() forced = forced + 1 end,
         nextTick = function(_s, fn) ticks[#ticks + 1] = fn end,
+        show = function(_s, widget) placeholders[#placeholders + 1] = widget end,
     }
 end
 package.preload["ui.themes.widgets.progress_dialog"] = function()
@@ -86,3 +90,5 @@ Assert.is_true(open.closed)
 Assert.is_nil(ReaderUIStub._book_open_dialog)
 ReaderUIStub:showReaderCoroutine("b.epub", nil, true)
 Assert.len(dialogs, 2)
+Assert.len(placeholders, 1, "seamless 切章要留不可见占位窗，否则旧书关掉后窗口栈为空会退出 KOReader")
+Assert.is_true(placeholders[1].invisible)
