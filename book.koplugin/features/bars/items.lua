@@ -549,7 +549,8 @@ function Items.paint(bb, x, y, w, h, layout, ctx, opts)
     -- 两行：紧凑块贴绘制区底部，空行已经丢掉，不留白。
     local origin = y
     if #rows > 1 then
-        origin = y + math.max(0, h - total_h)
+        -- 绘制区不够高时向上溢出，不能把下行（进度条）挤出屏幕底部。
+        origin = y + h - total_h
     end
     local cursor = origin
     for i = 1, #rows do
