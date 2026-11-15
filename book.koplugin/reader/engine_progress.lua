@@ -32,6 +32,15 @@ local function label(fraction)
     return fraction <= 0.5 and _("正在载入书籍") or _("正在排版")
 end
 
+--- 只画弹窗本身并局部刷新。不能用 forceRePaint：它会重画整个窗口栈，阅读页绘制时
+--- 触发文档再次排版，引擎回调又进来，无限递归（字体切换时一直「正在排版」）。
+local function paintDialog(dialog)
+    local Screen = require("device").screen
+    dialog:paintTo(Screen.bb, 0, 0)
+    local box = dialog[1] and dialog[1].dimen
+    if box then Screen:refreshFast(box.x, box.y, box.w, box.h) end
+end
+
 local function closeDialog(owner, field)
     local dialog = owner[field]
     owner[field] = nil
@@ -84,12 +93,12 @@ function EngineProgress.install(rolling)
     rolling.showEngineProgress = function(self, fraction)
         if G_reader_settings and G_reader_settings:isFalse("cre_show_progress") then return end
         local ReaderUI = require("apps/reader/readerui")
-        local UIManager = require("ui/uimanager")
         if not fraction then
             self.engine_progress_update_not_before = nil
             closeDialog(self, "_book_engine_dialog")
             return
         end
+        if self._book_engine_painting then return end
         local now = time.now()
         local dialog = ReaderUI._book_open_dialog
         local not_before = self.engine_progress_update_not_before
@@ -106,8 +115,10 @@ function EngineProgress.install(rolling)
                 dialog:show()
             end
         end
+        self._book_engine_painting = true
         dialog:set(label(fraction), math.max(0, math.min(1, fraction)) * 100)
-        UIManager:forceRePaint()
+        paintDialog(dialog)
+        self._book_engine_painting = nil
         self.engine_progress_update_not_before = now + UPDATE_DELAY
     end
 end

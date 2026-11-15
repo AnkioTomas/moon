@@ -24,10 +24,15 @@ package.preload["ui.themes.widgets.progress_dialog"] = function()
             o.show = function(self) self.shown = true end
             o.close = function(self) self.closed = true end
             o.set = function(self, text, pct) self.sets[#self.sets + 1] = { text, pct } end
+            o[1] = { dimen = { x = 0, y = 0, w = 10, h = 10 } }
+            o.paintTo = function(self) self.painted = (self.painted or 0) + 1 end
             dialogs[#dialogs + 1] = o
             return o
         end,
     }
+end
+package.preload["device"] = function()
+    return { screen = { bb = {}, refreshFast = function() end } }
 end
 local ReaderUIStub = {}
 package.preload["apps/reader/readerui"] = function() return ReaderUIStub end
@@ -55,6 +60,15 @@ now_ms = 2500
 rolling:showEngineProgress(0.7)
 Assert.eq(dialogs[1].sets[2][1], "正在排版")
 Assert.eq(dialogs[1].sets[2][2], 70)
+-- 重绘时引擎回调再进来（旧实现用 forceRePaint 会无限递归）：只画弹窗，嵌套回调直接忽略。
+Assert.eq(forced, 0)
+Assert.eq(dialogs[1].painted, 2)
+local nested
+dialogs[1].paintTo = function() nested = true; now_ms = now_ms + 1000; rolling:showEngineProgress(0.9) end
+now_ms = 4000
+rolling:showEngineProgress(0.8)
+Assert.is_true(nested)
+Assert.len(dialogs[1].sets, 3)
 rolling:showEngineProgress(nil)
 Assert.is_true(dialogs[1].closed)
 Assert.is_nil(rolling.engine_progress_update_not_before)
