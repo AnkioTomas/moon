@@ -211,7 +211,7 @@ Assert.is_nil(reason)
 Assert.is_true(empty, "游客阅读不应触发云端进度登录提示")
 
 local text
-client.contentAsync = function(_book, _raw, _index, cb) return Base.defer(cb, text) end
+client.contentAsync = function(_book, _index, cb) return Base.defer(cb, text) end
 source.found = { [row.name] = row }
 local fetch = source:contentFetcher()
 text = "测试段落\n第二段"

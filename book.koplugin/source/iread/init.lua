@@ -342,7 +342,7 @@ Source.refreshTocAsync = fetchTocAsync
 function Source:contentFetcher()
     return function(identity, chapter, done)
         return self:withRow(identity, false, done, function(row)
-            return Client.contentAsync(row, chapter.raw, tonumber(chapter.uid), function(text, err)
+            return Client.contentAsync(row, tonumber(chapter.uid), function(text, err)
                 if not text then done(nil, err); return end
                 if text:find("<[Ii][Mm][Gg][%s>]") then
                     done(nil, _("iRead 图片正文暂不支持，请使用网页版阅读")); return

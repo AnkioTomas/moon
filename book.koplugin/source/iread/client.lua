@@ -109,6 +109,24 @@ local function post(path, form, cred, ratio, cb, session)
     end)
 end
 
+---@param path string
+---@param cred IReadCredential
+---@param ratio number 超时倍率
+---@param cb fun(data: any|nil, err: string|nil, res: table|nil)
+---@return { cancel: fun() }
+local function get(path, cred, ratio, cb)
+    local cookie = cred.cookie
+    return Request.get(Client.BASE .. path, {
+        accept = "application/json",
+        headers = { Cookie = cookie, Authorization = cred.token and ("Bearer " .. cred.token),
+            ["X-Requested-With"] = "XMLHttpRequest" },
+        timeout = require("http.timeout").net(ratio),
+    }, function(raw, err, res)
+        local data, decode_err = Client.decode(raw, err, cred)
+        cb(data, decode_err, res)
+    end)
+end
+
 --- 读取接口允许游客；已登录时使用用户配置的书源。
 ---@param path string
 ---@param form table<string, any>
@@ -129,7 +147,7 @@ end
 ---@param cb fun(user: table|nil, err: string|nil)
 ---@return { cancel: fun() }
 function Client.userAsync(cred, cb)
-    return post("/user/home", {}, cred, 0.5, function(data, err)
+    return get("/user/home", cred, 0.5, function(data, err)
         if type(data) ~= "table" or type(data.nickname) ~= "string" or data.nickname == "" then
             cb(nil, err or _("iRead 账号信息为空")); return
         end
@@ -184,25 +202,24 @@ function Client.shelfAsync(cb)
 end
 
 --- 目录：章节对象数组，顺序即阅读顺序。
----@param row table 书架行
+---@param row table 书架行（必须含 id 字段）
 ---@param cb fun(rows: table[]|nil, err: string|nil)
 ---@return { cancel: fun() }
 function Client.chaptersAsync(row, cb)
-    return call("/book/chapters", row, 1, function(data, err)
+    return call("/book/chapters", { id = row.id }, 1, function(data, err)
         if not validRows(data, "title") then cb(nil, err or _("响应无效")); return end
         if #data == 0 then cb(nil, _("iRead 目录为空")); return end
         cb(data)
     end)
 end
 
---- 一章正文（纯文本）。chapter_raw 是目录里原样保存的章节 JSON，index 是 0 基章序号。
----@param row table
----@param chapter_raw string
+--- 一章正文（纯文本）。index 是 0 基章序号。
+---@param row table 书架行（必须含 id 字段）
 ---@param index integer
 ---@param cb fun(text: string|nil, err: string|nil)
 ---@return { cancel: fun() }
-function Client.contentAsync(row, chapter_raw, index, cb)
-    return call("/book/chapter", { book = JSON.encode(row), chapter = chapter_raw, index = index }, 1,
+function Client.contentAsync(row, index, cb)
+    return call("/book/chapter", { id = row.id, index = index }, 1,
         function(data, err)
             local text = type(data) == "table" and data.content
             if type(text) ~= "string" or text == "" then cb(nil, err or _("iRead 章节内容为空")); return end
@@ -211,18 +228,13 @@ function Client.contentAsync(row, chapter_raw, index, cb)
 end
 
 --- 上报阅读位置：服务端用整行覆盖记录，所以带回原行，只改位置字段。
----@param row table
+---@param row table 书架行（必须含 id 字段）
 ---@param pos { index: integer, title: string|nil, offset: integer }
 ---@param cb fun(ok: boolean|nil, err: string|nil)
 ---@return { cancel: fun() }
 function Client.saveProgressAsync(row, pos, cb)
     if not Client.credential() then return require("source.base").defer(cb, nil, _("未登录 iRead")) end
-    local body = {}
-    for key, value in pairs(row) do body[key] = value end
-    body.durChapterIndex = pos.index
-    body.durChapterPos = pos.offset
-    body.durChapterTitle = pos.title or ""
-    body.durChapterTime = os.time() * 1000
+    local body = { id = row.id, durChapterIndex = pos.index, durChapterPos = pos.offset, durChapterTitle = pos.title or "" }
     local cancelled, job, pending = false, nil, true
     local first = call("/book/process", body, 0.5, function(data, err)
         pending = false
@@ -348,12 +360,23 @@ function Client.exploreRulesAsync(cb)
 end
 
 --- 切换收藏状态。调用方必须先读书架判断是否需要切换，并在写后确认状态。
+--- 已在书库的书（row.id > 0）只传 id；未入库的传完整 hit 数据。
 ---@param row table
 ---@param cb fun(ok: boolean|nil, err: string|nil)
 ---@return { cancel: fun() }
 function Client.favouriteAsync(row, cb)
     if not Client.credential() then return require("source.base").defer(cb, nil, _("未登录 iRead")) end
-    return call("/book/favourite", row, 0.5, function(data, err) cb(data ~= nil or nil, err) end)
+    local form
+    if row.id and tonumber(row.id) > 0 then
+        form = { id = row.id }
+    else
+        form = { id = row.id or 0, sourceId = row.sourceId or 0, bookUrl = row.bookUrl or "",
+            tocUrl = row.tocUrl or "", name = row.name or "", author = row.author or "",
+            coverUrl = row.coverUrl or "", intro = row.intro or "", kind = row.kind or "",
+            originName = row.originName or row.origin or "", latestChapterTitle = row.latestChapterTitle or "",
+            wordCount = row.wordCount or "", totalChapterNum = row.totalChapterNum or 0 }
+    end
+    return call("/book/favourite", form, 0.5, function(data, err) cb(data ~= nil or nil, err) end)
 end
 
 return Client

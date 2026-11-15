@@ -31,6 +31,12 @@ package.preload["http.request"] = function()
             if type(reply) == "table" then cb(reply.body, nil, reply) else cb(reply) end
             return { cancel = function() end }
         end,
+        get = function(url, opts, cb)
+            requests[#requests + 1] = { url = url, opts = opts }
+            local reply = table.remove(replies, 1)
+            if type(reply) == "table" then cb(reply.body, nil, reply) else cb(reply) end
+            return { cancel = function() end }
+        end,
         header = function(res) return res and res.cookie end,
         headerAll = function(res) return res and res.cookie and { res.cookie } or {} end,
     }
@@ -78,12 +84,12 @@ do
     requests = {}
     replies = { '{"code":400,"msg":"书籍数据错误"}' }
     local err
-    Client.saveProgressAsync({ name = "书" }, { index = 0, offset = 0 }, function(_ok, e) err = e end)
+    Client.saveProgressAsync({ id = 1, name = "书" }, { index = 0, offset = 0 }, function(_ok, e) err = e end)
     Assert.eq(err, "书籍数据错误")
 
     cfg.token = nil
     requests = {}
-    Client.saveProgressAsync({ name = "书" }, { index = 0, offset = 0 }, function(_ok, e) err = e end)
+    Client.saveProgressAsync({ id = 1, name = "书" }, { index = 0, offset = 0 }, function(_ok, e) err = e end)
     Assert.len(requests, 0)
     cfg.token = "a1b2"
 end
@@ -112,7 +118,7 @@ do
     } }), "a=1; b=2")
 end
 
--- 进度：整行带回，只改位置字段；嵌套表按 PHP 的 a[b] / a[0] 摊平。
+-- 进度：只传 id + 位置字段；不再发整行。
 do
     requests = {}
     replies = {
@@ -120,35 +126,34 @@ do
         '{"code":200,"data":[{"name":"书","durChapterIndex":4,"durChapterPos":12}]}',
     }
     local ok
-    Client.saveProgressAsync({ name = "书", sourceId = 3, variable = { k = "v" }, tags = { "x", "y" },
-        customIntro = json_null },
+    Client.saveProgressAsync({ id = 42, name = "书" },
         { index = 4, title = "第5章", offset = 12 }, function(v) ok = v end)
     Assert.is_true(ok)
     local body = requests[1].body
     Assert.matches(requests[1].url, "/book/process$")
+    Assert.matches(body, "id=42")
     Assert.matches(body, "durChapterIndex=4")
     Assert.matches(body, "durChapterPos=12")
-    Assert.matches(body, "sourceId=3")
-    Assert.matches(body, "variable%%5Bk%%5D=v")
-    Assert.matches(body, "tags%%5B0%%5D=x")
-    Assert.matches(body, "tags%%5B1%%5D=y")
-    Assert.is_nil(body:find("customIntro", 1, true), "旧元数据里的 JSON null 不能变成 Lua 函数地址发送")
+    Assert.matches(body, "durChapterTitle=%%E7%%AC%%AC5%%E7%%AB%%A0")
+    -- 不再发原行的其他字段（sourceId、variable 等）
+    Assert.is_nil(body:find("sourceId", 1, true))
+    Assert.is_nil(body:find("variable", 1, true))
 end
 
--- 正文：book / chapter 是 JSON 字符串，index 0 基；空正文报错。
+-- 正文：只传 id 和 index；空正文报错。
 do
     requests = {}
     replies = { '{"code":200,"data":{"title":"一","content":"第一段\\n第二段"}}' }
     local text
-    Client.contentAsync({ name = "书" }, '{"url":"u"}', 3, function(v) text = v end)
+    Client.contentAsync({ id = 10 }, 3, function(v) text = v end)
     Assert.eq(text, "第一段\n第二段")
     Assert.matches(requests[1].url, "/book/chapter$")
+    Assert.matches(requests[1].body, "id=10")
     Assert.matches(requests[1].body, "index=3")
-    Assert.matches(requests[1].body, "chapter=%%7B%%22url%%22%%3A%%22u%%22%%7D")
 
     replies = { '{"code":200,"data":{"content":""}}' }
     local err
-    Client.contentAsync({ name = "书" }, "{}", 0, function(_, e) err = e end)
+    Client.contentAsync({ id = 10 }, 0, function(_, e) err = e end)
     Assert.eq(err, "iRead 章节内容为空")
 end
 

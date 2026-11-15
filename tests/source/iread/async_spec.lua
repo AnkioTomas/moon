@@ -25,13 +25,27 @@ package.loaded.json = {
 local cfg = { token = "old-token" }
 package.loaded["utils.settings"] = { getSource = function() return cfg end }
 local requests, replies = {}, {}
+local queue = {}
 package.loaded["http.request"] = {
     post = function(url, body, opts, cb)
         local request = { url = url, body = body, opts = opts, cb = cb }
         requests[#requests + 1] = request
         local reply = table.remove(replies, 1)
         if reply then cb(JSON.encode({ code = 200, data = reply }), nil, { cookies = { "sid=new; Path=/" } }) end
-        return { cancel = function() request.cancelled = true end }
+        request.cancel = function() request.cancelled = true end
+        return request
+    end,
+    get = function(url, opts, cb)
+        local request = { url = url, opts = opts, cb = cb }
+        requests[#requests + 1] = request
+        -- 延迟回调，与真实网络行为一致
+        local reply = table.remove(replies, 1)
+        local wrapped = function()
+            if reply then cb(JSON.encode({ code = 200, data = reply }), nil, nil) end
+        end
+        queue[#queue + 1] = wrapped
+        request.cancel = function() request.cancelled = true end
+        return request
     end,
     headerAll = function(res) return res and res.cookies or {} end,
 }
@@ -43,6 +57,7 @@ local function reset()
     requests, replies, result, reason, calls = {}, {}, nil, nil, 0
     cfg.token, cfg.cookie = "old-token", nil
     Stubs.reset()
+    queue = {}
     Auth.reset()
 end
 local function reply(request, data, code)
@@ -72,6 +87,8 @@ local pending = requests[2]
 Assert.matches(pending.url, "/user/home$")
 handle:cancel()
 Assert.is_true(pending.cancelled)
+reply(pending, { nickname = "测试" })
+Assert.eq(calls, 0)
 reply(pending, { nickname = "测试" })
 Assert.eq(calls, 0)
 
@@ -105,7 +122,7 @@ Assert.eq(reason, "登录状态已变化，请重试")
 
 reset()
 Auth.expire("iread", "expired")
-Client.chaptersAsync({ name = "书" }, done)
+Client.chaptersAsync({ id = 1, name = "书" }, done)
 reply(requests[1], { bad = true })
 Assert.is_nil(result)
 Assert.eq(reason, "响应无效")
@@ -194,7 +211,7 @@ Assert.eq(reason, "登录状态已变化，请重试")
 
 reset()
 replies = { {} }
-handle = Client.saveProgressAsync({ name = "书" }, { index = 2, offset = 0 }, done)
+handle = Client.saveProgressAsync({ id = 1, name = "书" }, { index = 2, offset = 0 }, done)
 pending = requests[2]
 handle:cancel()
 Assert.is_true(pending.cancelled)
@@ -203,7 +220,7 @@ Assert.eq(calls, 0)
 
 reset()
 replies = { {}, { { name = "书", durChapterIndex = 1, durChapterPos = 0 } } }
-Client.saveProgressAsync({ name = "书" }, { index = 2, offset = 0 }, done)
+Client.saveProgressAsync({ id = 1, name = "书" }, { index = 2, offset = 0 }, done)
 Assert.is_nil(result)
 Assert.eq(reason, "iRead 阅读进度更新未生效")
 Assert.eq(calls, 1)
