@@ -58,7 +58,6 @@ package.preload["features.bars.layout"] = function()
         BAR_HORIZONTAL_PADDING = 12,
         fontSize = function(_which, fs) return fs and fs.text_font_size or 14 end,
         stackedBottom = function() return false end,
-        stackedPreferred = function() return false end,
         progressBarHeight = function() return 8 end,
         bottomPaintHeight = function() return bottom_content_h end,
         STACK_GAP = 2,

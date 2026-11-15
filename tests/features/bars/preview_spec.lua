@@ -45,7 +45,6 @@ package.preload["features.bars.layout"] = function()
         percentDecimals = function() return false end,
         divider = function() return false end,
         stackedBottom = function() return stacked end,
-        stackedPreferred = function() return stacked end,
         bottomPaintHeight = function(_fs, size)
             size = size or 14
             return size + 2 + 2 + bar_h

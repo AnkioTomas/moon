@@ -93,7 +93,7 @@ function Preview.build(width, which)
             fgcolor = Blitbuffer.Color8(t.color.ink),
             bar_h = Layout.progressBarHeight(),
             icons = Layout.icons(),
-            stacked = which == "bottom" and Layout.stackedPreferred(),
+            stacked = which == "bottom",
         })
     end
     return Overlay.previewBox(width, inner, total_h)

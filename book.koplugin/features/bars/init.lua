@@ -245,18 +245,24 @@ function Bars.syncTopMargin(ui)
 end
 
 --- 双栏底栏或更粗的进度条需要比系统状态栏默认更高的容器；只改运行时 footer.height，不写 KOReader 的 container_height。
+---@param footer table ReaderFooter
+---@return number
+local function bottomNeed(footer)
+    local footer_settings = footer.settings
+    local base = Screen:scaleBySize((footer_settings and footer_settings.container_height) or 14)
+    if Bars.bottomBarPreference() and Layout.replace("bottom") then
+        return math.max(base, Layout.bottomPaintHeight(footer_settings))
+    end
+    return base
+end
+
 ---@param ui table ReaderUI
 function Bars.syncBottomHeight(ui)
     local footer = ui and ui.view and ui.view.footer
     if not footer or type(footer.refreshFooter) ~= "function" then
         return
     end
-    local footer_settings = footer.settings
-    local base = Screen:scaleBySize((footer_settings and footer_settings.container_height) or 14)
-    local need = base
-    if Bars.bottomBarPreference() and Layout.replace("bottom") then
-        need = math.max(base, Layout.bottomPaintHeight(footer_settings))
-    end
+    local need = bottomNeed(footer)
     if footer.height == need then
         return
     end
@@ -501,6 +507,9 @@ function Bars.install(ui)
     end
     ui._book_bars_installed = true
     hijackFooter(ui)
+    -- 首次排版前就用对高度：等 ReaderReady 后再改，页边距变化会让整本重排第二遍（第二根载入进度条）。
+    local footer = ui.view and ui.view.footer
+    if footer and footer.height then footer.height = bottomNeed(footer) end
     ui:registerPostReaderReadyCallback(Guard.wrap("bars preferences", function()
         Bars.applyPreferences(ui)
     end))
@@ -619,7 +628,7 @@ local function paint(self, bb, x, y)
         local margin = Screen:scaleBySize(Layout.BAR_HORIZONTAL_PADDING)
         local pad = Screen:scaleBySize(BOTTOM_CONTENT_INSET) + (footer.bottom_padding or 0)
         local layout = Layout.get("bottom")
-        -- 双栏时把整段 overlay 交给绘制，两行紧凑块贴底；单行仍扣掉底部内缩和 Bottom margin。
+        -- 上下两行时把整段 overlay 交给绘制，两行紧凑块贴底；单行仍扣掉底部内缩和 Bottom margin。
         local paint_h = Layout.stackedBottom(layout) and rect.h or math.max(1, rect.h - pad)
         Items.paint(
             bb, rect.x + margin, rect.y, math.max(1, rect.w - margin * 2),
@@ -628,7 +637,6 @@ local function paint(self, bb, x, y)
                 face = bottomTextFace(footer),
                 fgcolor = Blitbuffer.COLOR_BLACK,
                 cache = cache,
-                stacked = Layout.stackedPreferred(),
                 -- 不传 bar_h：高度走 Layout.progressBarHeight（用户粗细或主题）。ReaderFooter.progress_bar.height 在
                 -- KOReader 底栏「显示进度条」关掉时被 resetLayout 置 0，复用它会让进度条开着却画不出来。
                 prefix = "bottom:",

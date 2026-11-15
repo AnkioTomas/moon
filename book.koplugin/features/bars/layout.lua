@@ -109,16 +109,11 @@ local function sanitize(which, raw)
     if type(raw) ~= "table" then raw = DEFAULTS[which] end
     local allowed = allowedIds(which)
     local seen, out = {}, {}
-    -- 单栏只忽略行归属，不改变它；旧布局的缺省行必须与当前单双栏开关无关。
-    local migrate_bar_down = which == "bottom" and not rawHasRow(raw)
     for i = 1, #raw do
         local item = raw[i]
         local id = type(item) == "table" and item.id or nil
         if id and allowed[id] and not seen[id] then
             local row = normalizeRow(item.row)
-            if migrate_bar_down and id == "progress_bar" then
-                row = "down"
-            end
             out[#out + 1] = { id = id, align = normalizeAlign(item.align), row = row }
             seen[id] = true
         end
@@ -130,6 +125,41 @@ local function sanitize(which, raw)
     return out
 end
 
+-- 旧版「单栏 / 双栏」开关（现已删除）：一次性折进组件行归属。
+local LEGACY_STACKED_KEY = "book_reader_bottom_bar_stacked"
+local ROWS_MIGRATED_KEY = "book_reader_bottom_bar_rows_migrated"
+
+--- 底栏现在只看组件的行归属：旧单栏用户把行归属压成上行（外观不变），
+--- 旧双栏用户没存过行归属时补上当年的默认（进度条在下行）。
+local function migrateLegacyStacked()
+    local bars = MoonSettings.get("features.bars")
+    if bars[ROWS_MIGRATED_KEY] then return end
+    local stacked = bars[LEGACY_STACKED_KEY] == true
+    local raw = bars[KEY.bottom]
+    if type(raw) == "table" then
+        local had_rows = rawHasRow(raw)
+        for i = 1, #raw do
+            local item = raw[i]
+            if type(item) == "table" then
+                if not stacked then
+                    item.row = "up"
+                elseif not had_rows and item.id == "progress_bar" then
+                    item.row = "down"
+                end
+            end
+        end
+    elseif stacked then
+        local layout = copyLayout(DEFAULTS.bottom)
+        for i = 1, #layout do
+            if layout[i].id == "progress_bar" then layout[i].row = "down" end
+        end
+        bars[KEY.bottom] = layout
+    end
+    bars[LEGACY_STACKED_KEY] = nil
+    bars[ROWS_MIGRATED_KEY] = true
+    MoonSettings.save("features.bars", bars)
+end
+
 --- 按落盘原表缓存清洗结果；绘制热路径每帧都读，原表换了（Layout.set）才重洗。
 ---@type table<string, { raw: table|nil, layout: table }>
 local cleaned = {}
@@ -138,6 +168,7 @@ local cleaned = {}
 ---@param which string
 ---@return table
 function Layout.get(which)
+    migrateLegacyStacked()
     local raw = MoonSettings.get("features.bars")[KEY[which]]
     local hit = cleaned[which]
     if not hit or hit.raw ~= raw then
@@ -341,22 +372,6 @@ function Layout.themeProgressThickness()
     return require("ui.themes").current().progress.height
 end
 
-local STACKED_KEY = "book_reader_bottom_bar_stacked"
-
---- 用户是否选择了底栏双栏。未设置或 false 为单栏（旧配置默认，不随居中自动拆行）。
----@return boolean
-function Layout.stackedPreferred()
-    return MoonSettings.get("features.bars")[STACKED_KEY] == true
-end
-
---- 写入底栏单栏 / 双栏；false 或 nil 都当单栏。不改 KOReader 的 container_height。
----@param on boolean
-function Layout.setStacked(on)
-    local bars = MoonSettings.get("features.bars")
-    bars[STACKED_KEY] = on and true or false
-    MoonSettings.save("features.bars", bars)
-end
-
 --- 组件的双栏行归属。
 ---@param item table
 ---@return string "up"|"down"
@@ -384,14 +399,14 @@ function Layout.partition(layout)
     return up, down
 end
 
---- 实际要画的行（空行丢掉）。未开双栏时全部在一行；开了双栏但只有一行有组件时也只返回一行。
+--- 实际要画的行（空行丢掉）：按组件的行归属拆成上下两行，只有一行有组件就只返回一行。
+--- stacked 显式为 false（顶栏）时全部放一行，忽略行归属。
 ---@param layout table|nil
 ---@param stacked boolean|nil
 ---@return table[]
 function Layout.effectiveRows(layout, stacked)
     layout = layout or Layout.get("bottom")
-    if stacked == nil then stacked = Layout.stackedPreferred() end
-    if not stacked then
+    if stacked == false then
         if #layout == 0 then return {} end
         return { layout }
     end
@@ -402,7 +417,7 @@ function Layout.effectiveRows(layout, stacked)
     return rows
 end
 
---- 底栏是否实际画成两行：开了双栏，并且上下行都有启用的组件。不特判进度条或居中。
+--- 底栏是否实际画成两行：上下行都有启用的组件。不特判进度条或居中。
 ---@param layout table|nil
 ---@return boolean
 function Layout.stackedBottom(layout)
@@ -501,7 +516,7 @@ function Layout.toggle(which, id)
     Layout.set(which, layout)
 end
 
---- 写入双栏行归属。单栏时也保存，切回双栏不丢。
+--- 写入行归属。
 ---@param which string
 ---@param id string
 ---@param row string "up"|"down"

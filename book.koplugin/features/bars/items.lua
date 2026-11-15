@@ -413,7 +413,7 @@ function Items.paint(bb, x, y, w, h, layout, ctx, opts)
         end
     end
 
-    local rows = Layout.effectiveRows(prepared, opts.stacked == true)
+    local rows = Layout.effectiveRows(prepared, opts.stacked)
 
     local has_bar = false
     for i = 1, #prepared do

@@ -135,7 +135,7 @@ function ReaderBar.itemPage(desktop, which, item)
                         width = iw,
                         icon = "vertical_split",
                         title = _("所在行"),
-                        subtitle = _("双栏时生效；单栏时所有组件仍在同一行，行归属会保留"),
+                        subtitle = _("上下行都有组件时分两行显示，空行不留白"),
                         items = {
                             { value = "up", text = _("上行") },
                             { value = "down", text = _("下行") },
@@ -233,7 +233,7 @@ local function itemRow(desktop, item, which)
     return function(iw)
         local index = Layout.slot(which, item.id)
         local enabled = index ~= nil
-        local dual = which == "bottom" and Layout.stackedPreferred()
+        local dual = which == "bottom"
         local count = #Layout.get(which)
         local pos = index
         if dual and enabled then
@@ -407,8 +407,8 @@ function ReaderBar:page(desktop, which)
             },
         },
     }
-    if not top and Layout.stackedPreferred() then
-        -- 双栏：上下行各自一段列表，各自排序；未启用的单独一段。
+    if not top then
+        -- 底栏：上下行各自一段列表，各自排序；未启用的单独一段。
         local up, down, unused = {}, {}, {}
         for _idx, item in ipairs(Layout.orderedCatalog(which)) do
             local index, _align, row = Layout.slot(which, item.id)
@@ -425,27 +425,6 @@ function ReaderBar:page(desktop, which)
         if #unused > 0 then
             page.sections[4] = { title = _("未启用"), rows = catalogRows(unused) }
         end
-    end
-    if not top then
-        -- 底栏单栏 / 双栏是显式布局，不随组件居中自动拆行。
-        table.insert(page.sections[1].rows, 3, function(iw)
-            local stacked = Layout.stackedPreferred()
-            return Row.choice({
-                width = iw,
-                icon = "view_agenda",
-                title = _("布局"),
-                subtitle = _("双栏时每个组件可放在上行或下行，空行不留白"),
-                items = {
-                    { value = "single", text = _("单栏") },
-                    { value = "double", text = _("双栏") },
-                },
-                current = stacked and "double" or "single",
-                on_select = function(value)
-                    Layout.setStacked(value == "double")
-                    refresh(desktop)
-                end,
-            })
-        end)
     end
     if top then
         -- 顶栏高度：插在「组件图标」「文字大小」之后。

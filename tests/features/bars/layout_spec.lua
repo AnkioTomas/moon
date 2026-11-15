@@ -145,15 +145,11 @@ Assert.eq(Layout.progressThickness(), 6)
 Layout.setProgressThickness(nil)
 Assert.is_nil(Layout.progressThickness(), "清除后恢复跟随主题")
 
--- 双栏是显式设置：未写入或 false 时一律单栏，即使有居中项也不自动拆行。
-Assert.is_false(Layout.stackedPreferred(), "旧配置缺省单栏")
+-- 没有单栏 / 双栏开关：只看组件行归属，都在上行就是单行（居中 + 进度条也不自动拆行）。
 Assert.is_false(Layout.stackedBottom({
     { id = "progress_bar", align = "left" },
     { id = "chapter", align = "center" },
-}), "未开双栏时居中 + 进度条仍单栏")
-Layout.setStacked(true)
-Assert.is_true(store.book_reader_bottom_bar_stacked)
-Assert.is_true(Layout.stackedPreferred())
+}), "都在上行时居中 + 进度条仍单行")
 
 -- 两行都有组件才是实际双栏；都在同一行则收成一行，不特判进度条或居中。
 local both_up = {
@@ -168,7 +164,7 @@ local text_split = {
     { id = "chapter", align = "left", row = "up" },
     { id = "percent", align = "right", row = "down" },
 }
-Assert.is_false(Layout.stackedBottom(both_up), "双栏但都在上行则收成一行")
+Assert.is_false(Layout.stackedBottom(both_up), "都在上行则收成一行")
 Assert.is_true(Layout.stackedBottom(split), "上行有百分比、下行有进度条是两行")
 Assert.is_true(Layout.stackedBottom(text_split), "两行都可以是普通文本组件")
 Assert.is_false(Layout.stackedBottom({ { id = "percent", align = "right", row = "up" } }),
@@ -178,15 +174,6 @@ Assert.is_false(Layout.stackedBottom({ { id = "progress_bar", align = "left", ro
 
 -- 旧双栏配置没有 row：迁一次，进度条下行、其它上行；已有 row 的不再改。
 store.book_reader_bottom_bar_layout = {
-    { id = "percent", align = "right" },
-    { id = "progress_bar", align = "left" },
-}
-local migrated = Layout.get("bottom")
-Assert.eq(Layout.itemRow(migrated[1]), "up")
-Assert.eq(migrated[1].id, "percent")
-Assert.eq(Layout.itemRow(migrated[2]), "down", "旧双栏把进度条迁到下行")
-Assert.is_true(Layout.stackedBottom(migrated))
-store.book_reader_bottom_bar_layout = {
     { id = "progress_bar", align = "left", row = "up" },
     { id = "percent", align = "right", row = "up" },
 }
@@ -194,24 +181,33 @@ local kept = Layout.get("bottom")
 Assert.eq(kept[1].row, "up", "已经写过行归属的进度条不强制下行")
 Assert.eq(kept[2].row, "up")
 
-store.book_reader_bottom_bar_layout = {
-    { id = "percent", align = "right" },
-    { id = "progress_bar", align = "left" },
-}
-Layout.setStacked(false)
-Assert.eq(select(3, Layout.slot("bottom", "progress_bar")), "down", "旧布局的行归属不依赖开关")
-Layout.setStacked(true)
-Assert.is_true(Layout.stackedBottom(), "先读单栏再开双栏立即生效")
-package.loaded["features.bars.layout"] = nil
-Layout = require("features.bars.layout")
-Assert.is_true(Layout.stackedBottom(), "重载后仍是同一布局")
+-- 旧版单栏 / 双栏开关一次性折进行归属：旧单栏压成上行（外观不变），旧双栏补进度条下行。
+local function migrated(stacked, layout)
+    for k in pairs(store) do store[k] = nil end
+    store.book_reader_bottom_bar_stacked = stacked
+    store.book_reader_bottom_bar_layout = layout
+    package.loaded["features.bars.layout"] = nil
+    local fresh = require("features.bars.layout")
+    fresh.get("bottom")
+    return fresh
+end
+local legacy = function()
+    return { { id = "percent", align = "right", row = "down" }, { id = "progress_bar", align = "left" } }
+end
+local single = migrated(false, legacy())
+Assert.is_false(single.stackedBottom(), "旧单栏用户迁移后仍是一行")
+Assert.is_nil(store.book_reader_bottom_bar_stacked, "旧开关清掉")
+Assert.is_true(store.book_reader_bottom_bar_rows_migrated)
+local double = migrated(true, { { id = "percent", align = "right" }, { id = "progress_bar", align = "left" } })
+Assert.is_true(double.stackedBottom(), "旧双栏用户没存行归属时进度条在下行")
+Assert.eq(select(3, double.slot("bottom", "progress_bar")), "down")
+Assert.is_true(migrated(true, nil).stackedBottom(), "旧双栏用户没存过布局也迁到默认组件")
+Assert.is_false(migrated(nil, nil).stackedBottom(), "新用户默认一行")
+Layout = migrated(nil, nil)
+store.book_reader_bottom_bar_layout = legacy()
+Layout.set("bottom", legacy())
 Layout.setRow("bottom", "progress_bar", "up")
-Layout.setStacked(false)
-package.loaded["features.bars.layout"] = nil
-Layout = require("features.bars.layout")
-Layout.setStacked(true)
-Assert.eq(select(3, Layout.slot("bottom", "progress_bar")), "up", "显式行归属在切换及重载后保留")
-Assert.is_false(Layout.stackedBottom(), "明确放在同一行时不重新迁移")
+Layout.setRow("bottom", "percent", "up")
 
 Layout.setRow("bottom", "progress_bar", "down")
 Assert.eq(select(3, Layout.slot("bottom", "progress_bar")), "down")
@@ -235,12 +231,6 @@ Assert.eq(after[3].id, "chapter")
 Layout.moveInRow("bottom", "clock", -1)
 Assert.eq(Layout.get("bottom")[1].id, "clock", "行首不能再上移到下行之外")
 
-Layout.setStacked(false)
-Assert.is_false(store.book_reader_bottom_bar_stacked)
-Assert.is_false(Layout.stackedBottom(Layout.get("bottom")), "关回单栏后即使有上下行归属也画一行")
-Assert.eq(select(3, Layout.slot("bottom", "percent")), "down", "切单栏不丢行归属")
-store.book_reader_bottom_bar_stacked = nil
-Assert.is_false(Layout.stackedPreferred(), "清掉键仍是单栏")
 
 -- 设置列表顺序：已启用的按布局，其余按目录补齐；未知 id 丢掉但不丢后面的合法项。
 store.book_reader_bottom_bar_layout = {

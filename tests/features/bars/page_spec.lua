@@ -116,7 +116,6 @@ local font = { top = nil, bottom = nil }
 local top_height = 12
 local percent_decimals = false
 local thickness = nil
-local stacked_on = false
 local spins = {}
 package.preload["ui.themes.widgets.spin"] = function()
     return { new = function(_, o) o.show = function(self) spins[#spins + 1] = self end; return o end }
@@ -145,8 +144,6 @@ package.preload["features.bars.layout"] = function()
         setDivider = function(which, on) dividers[which] = on end,
         percentDecimals = function() return percent_decimals end,
         setPercentDecimals = function(on) percent_decimals = on end,
-        stackedPreferred = function() return stacked_on end,
-        setStacked = function(on) stacked_on = on and true or false end,
         setRow = function(which, id, row)
             for i = 1, #layouts[which] do
                 if layouts[which][i].id == id then layouts[which][i].row = row return end
@@ -332,27 +329,13 @@ local bottom = ReaderBar:page(desktop, "bottom")
 Assert.eq(bottom.sections[1].rows[1](600).title, "替代系统底栏")
 Assert.eq(bottom.sections[1].rows[2](600).title, "开启底栏")
 Assert.is_false(bottom.sections[1].rows[2](600).status_on)
-Assert.len(bottom.sections[1].rows, 7, "底栏公共显示项含布局，不含组件专属设置")
-Assert.eq(bottom.sections[1].rows[3](600).title, "布局")
-Assert.eq(bottom.sections[1].rows[3](600).current, "single")
-Assert.eq(bottom.sections[1].rows[3](600).items[1].text, "单栏")
-Assert.eq(bottom.sections[1].rows[3](600).items[2].text, "双栏")
-bottom.sections[1].rows[3](600).on_select("double")
-Assert.is_true(stacked_on, "选双栏立即落盘")
-Assert.eq(ReaderBar:page(desktop, "bottom").sections[1].rows[3](600).current, "double")
-ReaderBar:page(desktop, "bottom").sections[1].rows[3](600).on_select("single")
-Assert.is_false(stacked_on)
-Assert.eq(page.sections[1].rows[3](600).title, "组件图标", "顶栏没有栏数设置")
-Assert.eq(bottom.sections[1].rows[4](600).title, "组件图标")
-Assert.eq(bottom.sections[1].rows[5](600).title, "分割线")
-Assert.eq(bottom.sections[1].rows[6](600).title, "文字大小")
-Assert.eq(bottom.sections[1].rows[7](600).title, "边距")
-Assert.eq(bottom.sections[2].rows[1](600).title, "进度")
-Assert.eq(bottom.sections[2].rows[2](600).title, "进度条")
-Assert.eq(bottom.sections[2].rows[3](600).title, "书名")
+Assert.len(bottom.sections[1].rows, 6, "底栏公共显示项不含布局开关，也不含组件专属设置")
+Assert.eq(bottom.sections[1].rows[3](600).title, "组件图标")
+Assert.eq(bottom.sections[1].rows[4](600).title, "分割线")
+Assert.eq(bottom.sections[1].rows[5](600).title, "文字大小")
+Assert.eq(bottom.sections[1].rows[6](600).title, "边距")
 
--- 开双栏后主列表按上下行分段；切回单栏行归属还在。
-bottom.sections[1].rows[3](600).on_select("double")
+-- 底栏主列表按上下行分段。
 local dual_page = ReaderBar:page(desktop, "bottom")
 Assert.eq(dual_page.sections[2].title, "上行")
 Assert.eq(dual_page.sections[3].title, "下行")
@@ -360,7 +343,6 @@ Assert.eq(dual_page.sections[4].title, "未启用")
 Assert.eq(dual_page.sections[2].rows[1](600).title, "进度")
 Assert.eq(dual_page.sections[2].rows[2](600).title, "进度条")
 Assert.eq(dual_page.sections[4].rows[1](600).title, "书名")
-dual_page.sections[1].rows[3](600).on_select("single")
 
 -- 两位小数与所在行都在进度组件页。
 local percent_page = ReaderBar.itemPage(desktop, "bottom", catalogs.bottom[1])
@@ -406,12 +388,12 @@ local footer = { settings = { text_font_size = 14 },
     updateFooterFont = function() footer_calls[#footer_calls + 1] = "font" end,
     refreshFooter = function() footer_calls[#footer_calls + 1] = "refresh" end }
 ReaderUIStub.instance = { document = {}, dialog = {}, view = { footer = footer } }
-bottom.sections[1].rows[6](600).callback()
+bottom.sections[1].rows[5](600).callback()
 spins[#spins].callback(18)
 Assert.eq(font.bottom, 18)
 Assert.eq(footer.settings.text_font_size, 18)
 Assert.eq(table.concat(footer_calls, ","), "font,refresh")
-Assert.eq(bottom.sections[1].rows[6](600).status, "18")
+Assert.eq(bottom.sections[1].rows[5](600).status, "18")
 ReaderUIStub.instance = nil
 
 -- 关书时 closeDocument 已清 document、instance 尚未清：不得把半死的 ReaderUI 交给底栏

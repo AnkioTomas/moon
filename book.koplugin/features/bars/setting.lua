@@ -37,6 +37,7 @@ Setting.keys = {
     "book_reader_top_bar_margin",
     "book_reader_progress_thickness",
     "book_reader_bottom_bar_stacked",
+    "book_reader_bottom_bar_rows_migrated",
     "cre_header_clock_prev",
 }
 
