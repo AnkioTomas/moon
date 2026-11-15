@@ -273,8 +273,8 @@ function FontMap:start(requested)
             self.names = names
             -- 只更新扫描结果并决定是否弹窗；样式已在加载时注入，这里再 ApplyStyleSheet 会触发反复重载。
             self:prepare()
-            local show = self.requested and names or self:missing()
-            if #show > 0 or self.requested then self:show(show) end
+            -- 自动弹出和手动打开展示同一份完整列表；自动弹出只在还有未映射字体时触发。
+            if self.requested or #self:missing() > 0 then self:show(names) end
         end),
         on_failed = function(err)
             self.job = nil
