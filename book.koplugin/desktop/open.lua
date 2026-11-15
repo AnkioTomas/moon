@@ -56,7 +56,7 @@ end
 ---@param path string
 ---@param generation integer
 ---@param done fun(ok: boolean) 交接给 ReaderUI 时 true，因用户已在读别的文档而放弃时 false
-local function showReader(plugin, path, generation, done)
+local function showReader(plugin, path, generation, done, title)
     local ReaderUI = require("apps/reader/readerui")
     require("reader.engine_progress").patchOpen()
     UIManager:nextTick(require("ui.guard").wrap("open document", function()
@@ -71,6 +71,7 @@ local function showReader(plugin, path, generation, done)
         local function open()
             logger.info("desktop.open reader", path)
             done(true)
+            require("reader.engine_progress").opening_name = title
             ReaderUI:showReader(path, nil, nil, nil, function()
                 -- KOReader 在此回调返回后才把 ReaderUI 放入窗口栈；再排一拍，
                 -- 避免先关全屏桌面导致底层 FileManager 被重绘出来。
@@ -159,7 +160,7 @@ function Open.book(plugin, book, on_done, opts)
         end
         -- 原书上次读的是衍生版（排版 / 双语）且文件还在：改开那个版本。
         local open_path = require("reader.session.derived_note").last(path) or path
-        showReader(plugin, open_path, generation, done)
+        showReader(plugin, open_path, generation, done, book.title)
     end)
     if not source_settled then
         if generation == Open.generation then

@@ -32,6 +32,7 @@ end
 local ReaderUIStub = {}
 package.preload["apps/reader/readerui"] = function() return ReaderUIStub end
 
+package.preload["apps/reader/modules/readerrolling"] = function() return {} end
 local EngineProgress = require("reader.engine_progress")
 local rolling = {}
 EngineProgress.install(rolling)
@@ -79,9 +80,10 @@ ReaderUIStub.doShowReader = function(_self, file)
     rolling.engine_progress_update_not_before = nil
     rolling:showEngineProgress(0.25)
 end
+EngineProgress.opening_name = "示例书"
 ReaderUIStub:showReaderCoroutine("a.epub", nil, false)
 local open = dialogs[2]
-Assert.eq(open.title, "正在打开")
+Assert.eq(open.title, "正在打开《示例书》")
 Assert.is_true(open.shown)
 ticks[#ticks]()
 Assert.eq(shown[1], "a.epub")

@@ -13,11 +13,15 @@
 
 local time = require("ui/time")
 local _ = require("gettext")
+local T = require("ffi/util").template
 
 local INITIAL_DELAY = time.s(2)
 local UPDATE_DELAY = time.ms(500)
 
-local EngineProgress = {}
+local EngineProgress = {
+    --- 正在打开的书名；Open.book 设置，开书弹窗标题引用。
+    opening_name = nil,
+}
 
 local function newDialog(title)
     local ProgressDialog = require("ui.themes.widgets.progress_dialog")
@@ -39,10 +43,14 @@ function EngineProgress.patchOpen()
     local ReaderUI = require("apps/reader/readerui")
     if ReaderUI._book_open_patched then return end
     ReaderUI._book_open_patched = true
+    -- 引擎回调在文档载入期间就触发，早于阅读页 onCreate 的实例安装，所以在类上先接管。
+    EngineProgress.install(require("apps/reader/modules/readerrolling"))
     ReaderUI.showReaderCoroutine = function(self, file, provider, seamless)
         local UIManager = require("ui/uimanager")
         if not seamless then
-            ReaderUI._book_open_dialog = newDialog(_("正在打开"))
+            local name = EngineProgress.opening_name
+            EngineProgress.opening_name = nil
+            ReaderUI._book_open_dialog = newDialog(name and name ~= "" and T(_("正在打开《%1》"), name) or _("正在打开"))
             ReaderUI._book_open_dialog:show()
             UIManager:forceRePaint()
         else

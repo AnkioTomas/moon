@@ -799,6 +799,7 @@ return {
     ["正在切换章节，请稍候…"] = "Switching chapter, please wait…",
     ["正在加载字体列表…"] = "Loading font list…",
     ["正在打开"] = "Opening",
+    ["正在打开《%1》"] = "Opening “%1”",
     ["正在提取文字"] = "Extracting text",
     ["正在检查月读更新…"] = "Checking for 月读 updates…",
     ["正在测试…"] = "Testing…",
