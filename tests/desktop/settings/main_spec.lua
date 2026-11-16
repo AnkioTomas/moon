@@ -273,14 +273,14 @@ Assert.eq(library.id, "group:library")
 local library_rows = buildSectionRows(library)
 local library_titles = {}
 for _, row in ipairs(library_rows) do library_titles[#library_titles + 1] = row.title end
-Assert.eq(table.concat(library_titles, ","), "启用的书源,当前书库,账号,数据清理")
+Assert.eq(table.concat(library_titles, ","), "启用的书源,当前书库,账号,第三方书源插件,数据清理")
 local cleanup_opened = false
 package.loaded["source.cleanup"] = { pick = function(d)
     Assert.eq(d, desktop)
     cleanup_opened = true
 end }
 Assert.is_false(cleanup_opened)
-library_rows[4].callback()
+library_rows[5].callback()
 Assert.is_true(cleanup_opened, "点清理入口才打开选择器，不自动清理")
 
 -- 阅读组：同一页三个分节，不再多点一层分类
