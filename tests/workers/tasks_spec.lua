@@ -380,6 +380,11 @@ do
     Assert.len(history, 10)
     Assert.eq(history[1].key, "h12")
     Assert.eq(history[10].key, "h3")
+    Tasks.dismissFinished("h12")
+    Tasks.dismissFinished("nope")
+    history = Tasks.finished()
+    Assert.len(history, 9)
+    Assert.eq(history[1].key, "h11", "长按删除一条历史")
     Assert.eq(#Tasks.tasks(), 0)
 end
 

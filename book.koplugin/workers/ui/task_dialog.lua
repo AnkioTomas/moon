@@ -217,7 +217,8 @@ function TaskDialog:row(task)
         },
     }
     return Tap.wrap(row, task.restartable and task.state ~= "finished"
-        and function() TaskDialog.confirmCancel(task) end or nil)
+        and function() TaskDialog.confirmCancel(task) end or nil,
+        task.state == "finished" and function() Tasks.dismissFinished(task.key) end or nil)
 end
 
 function TaskDialog:init()
