@@ -84,8 +84,8 @@ end
 Setting.browser = {
     domain = "iread.ankio.net",
     scope = "cookie",
-    login = "https://iread.ankio.net/user/token",
-    check = "https://iread.ankio.net/user/token",
+    login = "https://iread.ankio.net/#/system/token",
+    check = "https://iread.ankio.net/#/system/token",
     icon = "https://iread.ankio.net/static/icons/favicon-32x32.png",
     isAuthorized = function()
         return loggedIn() and not require("source.auth").expired(SOURCE_ID)
@@ -121,7 +121,7 @@ end
 local function showLogin()
     require("ui.themes.widgets.input"):new{
         title = _("iRead 个人 Token"),
-        fields = { { text = "", hint = _("打开 iread.ankio.net/user/token ，新建个人 Token 后粘贴到这里") } },
+        fields = { { text = "", hint = _("打开 iread.ankio.net/#/system/token ，新建个人 Token 后粘贴到这里") } },
         ok_text = _("登录"),
         callback = function(value)
             local token = Setting.parseToken(value or "")

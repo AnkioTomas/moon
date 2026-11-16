@@ -69,13 +69,14 @@ do
     Client.shelfAsync(function(v) rows = v end)
     Assert.len(rows, 0)
     Assert.eq(requests[2].url, "https://iread.ankio.net/user/home")
+    Assert.not_nil(requests[2].body)
 
     replies = { '{"code":200,"data":[]}', '{"code":401,"data":"x"}' }
     local err
     rows = nil
     Client.shelfAsync(function(v, e) rows, err = v, e end)
     Assert.is_nil(rows)
-    Assert.matches(err, "iread%.ankio%.net/user/token")
+    Assert.matches(err, "iread%.ankio%.net/#/system/token")
     Assert.is_true(Auth.expired("iread"))
 end
 

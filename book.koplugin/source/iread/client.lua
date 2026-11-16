@@ -81,8 +81,8 @@ function Client.decode(raw, err, cred)
         return wire.data == nil and {} or wire.data
     end
     if (code == 401 or code == 403) and (cred.token or cred.cookie) and isCurrent(cred) then
-        return nil, require("source.auth").expire(SOURCE_ID, _("请按这个做：\n1. 点这个提示上的「重新登录」。没有按钮就打开「设置 → 书库 → 账号 → iRead → iRead 账号」。\n2. 用电脑浏览器打开 https://iread.ankio.net/user/token ，登录你的账号。\n3. 在页面上新建一个个人 Token，复制它。\n4. 回到月读的输入框，把 Token 贴进去，点「登录」。\n\n如果平时用的是浏览器扩展，不要新建 Token，改做下面这些：\n")
-            .. require("source.cookie_login").relogin(_("iRead"), "https://iread.ankio.net/user/token"))
+        return nil, require("source.auth").expire(SOURCE_ID, _("请按这个做：\n1. 点这个提示上的「重新登录」。没有按钮就打开「设置 → 书库 → 账号 → iRead → iRead 账号」。\n2. 用电脑浏览器打开 https://iread.ankio.net/#/system/token ，登录你的账号。\n3. 在页面上新建一个个人 Token，复制它。\n4. 回到月读的输入框，把 Token 贴进去，点「登录」。\n\n如果平时用的是浏览器扩展，不要新建 Token，改做下面这些：\n")
+            .. require("source.cookie_login").relogin(_("iRead"), "https://iread.ankio.net/#/system/token"))
     end
     return nil, type(wire.msg) == "string" and wire.msg ~= "" and wire.msg or _("请求失败")
 end
@@ -102,24 +102,6 @@ local function post(path, form, cred, ratio, cb, session)
         headers = { Cookie = cookie, Authorization = cred.token and ("Bearer " .. cred.token),
             ["X-Requested-With"] = "XMLHttpRequest" },
         content_type = "application/x-www-form-urlencoded",
-        timeout = require("http.timeout").net(ratio),
-    }, function(raw, err, res)
-        local data, decode_err = Client.decode(raw, err, cred)
-        cb(data, decode_err, res)
-    end)
-end
-
----@param path string
----@param cred IReadCredential
----@param ratio number 超时倍率
----@param cb fun(data: any|nil, err: string|nil, res: table|nil)
----@return { cancel: fun() }
-local function get(path, cred, ratio, cb)
-    local cookie = cred.cookie
-    return Request.get(Client.BASE .. path, {
-        accept = "application/json",
-        headers = { Cookie = cookie, Authorization = cred.token and ("Bearer " .. cred.token),
-            ["X-Requested-With"] = "XMLHttpRequest" },
         timeout = require("http.timeout").net(ratio),
     }, function(raw, err, res)
         local data, decode_err = Client.decode(raw, err, cred)
@@ -147,7 +129,7 @@ end
 ---@param cb fun(user: table|nil, err: string|nil)
 ---@return { cancel: fun() }
 function Client.userAsync(cred, cb)
-    return get("/user/home", cred, 0.5, function(data, err)
+    return post("/user/home", {}, cred, 0.5, function(data, err)
         if type(data) ~= "table" or type(data.nickname) ~= "string" or data.nickname == "" then
             cb(nil, err or _("iRead 账号信息为空")); return
         end
