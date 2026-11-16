@@ -12,6 +12,7 @@
 
 local Job = require("workers.job")
 local Linked = require("features.reviews.linked")
+local MarkStyle = require("reader.mark_style")
 local PageMarks = require("reader.page_marks")
 local Perf = require("utils.perf")
 local UIManager = require("ui/uimanager")
@@ -385,15 +386,13 @@ end
 function ReviewMarks:marks()
     self:updateView()
     local conf = require("utils.settings").get("features.reviews")
-    local style = conf.book_reviews_mark_style
-    local gray = math.floor((100 - conf.mark_gray) * 255 / 100 + 0.5)
-    local alpha = math.floor(conf.mark_opacity * 255 / 100 + 0.5)
+    local style, gray, alpha, offset = MarkStyle.resolve(conf, require("features.reviews.setting").KEYS)
     for i = #self.current, 1, -1 do
         local mark = self.current[i]
         if mark.spot.total == 0 and not mark.heading then
             table.remove(self.current, i)
         else
-            mark.style, mark.gray, mark.alpha, mark.offset = style, gray, alpha, conf.mark_offset
+            mark.style, mark.gray, mark.alpha, mark.offset = style, gray, alpha, offset
         end
     end
     return self.current

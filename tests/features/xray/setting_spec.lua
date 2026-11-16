@@ -31,7 +31,7 @@ package.preload["ui.themes.widgets.list"] = function()
     }
 end
 local conf = {
-    xray = { book_xray_enabled = true, book_xray_show_marks = true, book_xray_mark_style = "dashed", book_xray_quality = "standard" },
+    xray = { book_xray_enabled = true, book_xray_show_marks = true, book_xray_mark_style = "dashed", book_xray_mark_gray = 73, book_xray_mark_opacity = 100, book_xray_mark_offset = 0, book_xray_quality = "standard" },
     translate = { edge_translation_enabled = false },
 }
 local saved = {}
@@ -57,7 +57,7 @@ Assert.eq(xray[1].group, "reader")
 Assert.eq(xray[1].order, 13)
 local section = xray[1].page.sections()[1]
 Assert.eq(section.title, "X-Ray")
-Assert.len(section.rows, 5)
+Assert.len(section.rows, 8)
 local quality_row = section.rows[4](600)
 Assert.eq(quality_row.current, "standard")
 Assert.len(quality_row.items, 3)
@@ -76,8 +76,14 @@ Assert.eq(section.rows[5](600).status, "虚线")
 section.rows[5](600).callback()
 Assert.eq(conf.xray.book_xray_mark_style, "solid")
 Assert.eq(saved[#saved], "features.xray")
-Assert.eq(invalidated, 1)
+Assert.eq(invalidated, 0, "样式只重画，不作废扫描缓存")
 Assert.eq(updates, 2)
+Assert.eq(section.rows[6](600).status, "+0 px")
+Assert.eq(section.rows[7](600).status, "73%")
+Assert.eq(section.rows[8](600).status, "100%")
+Assert.eq(require("reader.mark_style").resolve(conf.xray, require("features.xray.setting").KEYS),
+    "solid", "换算出样式")
+invalidated = 1
 section = xray[1].page.sections()[1]
 section.rows[1](600).callback()
 Assert.is_false(conf.xray.book_xray_enabled)

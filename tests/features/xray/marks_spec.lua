@@ -6,7 +6,8 @@ Stubs.install()
 package.preload["l10n"] = function() return { apply = function() end } end
 package.preload["gettext"] = function() return function(value) return value end end
 package.preload["utils.settings"] = function()
-    local xray = { book_xray_enabled = true, book_xray_show_marks = true }
+    local xray = { book_xray_enabled = true, book_xray_show_marks = true,
+        book_xray_mark_style = "dotted", book_xray_mark_gray = 73, book_xray_mark_opacity = 50, book_xray_mark_offset = 2 }
     return { get = function(name) assert(name == "features.xray"); return xray end }
 end
 local job_runs, job_cancels = 0, 0
@@ -188,7 +189,9 @@ Assert.eq(Marks._marks[1].box.w, 80)
 local layer_marks = Marks:marks()
 Assert.len(layer_marks, 1)
 Assert.eq(layer_marks[1].boxes[1].x, 20)
-Assert.is_false(layer_marks[1].solid)
+Assert.eq(layer_marks[1].style, "dotted")
+Assert.eq(layer_marks[1].alpha, 128)
+Assert.eq(layer_marks[1].offset, 2)
 Assert.is_nil(opened)
 layer_marks[1].tap()
 Assert.eq(opened, "Whitby")

@@ -6,6 +6,7 @@
 
 require("l10n").apply()
 
+local MarkStyle = require("reader.mark_style")
 local PageMarks = require("reader.page_marks")
 local Text = require("utils.text")
 local UIManager = require("ui/uimanager")
@@ -315,12 +316,13 @@ function Marks:marks()
         return {}
     end
     self:updateView()
-    local solid = require("utils.settings").get("features.xray").book_xray_mark_style == "solid"
+    local conf = require("utils.settings").get("features.xray")
+    local style, gray, alpha, offset = MarkStyle.resolve(conf, require("features.xray.setting").KEYS)
     local out = {}
     for _idx, mark in ipairs(self._marks) do
         out[#out + 1] = {
             boxes = { mark.box },
-            solid = solid,
+            style = style, gray = gray, alpha = alpha, offset = offset,
             tap = function() require("features.xray.ui").showEntity(mark.entity) end,
         }
     end
