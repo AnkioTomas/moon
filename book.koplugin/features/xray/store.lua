@@ -133,9 +133,10 @@ end
 
 --- 把已有实体整理成 AI prompt 所需的三类快照。
 ---@param entities table[]
+---@param events table[]|nil 已收录情节线 { title, last }；nil = 事件功能关闭，提示词不要事件
 ---@return table
-function Store.promptSnapshot(entities)
-    local snapshot = { characters = {}, locations = {}, terms = {} }
+function Store.promptSnapshot(entities, events)
+    local snapshot = { characters = {}, locations = {}, terms = {}, events = events }
     local buckets = {
         character = snapshot.characters,
         location = snapshot.locations,

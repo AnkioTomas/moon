@@ -47,6 +47,20 @@ CREATE TABLE IF NOT EXISTS xray_removed (
 ]]) ~= nil
 end)
 
+-- 情节线：title 是情节线名，每行是它的一个先后发生的节点；time 是正文里写明的故事内时间（没有为空串），
+-- pos 是节点在全书中的位置（阅读进度百分比）。同情节线同描述只收一次。
+DB.schema("xray_plots", function()
+    return DB.exec([[
+CREATE TABLE IF NOT EXISTS xray_plots (
+  source_id TEXT NOT NULL, stable_id TEXT NOT NULL, title TEXT NOT NULL,
+  time TEXT NOT NULL DEFAULT '',
+  description TEXT NOT NULL DEFAULT '', characters TEXT NOT NULL DEFAULT '',
+  pos REAL NOT NULL,
+  PRIMARY KEY (source_id, stable_id, title, description)
+);
+]]) ~= nil
+end)
+
 -- 已按章识别过的目录章序号，自动预取据此不重复花 token。
 DB.schema("xray_chapter", function()
     return DB.exec([[
@@ -162,6 +176,67 @@ function XrayDB.list(source_id, stable_id, kind)
     return out
 end
 
+--- 每本书的情节线数与节点数上限：模型把场景当情节线乱吐时兜底。
+local MAX_PLOTS = 20
+local MAX_NODES = 400
+
+--- 追加情节节点；同情节线同描述的忽略，新情节线与节点满额后不再收（已有情节线的节点仍可追加到节点上限）。
+---@param source_id string
+---@param stable_id string
+---@param events { title: string, time: string, description: string, characters: string[], pos: number }[]
+---@return boolean
+function XrayDB.addEvents(source_id, stable_id, events)
+    if #events == 0 then return true end
+    return DB.transaction(function()
+        local known, plots = {}, 0
+        local result, nrows = DB.query(
+            "SELECT DISTINCT title FROM xray_plots WHERE source_id=? AND stable_id=?;", source_id, stable_id)
+        for i = 1, nrows or 0 do
+            known[result[1][i]] = true
+            plots = plots + 1
+        end
+        local count = tonumber(DB.rowexec(
+            "SELECT COUNT(*) FROM xray_plots WHERE source_id=? AND stable_id=?;", source_id, stable_id)) or 0
+        for _idx, event in ipairs(events) do
+            if count >= MAX_NODES then break end
+            if not known[event.title] and plots < MAX_PLOTS then
+                known[event.title] = true
+                plots = plots + 1
+            end
+            if known[event.title] then
+                if not DB.exec([[INSERT OR IGNORE INTO xray_plots
+                    (source_id, stable_id, title, time, description, characters, pos) VALUES (?,?,?,?,?,?,?);]],
+                        source_id, stable_id, event.title, event.time, event.description,
+                        table.concat(event.characters, "、"), event.pos) then
+                    return false
+                end
+                count = count + 1
+            end
+        end
+        return true
+    end) == true
+end
+
+--- 按发生顺序（位置，再按写入先后）列出这本书的全部情节节点。
+---@param source_id string
+---@param stable_id string
+---@return { title: string, time: string, description: string, characters: string[], pos: number }[]
+function XrayDB.listEvents(source_id, stable_id)
+    local result, nrows = DB.query([[SELECT title, time, description, characters, pos FROM xray_plots
+        WHERE source_id=? AND stable_id=? ORDER BY pos ASC, rowid ASC;]], source_id, stable_id)
+    local out = {}
+    for i = 1, nrows do
+        out[i] = {
+            title = result[1][i],
+            time = result[2][i],
+            description = result[3][i],
+            characters = splitAliases(result[4][i]),
+            pos = tonumber(result[5][i]) or 0,
+        }
+    end
+    return out
+end
+
 ---@param name string
 ---@return string
 local function tombName(name)
@@ -262,7 +337,7 @@ function XrayDB.replace(source_id, stable_id, entities, updated_at)
 end
 
 -- 这本书的全部 X-Ray 状态。改身份、撕墓碑都只认这一份。
-local TABLES = { "xray_entities", "xray_scan", "xray_removed", "xray_chapter" }
+local TABLES = { "xray_entities", "xray_scan", "xray_removed", "xray_chapter", "xray_plots" }
 
 --- 书改名 / 收编。不另起事务，跑在调用方事务里。
 ---@param source_id string

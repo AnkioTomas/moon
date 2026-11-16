@@ -12,6 +12,7 @@ require("l10n").apply()
 local AI = require("ai")
 local Context = require("reader.context")
 local Prompts = require("features.xray.prompts")
+local Setting = require("features.xray.setting")
 local Store = require("features.xray.store")
 local XrayDB = require("features.xray.db")
 local Text = require("utils.text")
@@ -21,15 +22,16 @@ local Fetch = {}
 
 local MIN_GROUND_LEN = 2
 local LOOKUP_PRIOR_LIMIT = 2000
+local RECENT_EVENTS = 20
 --- 一次产出人物、地点、术语三段 JSON，推理模型的思考还要占额度，8K 实测会被截断。
 local BULK_MAX_TOKENS = 16000
 --- 识别档位（book_xray_quality）：前情摘要章数、是否带本页之前的正文、每次实体数量上限、输出 token 上限、附加规则。
 local PROFILES = {
-    save = { recap = 0, prior = false, caps = { 10, 5, 5 }, max_tokens = 10000,
+    save = { recap = 0, prior = false, caps = { 10, 5, 5, 2 }, max_tokens = 10000,
         rule = "description 不超过 40 字，aliases 最多 2 个；只输出本页新出现或有重要新信息的实体。" },
-    standard = { recap = 5, prior = true, caps = { 25, 15, 15 }, max_tokens = BULK_MAX_TOKENS,
+    standard = { recap = 5, prior = true, caps = { 25, 15, 15, 4 }, max_tokens = BULK_MAX_TOKENS,
         rule = "description 不超过 80 字，aliases 最多 3 个。" },
-    high = { recap = 10, prior = true, caps = { 40, 25, 25 }, max_tokens = BULK_MAX_TOKENS,
+    high = { recap = 10, prior = true, caps = { 40, 25, 25, 6 }, max_tokens = BULK_MAX_TOKENS,
         rule = "description 写详实（80 到 150 字，不得超过）：身份、与其他人物的关系、关键经历；有别名或译名变体务必收全。" },
 }
 
@@ -144,6 +146,55 @@ local function cleanPayload(decoded)
     return incoming
 end
 
+--- 把模型返回的 events 规范成情节节点；没有标题或描述的丢弃，字段按字节截断，位置记为 pos。
+---@param decoded table 模型返回的 JSON 对象
+---@param pos number 阅读进度百分比
+---@return table[]
+local function cleanEvents(decoded, pos)
+    local out = {}
+    for _idx, item in ipairs(type(decoded.events) == "table" and decoded.events or {}) do
+        local title = Text.truncateUtf8(Text.trim(item.title), 60)
+        local description = Text.truncateUtf8(Text.trim(item.description), 300)
+        if title ~= "" and description ~= "" then
+            local characters = {}
+            for _name_idx, name in ipairs(type(item.characters) == "table" and item.characters or {}) do
+                name = Text.trim(name)
+                if name ~= "" and #characters < 5 then characters[#characters + 1] = name end
+            end
+            out[#out + 1] = {
+                title = title,
+                time = Text.truncateUtf8(Text.trim(item.time), 40),
+                description = description,
+                characters = characters,
+                pos = pos,
+            }
+        end
+    end
+    return out
+end
+
+--- 已收录的情节线（按最近一次进展的先后，取最后 RECENT_EVENTS 条）与各自最近一个节点，放进提示词让模型续写。
+---@param identity BookIdentity
+---@return { title: string, last: string }[]|nil 事件功能关闭时为 nil
+local function recentEvents(identity)
+    if not Setting.eventsEnabled() then return nil end
+    local order, latest = {}, {}
+    for _idx, node in ipairs(XrayDB.listEvents(identity.source_id, identity.stable_id)) do
+        if latest[node.title] then
+            for i, title in ipairs(order) do
+                if title == node.title then table.remove(order, i); break end
+            end
+        end
+        order[#order + 1] = node.title
+        latest[node.title] = node.description
+    end
+    local out = {}
+    for i = math.max(1, #order - RECENT_EVENTS + 1), #order do
+        out[#out + 1] = { title = order[i], last = latest[order[i]] }
+    end
+    return out
+end
+
 --- 按三类实体组成返回给调用方的结果表。
 ---@param entities table[]
 ---@return { characters: table[], locations: table[], terms: table[], cached: boolean|nil }
@@ -188,11 +239,28 @@ local function mergeAndSave(identity, incoming, manual)
     return merged
 end
 
+--- 落库一次识别结果：实体须在 context 里 grounding，事件记在 pos 位置。
 ---@param identity BookIdentity
----@param incoming table[]
+---@param decoded table 模型返回的 JSON 对象
+---@param context string
+---@param pos number
+---@return table[] 合并后的全部实体
+local function saveDecoded(identity, decoded, context, pos)
+    local merged = mergeAndSave(identity, filterGrounded(cleanPayload(decoded), context))
+    if Setting.eventsEnabled() then
+        assert(XrayDB.addEvents(identity.source_id, identity.stable_id, cleanEvents(decoded, pos)),
+            "failed to save xray events")
+    end
+    return merged
+end
+
+---@param identity BookIdentity
+---@param decoded table
+---@param context string
+---@param pos number
 ---@param cb fun(result: table|nil, err: any)
-local function persist(identity, incoming, cb)
-    local ok, result = pcall(mergeAndSave, identity, incoming)
+local function persist(identity, decoded, context, pos, cb)
+    local ok, result = pcall(saveDecoded, identity, decoded, context, pos)
     if ok then cb(fetchResult(result)) else cb(nil, result) end
 end
 
@@ -228,15 +296,16 @@ local function fromContext(ui, identity, existing, cb)
     if not profile().prior then
         ctx.prior_text = ""
     end
+    local pos = progressPercent()
     local messages = {
         { role = "system", content = Prompts.system },
         { role = "user", content = Prompts.comprehensive(
-            title, author, progressPercent(), ctx.current_page, ctx.prior_text, Store.promptSnapshot(existing),
-            storySoFar(identity), profile()) },
+            title, author, pos, ctx.current_page, ctx.prior_text,
+            Store.promptSnapshot(existing, recentEvents(identity)), storySoFar(identity), profile()) },
     }
     return AI.jsonExtract(messages, { localize = true, stream = true, max_tokens = profile().max_tokens, timeout = require("http.timeout").ai(1.5) }, function(decoded, err)
         if not decoded then cb(nil, err); return end
-        persist(identity, filterGrounded(cleanPayload(decoded), readingContext(ctx)), cb)
+        persist(identity, decoded, readingContext(ctx), pos, cb)
     end)
 end
 
@@ -380,16 +449,17 @@ function Fetch.chapter(identity, text, cb)
         end
         local chunk = chunks[index]
         local existing = filterGrounded(XrayDB.list(source_id, stable_id), chunk)
+        local pos = progressPercent()
         local messages = {
             { role = "system", content = Prompts.system },
             { role = "user", content = Prompts.comprehensive(
-                title, author, progressPercent(), chunk, "", Store.promptSnapshot(existing),
+                title, author, pos, chunk, "", Store.promptSnapshot(existing, recentEvents(identity)),
                 storySoFar(identity), profile()) },
         }
         request = AI.jsonExtract(messages, { localize = true, stream = true, max_tokens = profile().max_tokens, timeout = require("http.timeout").ai(1.5) }, function(decoded, err)
             if cancelled then return end
             if not decoded then cb(nil, err); return end
-            local ok, save_err = pcall(mergeAndSave, identity, filterGrounded(cleanPayload(decoded), chunk))
+            local ok, save_err = pcall(saveDecoded, identity, decoded, chunk, pos)
             if not ok then cb(nil, save_err); return end
             index = index + 1
             step()
@@ -460,10 +530,11 @@ function Fetch.scanBook(identity, path)
                 return
             end
             local existing = filterGrounded(XrayDB.list(identity.source_id, identity.stable_id), chunk)
+            local pos = index * 100 / #bounds
             local messages = {
                 { role = "system", content = Prompts.system },
                 { role = "user", content = Prompts.comprehensive(
-                    title, author, math.floor(index * 100 / #bounds), chunk, "", Store.promptSnapshot(existing),
+                    title, author, math.floor(pos), chunk, "", Store.promptSnapshot(existing, recentEvents(identity)),
                     nil, profile()) },
             }
             --- 同段 AI 偶发失败（网关慢 / 截断）先就地再试一次，避免整次尝试直接进「失败」退避。
@@ -483,7 +554,7 @@ function Fetch.scanBook(identity, path)
                     finish({ ok = false, err = err })
                     return
                 end
-                local ok, save_err = pcall(mergeAndSave, identity, filterGrounded(cleanPayload(decoded), chunk))
+                local ok, save_err = pcall(saveDecoded, identity, decoded, chunk, pos)
                 if not ok then finish({ ok = false, err = save_err }); return end
                 XrayDB.saveScanCursor(identity.source_id, identity.stable_id, digest, index, #bounds)
                 index = index + 1

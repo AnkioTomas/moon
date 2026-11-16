@@ -10,6 +10,7 @@ local Kinds = {
     { id = "character", text = _("人物"), icon = "person" },
     { id = "location", text = _("地点"), icon = "location_on" },
     { id = "term", text = _("专有名词"), icon = "label" },
+    { id = "event", text = _("事件"), icon = "timeline" },
 }
 
 ---@param kind string|nil

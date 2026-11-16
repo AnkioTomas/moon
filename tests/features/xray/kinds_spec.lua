@@ -8,7 +8,7 @@ end
 
 local Kinds = require("features.xray.kinds")
 
-Assert.eq(#Kinds, 3)
+Assert.eq(#Kinds, 4)
 Assert.eq(Kinds[1].id, "character")
 Assert.eq(Kinds[1].text, "人物")
 Assert.eq(Kinds[1].icon, "person")

@@ -12,6 +12,7 @@ local TextViewer = require("ui.themes.widgets.text_viewer")
 local Toast = require("ui.themes.widgets.toast")
 local Text = require("utils.text")
 local Kinds = require("features.xray.kinds")
+local Setting = require("features.xray.setting")
 local XrayDB = require("features.xray.db")
 local _ = require("gettext")
 local T = require("ffi/util").template
@@ -98,6 +99,19 @@ function UI.showEntity(entity)
     viewer:show()
 end
 
+--- 事件时间线：每个节点一段，● 标出位置，节点之间用竖线连起来。
+---@param event { title: string, nodes: { description: string, characters: string[], pos: number }[] }
+function UI.showEvent(event)
+    local lines = {}
+    for index, node in ipairs(event.nodes) do
+        lines[#lines + 1] = node.time ~= "" and ("● " .. node.time) or string.format("● %d%%", math.floor(node.pos))
+        lines[#lines + 1] = "│ " .. node.description
+        if #node.characters > 0 then lines[#lines + 1] = "│ " .. table.concat(node.characters, "、") end
+        if index < #event.nodes then lines[#lines + 1] = "│" end
+    end
+    TextViewer:new{ title = event.title, text = table.concat(lines, "\n"), fullscreen = false }:show()
+end
+
 --- 用户点了重新生成类入口：先释放墓碑，否则删过的实体永远加不回来。
 ---@param identity BookIdentity
 local function releaseRemoved(identity)
@@ -118,10 +132,40 @@ local function ensureReady()
     return true
 end
 
+--- 事件列表：一行一个事件（按首次出现的位置排序），右侧是节点数，点开看它的时间线。
+---@param identity BookIdentity
+---@return table[]
+local function eventRows(identity)
+    local groups, order = {}, {}
+    for _idx, node in ipairs(XrayDB.listEvents(identity.source_id, identity.stable_id)) do
+        local group = groups[node.title]
+        if not group then
+            group = { title = node.title, nodes = {} }
+            groups[node.title] = group
+            order[#order + 1] = group
+        end
+        group.nodes[#group.nodes + 1] = node
+    end
+    local items = {}
+    for _idx, group in ipairs(order) do
+        items[#items + 1] = {
+            text = group.title,
+            mandatory = T(_("%1 个节点"), #group.nodes),
+            keep_open = true,
+            callback = function() UI.showEvent(group) end,
+        }
+    end
+    if #items == 0 then
+        items[1] = { text = _("暂无事件，阅读或重新生成后会出现在这里"), enabled = false }
+    end
+    return items
+end
+
 ---@param tab_id string
 ---@param identity BookIdentity
 ---@return table[]
 local function rowsForTab(tab_id, identity)
+    if tab_id == "event" then return eventRows(identity) end
     local items = {}
     for i, entity in ipairs(XrayDB.list(identity.source_id, identity.stable_id, tab_id)) do
         local subtitle = entity.role or ""
@@ -422,7 +466,12 @@ function UI.openMain(ui, initial_tab)
         info(_("当前书籍没有可用身份"))
         return
     end
+    local tabs = {}
+    for _idx, kind in ipairs(Kinds) do
+        if kind.id ~= "event" or Setting.eventsEnabled() then tabs[#tabs + 1] = kind end
+    end
     initial_tab = initial_tab or "character"
+    if initial_tab == "event" and not Setting.eventsEnabled() then initial_tab = "character" end
     local holder = { identity = identity }
     main_holder = holder
     holder.menu = List:new{
@@ -438,7 +487,7 @@ function UI.openMain(ui, initial_tab)
                 { text = _("重置此书 X-Ray"), callback = function() UI.resetBook(ui, identity) end },
             } }:show()
         end,
-        tabs = { tabs = Kinds, active = initial_tab, on_tab = function(tab_id)
+        tabs = { tabs = tabs, active = initial_tab, on_tab = function(tab_id)
             holder.menu.subtitle = Kinds.label(tab_id)
             return rowsForTab(tab_id, identity)
         end },

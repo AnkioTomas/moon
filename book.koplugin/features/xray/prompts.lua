@@ -63,6 +63,21 @@ local function formatExisting(snapshot)
     return table.concat(parts, "\n")
 end
 
+local EVENTS_RULE = [[- events 是贯穿全书的大情节线（如“调查某案件”“某人的复仇”“某段旅程”“某场战争”），一条线由多个先后发生的节点组成。单个场景、动作、对话（如“某人讲述某事”“潜入某处”）不是事件，只能作为某条情节线的节点。全书通常只有几条到十几条情节线：CURRENT PAGE 的内容属于 EXISTING EVENTS 中某条线时，必须沿用它的原 title 追加一个节点；只有确实是全新的主线才新建，宁可并入已有的线也不要新建。本页没有进展就不输出，最多 %d 个节点。节点的 time 写正文里明确出现的故事内时间（如“三月五日”“三天后”“十年前”），没有明确时间就留空串，不要编造；description 只写本页的新进展（不超过 50 字）；characters 写涉及的人物名。]]
+
+--- 已收录的情节线（名字加最近一个节点），让模型沿用原名续写；没有时「（暂无）」。
+---@param snapshot table|nil
+---@return string
+local function formatEvents(snapshot)
+    local plots = snapshot and snapshot.events or {}
+    if #plots == 0 then return "（暂无）" end
+    local lines = {}
+    for _idx, plot in ipairs(plots) do
+        lines[#lines + 1] = "- " .. plot.title .. (plot.last ~= "" and ("（最近：" .. plot.last .. "）") or "")
+    end
+    return table.concat(lines, "\n")
+end
+
 ---@param title string|nil
 ---@param author string|nil
 ---@param progress integer|nil
@@ -73,8 +88,14 @@ end
 ---@param limits { caps: integer[], rule: string|nil }|nil 档位：实体数量上限与附加规则
 ---@return string
 function Prompts.comprehensive(title, author, progress, current_page, prior_text, existing, recap, limits)
-    local caps = limits and limits.caps or { 15, 10, 10 }
+    local caps = limits and limits.caps or { 15, 10, 10, 6 }
     local book_line = bookLine(title, author)
+    local eventsRule, eventsSchema, eventsBlock = "", "", ""
+    if existing and existing.events then
+        eventsRule = "\n" .. string.format(EVENTS_RULE, caps[4] or 6)
+        eventsSchema = ',\n  "events": [\n    {"title":"情节线名（不超过 15 字）","time":"","description":"本页中的新进展","characters":["人物"]}\n  ]'
+        eventsBlock = "EXISTING EVENTS（已收录的情节线）:\n" .. formatEvents(existing) .. "\n\n"
+    end
     return string.format([[书籍：%s
 阅读进度：约 %d%%
 
@@ -95,6 +116,7 @@ TASK: 为当前阅读位置更新 X-Ray。只输出一个 JSON 对象。
 %s
 - 新实体：可新增；人物用正式全名，aliases 最多 3 个。
 - 不要输出正文中未出现的实体。
+%s
 
 REQUIRED JSON:
 {
@@ -107,20 +129,22 @@ REQUIRED JSON:
   ],
   "terms": [
     {"name":"术语","aliases":["别称"],"description":"在本书语境下的含义"}
-  ]
+  ]%s
 }
 
 EXISTING ENTITIES:
 %s
 
-CURRENT PAGE:
+%sCURRENT PAGE:
 %s
 
 PRIOR CONTEXT:
 %s]], book_line, progress or 0,
         string.format("- 人物不超过 %d，地点不超过 %d，专有名词不超过 %d。%s",
             caps[1], caps[2], caps[3], limits and limits.rule or ""),
-        formatExisting(existing),
+        eventsRule,
+        eventsSchema,
+        formatExisting(existing), eventsBlock,
         current_page or "", prior_text or "") .. storySoFar(recap)
 end
 

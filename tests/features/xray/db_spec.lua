@@ -77,6 +77,20 @@ Assert.matches(calls[#calls].sql, "DELETE FROM xray_removed")
 Assert.eq(calls[#calls].args[1], "moon")
 Assert.eq(calls[#calls].args[2], "b1")
 
+-- 事件：参数化写入，同一标题忽略，位置随行写入
+calls = {}
+Assert.is_true(XrayDB.addEvents("moon", "b1", {
+    { title = "T", time = "三月五日", description = "d", characters = { "A", "B" }, pos = 12.5 },
+}))
+local insert
+for _idx, c in ipairs(calls) do
+    if c.sql:find("INSERT OR IGNORE INTO xray_plots", 1, true) then insert = c end
+end
+Assert.eq(insert.args[3], "T")
+Assert.eq(insert.args[4], "三月五日")
+Assert.eq(insert.args[6], "A、B")
+Assert.eq(insert.args[7], 12.5)
+
 -- 撕墓碑走同一份名单，但不另起事务：外层 BookDB.remove 已经在事务里。
 calls = {}
 Assert.is_true(XrayDB.removeIdentity("moon", "b1"))
@@ -84,8 +98,8 @@ local removed = {}
 for _idx, c in ipairs(calls) do
     removed[#removed + 1] = c.sql:match("^DELETE FROM ([%w_]+)")
 end
-Assert.eq(table.concat(removed, ","), "xray_entities,xray_scan,xray_removed,xray_chapter")
-Assert.len(calls, 4, "撕墓碑不另起事务")
+Assert.eq(table.concat(removed, ","), "xray_entities,xray_scan,xray_removed,xray_chapter,xray_plots")
+Assert.len(calls, 5, "撕墓碑不另起事务")
 
 -- 重置所有 X-Ray 数据在同一事务内完成，单表失败时不留下部分清理结果。
 calls = {}
@@ -96,7 +110,7 @@ for _idx, c in ipairs(calls) do
     local tbl = c.sql:match("^DELETE FROM ([%w_]+)")
     if tbl then reset_tables[#reset_tables + 1] = tbl end
 end
-Assert.eq(table.concat(reset_tables, ","), "xray_entities,xray_scan,xray_removed,xray_chapter")
+Assert.eq(table.concat(reset_tables, ","), "xray_entities,xray_scan,xray_removed,xray_chapter,xray_plots")
 Assert.eq(calls[#calls].sql, "COMMIT;")
 
 calls = {}

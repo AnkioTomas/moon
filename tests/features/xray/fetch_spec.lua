@@ -9,8 +9,14 @@ end
 
 local entity_rows = {}
 local scan_cursor
+local event_rows = {}
 package.preload["features.xray.db"] = function()
     return {
+        listEvents = function() return event_rows end,
+        addEvents = function(_source_id, _stable_id, events)
+            for _idx, event in ipairs(events) do event_rows[#event_rows + 1] = event end
+            return true
+        end,
         scanCursor = function() return scan_cursor end,
         saveScanCursor = function(source_id, stable_id, digest, done, total)
             scan_cursor = { digest = digest, done = done, total = total }
@@ -115,6 +121,33 @@ Assert.matches(prompts[1], "CURRENT PAGE")
 Assert.is_nil(prompts[1]:find("已有知识", 1, true))
 Assert.eq(#result.characters, 1)
 Assert.eq(result.characters[1].name, "Mina")
+
+-- 事件：落库时带位置，标题截断、无标题丢弃；已收录事件标题出现在下一次提示词里
+event_rows = {}
+require("utils.settings").get("features.xray").book_xray_events = true
+result, failure = run({}, {
+    { characters = {}, locations = {}, terms = {}, events = {
+        { title = "Mina meets Helsing", description = "node-detail-xyz", characters = { "Mina", "Van Helsing" } },
+        { title = "", description = "no title" },
+    } },
+})
+Assert.is_nil(failure)
+Assert.len(event_rows, 1)
+Assert.eq(event_rows[1].title, "Mina meets Helsing")
+Assert.eq(event_rows[1].characters[2], "Van Helsing")
+Assert.is_true(event_rows[1].pos >= 1)
+run({}, { { characters = {}, locations = {}, terms = {} } })
+Assert.matches(prompts[1], "EXISTING EVENTS")
+Assert.matches(prompts[1], "%- Mina meets Helsing")
+Assert.matches(prompts[1], "最近：node%-detail%-xyz")
+
+-- 事件默认关：提示词不带事件，也不落库
+require("utils.settings").get("features.xray").book_xray_events = false
+event_rows = {}
+run({}, { { characters = {}, locations = {}, terms = {}, events = { { title = "T", description = "d" } } } })
+Assert.is_nil(prompts[1]:find("EVENTS", 1, true))
+Assert.is_nil(prompts[1]:find('"events"', 1, true))
+Assert.len(event_rows, 0)
 
 -- 模型漏掉 aliases：不能抛错
 result, failure = run({}, { { characters = { { name = "Mina" } }, locations = {}, terms = {} } })
