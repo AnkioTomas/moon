@@ -49,8 +49,8 @@ function CategorySetting.row(source_id, plugin)
                 local settings = require("utils.settings")
                 local cfg = settings.getSource(source_id)
                 cfg.category_as_group = not on
-                -- 微信增量会保留本地分类；清游标逼下次全量，才能按新开关重写分类。
-                if source_id == "wechat" then cfg.shelf_cursor = nil end
+                -- 增量同步会保留本地分类；清游标逼下次全量，才能按新开关重写分类。
+                cfg.shelf_cursor = nil
                 settings.saveSource(source_id, cfg)
                 if plugin and plugin.desktop then plugin.desktop:updateView() end
             end,

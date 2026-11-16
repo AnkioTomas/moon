@@ -20,7 +20,7 @@ shelf_cache 是唯一不配 supports* 的：可选方法 shelfCache 自身声明
 @module koplugin.book.source.base
 --]]
 
----@alias SourceId "moon"|"wechat"|"jdread"|"copymanga"|"fanqie"|"qimao"|"legado"|"jjwxc"|"qidian"|"qqreader"|"iread"|"changpei"|"xiaoxiang"|"local"|string
+---@alias SourceId "moon"|"copymanga"|"legado"|"iread"|"local"|string
 
 ---@alias BookSourceType
 ---| '"book"' # 整本文件
