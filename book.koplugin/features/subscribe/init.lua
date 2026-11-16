@@ -368,7 +368,9 @@ Subscribe.providers = {
         icon = "newspaper",
         label = _("公众号"),
         fetch = function(feed, cursor, cb)
-            local Mp = require("source.wechat.mp")
+            local provider = Subscribe.mpProvider()
+            if not provider then cb(nil, nil, _("没有可用的公众号来源")); return nil end
+            local Mp = provider.mp()
             return Mp.fetchArticlesAsync(feed.url, cursor or 0, function(items, err, groups)
                 if not items then return cb(nil, nil, err) end
                 local next_cursor = groups >= Mp.PAGE and (cursor or 0) + groups or nil
@@ -376,7 +378,9 @@ Subscribe.providers = {
             end)
         end,
         content = function(_feed, item, images_dir, cb)
-            return require("source.wechat.mp").fetchContentAsync(item.guid, images_dir, cb)
+            local provider = Subscribe.mpProvider()
+            if not provider then cb(nil, _("没有可用的公众号来源")); return nil end
+            return provider.mp().fetchContentAsync(item.guid, images_dir, cb)
         end,
     },
 }
@@ -492,11 +496,20 @@ function Subscribe.allowMp(mp_id)
     end
 end
 
---- 默认全订：把微信读书书架上的公众号都加进订阅（用户取消过的跳过）；无书架分组的归「公众号」组。
+--- 公众号来源（由外部书源经 desktop.account_feeds 登记）；没有则 nil。
+---@return table|nil
+function Subscribe.mpProvider()
+    local list = require("utils.extension").list("desktop.account_feeds")
+    return list[#list]
+end
+
+--- 默认全订：把公众号来源书架上的公众号都加进订阅（用户取消过的跳过）；无书架分组的归「公众号」组。
 --- 未登录 / 失败时 cb(nil, err)；成功 cb(新增的订阅行列表)。
 ---@param cb fun(added: table[]|nil, err: any)
 function Subscribe.syncMp(cb)
-    return require("source.wechat.client"):shelfSyncAsync(function(data, err)
+    local provider = Subscribe.mpProvider()
+    if not provider then return cb(nil, _("没有可用的公众号来源")) end
+    return provider.client():shelfSyncAsync(function(data, err)
         if not data then return cb(nil, err) end
         local removed = Subscribe.settings().mp_removed or {}
         local have = {}
@@ -504,7 +517,7 @@ function Subscribe.syncMp(cb)
             if feed.kind == "mp" then have[feed.url] = true end
         end
         local added = {}
-        for _idx, a in ipairs(require("source.wechat.mp").accounts(data)) do
+        for _idx, a in ipairs(provider.mp().accounts(data)) do
             if not have[a.id] and not removed[a.id] then
                 local id = SubDB.add({ kind = "mp", url = a.id, title = a.title,
                     grp = a.group ~= "" and a.group or _("公众号") })

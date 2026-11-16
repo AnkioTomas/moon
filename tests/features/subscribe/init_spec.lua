@@ -52,6 +52,10 @@ package.loaded["features.subscribe.db"] = {
     guids = function() return { alive = true } end,
 }
 local mp_calls = {}
+require("utils.extension").add("desktop.account_feeds", {
+    mp = function() return package.loaded["source.wechat.mp"] end,
+    client = function() return package.loaded["source.wechat.client"] end,
+})
 package.loaded["source.wechat.mp"] = {
     PAGE = 2,
     fetchArticlesAsync = function(_id, offset, cb)

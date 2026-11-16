@@ -11,22 +11,29 @@ local _ = require("gettext")
 
 local Search = {}
 
---- 可单独指定的数据来源（顺序即选择列表顺序）。
-Search.SOURCES = {
+local BASE = {
     { id = "douban", name = _("豆瓣"), run = Douban.searchAsync },
-    { id = "weread", name = _("微信读书"), run = function(q, cb) return Novel.viaSource("wechat", q, cb, "weread") end },
-    { id = "qimao", name = _("七猫小说"), run = function(q, cb) return Novel.viaSource("qimao", q, cb) end },
-    { id = "jjwxc", name = _("晋江文学城"), run = function(q, cb) return Novel.viaSource("jjwxc", q, cb) end },
-    { id = "qidian", name = _("起点中文网"), run = function(q, cb) return Novel.viaSource("qidian", q, cb) end },
-    { id = "fanqie", name = _("番茄小说"), run = function(q, cb) return Novel.viaSource("fanqie", q, cb) end },
-    { id = "changpei", name = _("长佩文学"), run = function(q, cb) return Novel.viaSource("changpei", q, cb) end },
-    { id = "xiaoxiang", name = _("潇湘书院"), run = function(q, cb) return Novel.viaSource("xiaoxiang", q, cb) end },
 }
+
+--- 可单独指定的数据来源（顺序即选择列表顺序）：内置的豆瓣 + 已启用的第三方书源（id 去掉可能的 ext. 前缀）。
+---@return { id: string, name: string, run: fun(query: string, cb: function): table|nil }[]
+function Search.sources()
+    local out = { BASE[1] }
+    for _idx, meta in ipairs(require("source.registry").listEnabled()) do
+        local short = tostring(meta.id):gsub("^ext%.", "")
+        if require("source.registry").external(meta.id) and short ~= "demo" and short ~= BASE[1].id then
+            out[#out + 1] = { id = short, name = meta.name or short,
+                run = function(q, cb) return Novel.viaSource(meta.id, q, cb, short) end }
+        end
+    end
+    return out
+end
 
 ---@param id string
 ---@return string
 function Search.name(id)
-    for _idx, src in ipairs(Search.SOURCES) do
+    if id == BASE[1].id then return BASE[1].name end
+    for _idx, src in ipairs(Search.sources()) do
         if src.id == id then return src.name end
     end
     return id
@@ -43,7 +50,7 @@ function Search.searchAsync(query, source_id, cb)
         cb(nil, _("搜索关键词为空"))
         return nil
     end
-    for _idx, src in ipairs(Search.SOURCES) do
+    for _idx, src in ipairs(Search.sources()) do
         if src.id == source_id then
             return src.run(query, function(results, err)
                 if results and #results > 0 then

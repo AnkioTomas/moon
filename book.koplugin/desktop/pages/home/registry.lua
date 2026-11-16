@@ -29,7 +29,7 @@ local COMPONENT_MODULES = {
     "recent_hero", "recent_list", "recent_cards", "random", "shelf",
 }
 
--- 内置书源自带的首页组件：源 id → 组件模块（组件 id 前缀是源 id；旧 ext.<name>. 前缀由 source/legacy_ext 迁移）。
+-- 内置书源自带的首页组件：源 id → 组件模块（组件 id 前缀是源 id；旧 ext.kavita. 前缀由 source/legacy_ext 迁移）。
 local SOURCE_COMPONENTS = { ["kavita"] = "source.kavita.on_deck" }
 
 ---@type BookHomeComponent[]|nil
@@ -115,7 +115,7 @@ local function external(plugin_id, item)
     if type(id) ~= "string" or id == "" then return nil, "missing id" end
     local prefix = plugin_id .. "."
     local is_class = type(item.createWidget) == "function"
-    if not is_class and not id:find("^ext%.") then id = prefix .. id end
+    if not is_class and id:sub(1, #prefix) ~= prefix and not id:find("^ext%.") then id = prefix .. id end
     if id:sub(1, #prefix) ~= prefix or #id == #prefix then return nil, "id must start with " .. prefix end
     if by_id[id] then return nil, "duplicate id " .. id end
     if is_class then return guard(item, plugin_id) end
@@ -182,7 +182,7 @@ function M.saveWidgets(list)
         for _idx, item in ipairs(list) do keep[item.id] = true end
         for _idx, item in ipairs(saved) do
             local id = type(item) == "table" and item.id
-            if type(id) == "string" and id:find("^ext%.") and not keep[id] and not M.find(id) then
+            if type(id) == "string" and id:find(".", 1, true) and not keep[id] and not M.find(id) then
                 keep[id] = true
                 list[#list + 1] = item
             end

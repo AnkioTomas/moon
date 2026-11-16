@@ -61,7 +61,7 @@ demo/ 不登记、打包时剔除。
 只开放 onReaderReady：其余生命周期与 KOReader 事件第三方插件自己的实例就能收到，月读不转发；补丁与页内标记不开放。
 规则：
   - 页面 / 开关 / 顶栏项 id 自动加 `<扩展 id>.` 前缀（已带则不重复加），撞名的记日志跳过；
-  - 配置存 utils.settings.getSource(<扩展 id>)（settings/ext.<name>.lua，不参与旧分区迁移），别用 get / save；
+  - 配置存 utils.settings.getSource(<扩展 id>)（settings/<扩展 id>.lua，不参与旧分区迁移），别用 get / save；
   - 每个回调经 External.try 隔离：出错只记日志（不弹错误页），读数类回调返回 nil，数据事件订阅方出错不中断核心派发；
   - 插件卸载后已保存的开关 / 顶栏 id 找不到就静默跳过；插件未加载完（extensionsReady 为假）时收集方不缓存。阅读会话、后台任务、源生命周期这类有返回值或顺序约束的核心编排不走这里，留在 main.lua。
 
@@ -135,7 +135,6 @@ Features.list = {
     "cookie",
     "notes",
     "share",
-    "wechat_import",
     "extensions",
 }
 

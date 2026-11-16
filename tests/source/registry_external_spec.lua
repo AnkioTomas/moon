@@ -17,7 +17,7 @@ package.preload["utils.settings"] = function()
 end
 
 -- 内置源只要 meta / new，别拉真实实现。
-local BUILTIN = { "local", "moon", "wechat", "jdread", "copymanga", "fanqie", "qimao", "legado", "jjwxc", "qidian", "qqreader", "iread", "changpei", "xiaoxiang", "kavita", "bookorbit", "ireader", "dedao", "tadu", "shuqi", "douban", "netease", "kuaikan", "zymk", "zhihu", "18ta" }
+local BUILTIN = { "local", "moon", "copymanga", "legado", "iread", "kavita", "bookorbit", "18ta" }
 for _idx, id in ipairs(BUILTIN) do
     package.loaded["source." .. id] = {
         meta = function() return { id = id, name = id, type = "book" } end,
@@ -56,7 +56,7 @@ end
 local enabled = {
         plugin("demo", descriptor("ext.demo")),
         plugin("oldapi", descriptor("ext.old", "2")),
-        plugin("noprefix", descriptor("demo")),
+        plugin("noprefix", descriptor("bad.id")),
         plugin("builtinclash", descriptor("moon")),
         plugin("dup", descriptor("ext.demo")),
         plugin("broken", "error('boom')"),

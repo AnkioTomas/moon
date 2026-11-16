@@ -8,13 +8,13 @@ examples/moonsource-demo.koplugin/moon_source.lua），按 PluginLoader.enabled_
 扩展自己声明能力：
   - 描述表带 `provides` 表：只有 provides.source == true 才登记为书源；provides.home_widgets 是首页组件数组。
   - 没有 provides（旧描述文件）：除非顶层 `source = false`，一律当书源；首页组件取顶层 `home`。
-  - 书源要 meta() / new()，id 取 meta().id；非书源不要求 meta/new，id 取描述表的 `id`。id 都必须是 ext.<name>。
+  - 书源要 meta() / new()，id 取 meta().id；非书源不要求 meta/new，id 取描述表的 `id`。id 须是 <name> 或 ext.<name>（与内置源 / 已登记 id 重名即拒绝；复用旧内置源 id 可沿用老数据）。
   - provides.features：往月读自己的挂点加功能，`{ setting, panel, topbar, events, hooks }`，值是表或延迟 require 的模块名，
     这里只原样记下（MoonExtension.features），解析、加前缀、校验与隔离都在 utils/external.lua（External.collect）。
 Registry.extensions() 按加载顺序列出全部扩展（含非书源），供桌面等上层读取首页组件与 feature；本模块不 require 桌面 / features。
 Registry.extensionsReady() 为假（KOReader 还在加载插件）时上层不要缓存扩展收集结果。
 
-描述文件不合约定（api ~= Registry.API、书源缺 meta/new、id 不是 ext.<name>、与已登记 id 重名、加载抛错）或 new() 抛错：
+描述文件不合约定（api ~= Registry.API、书源缺 meta/new、id 不是 <name> / ext.<name>、与已登记 id 重名、加载抛错）或 new() 抛错：
 记错误日志并跳过，第三方代码不拖垮内置源。enabled_sources 为 nil 或集合里没有的 id 算启用，只有显式 false 是禁用；活跃源不能禁用。
 resolve(id) 取书的属主实例，不改活跃源（打开旧书不串源的关键）；登录态或连接配置变了用 reload()。
 
@@ -34,7 +34,7 @@ local DESCRIPTOR = "moon_source.lua"
 
 -- 选择器为「混合 → 本地 → 其余在线源 → 第三方源」
 ---@type SourceId[]
-local BUILTIN = { "local", "moon", "wechat", "jdread", "copymanga", "fanqie", "qimao", "legado", "jjwxc", "qidian", "qqreader", "iread", "changpei", "xiaoxiang", "kavita", "bookorbit", "ireader", "dedao", "tadu", "shuqi", "douban", "netease", "kuaikan", "zymk", "zhihu", "18ta" }
+local BUILTIN = { "local", "moon", "copymanga", "legado", "iread", "kavita", "bookorbit", "18ta" }
 
 ---@type SourceId[]|nil
 local ids
@@ -43,7 +43,7 @@ local known = {}
 ---@type table<SourceId, table> 第三方源 id → 描述表 { api, meta, new, setting? }
 local external = {}
 ---@class MoonExtension
----@field id string 扩展 id（ext.<name>）
+---@field id string 扩展 id（<name> 或 ext.<name>）
 ---@field desc table 描述表
 ---@field source boolean 是否登记为书源
 ---@field home_widgets table[] 声明的首页组件（未校验）
@@ -100,7 +100,7 @@ local function readDescriptor(path)
     else
         id = desc.id
     end
-    assert(type(id) == "string" and id:match("^ext%.[%w_%-]+$"), "id must look like ext.<name>")
+    assert(type(id) == "string" and (id:match("^[%w_%-]+$") or id:match("^ext%.[%w_%-]+$")), "id must look like <name> or ext.<name>")
     return id, desc, is_source, widgets
 end
 

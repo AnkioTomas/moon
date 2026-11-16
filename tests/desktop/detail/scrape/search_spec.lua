@@ -23,6 +23,9 @@ package.preload["desktop.detail.scrape.novel"] = function()
         return { cancel = function() end }
     end }
 end
+local real_registry = package.loaded["source.registry"]
+package.loaded["source.registry"] = { listEnabled = function() return { { id = "weread", name = "微信读书" }, { id = "douban", name = "豆瓣" }, { id = "local", name = "本地" } } end,
+    external = function(id) return id ~= "local" and {} or nil end }
 for _, name in ipairs({ "desktop.detail.scrape.douban", "desktop.detail.scrape.novel", "desktop.detail.scrape.search" }) do
     package.loaded[name] = nil
 end
@@ -58,11 +61,11 @@ do
     Assert.is_true(calls.cancelled)
 end
 
--- 微信读书经 wechat 数据源，结果来源标记 weread；空结果 / 报错都是错误
+-- 第三方书源（weread）经数据源，结果来源标记 weread；空结果 / 报错都是错误
 do
     local rec, cb = recorder()
     Search.searchAsync("活着", "weread", cb)
-    Assert.eq(calls[2], "wechat:活着:weread")
+    Assert.eq(calls[2], "weread:活着:weread")
     pending({}, nil)
     Assert.eq(rec.err, "无搜索结果")
     Assert.is_nil(rec.source)
@@ -75,3 +78,4 @@ for _, name in ipairs({ "desktop.detail.scrape.douban", "desktop.detail.scrape.n
     package.preload[name] = nil
     package.loaded[name] = nil
 end
+package.loaded["source.registry"] = real_registry

@@ -36,7 +36,7 @@ end
 local search_pending
 package.preload["desktop.detail.scrape.search"] = function()
     return {
-        SOURCES = { { id = "douban", name = "豆瓣" } },
+        sources = function() return { { id = "douban", name = "豆瓣" } } end,
         searchAsync = function(_, _, cb)
             if search_pending then
                 search_pending.cb = cb

@@ -108,6 +108,7 @@ do
     package.loaded["ui.themes.widgets.confirm"] = { new = function(_self, o) return { show = function() shown[#shown + 1] = o.text end } end }
     package.loaded["source.wechat.mp"] = { AUTH_EXPIRED = "公众号授权已失效，请在微信读书 App 中打开任意公众号重新授权后再试" }
     local AUTH = package.loaded["source.wechat.mp"].AUTH_EXPIRED
+    require("utils.extension").add("desktop.account_feeds", { mp = function() return package.loaded["source.wechat.mp"] end })
     Refresh._reset(); calls, pending = {}, {}
     Refresh.start({ { id = 21, title = "M1" }, { id = 22, title = "M2" } })
     pending[1](nil, AUTH); Stubs.flush()

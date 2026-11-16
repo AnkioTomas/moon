@@ -311,7 +311,7 @@ function ScrapeUI.start(identity, default_title, on_close, owner)
                 }:show()
             end,
         } }
-        for _idx, src in ipairs(Search.SOURCES) do
+        for _idx, src in ipairs(Search.sources()) do
             items[#items + 1] = { text = src.name, keep_open = true, callback = function() search(src.id) end }
         end
         return items

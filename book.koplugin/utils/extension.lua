@@ -39,6 +39,8 @@ Ext.POINTS = {
     ["reader.page_updated"] = "翻页后 fn(plugin)（阅读器侧，会话快照已刷新；每次翻页都调，回调要自己节流）",
     ["reader.doc_settings"] = "开书前改文档设置 fn(doc_settings, document)",
     ["reader.preferences"] = "开书后套用偏好 fn(ui)",
+    ["desktop.account_feeds"] = "单一提供者：订阅页的公众号来源 { label, busy, login_hint, empty, mp():module, client():module }；mp 需有 accounts / fetchArticlesAsync / fetchContentAsync / PAGE / AUTH_EXPIRED，client 需有 shelfSyncAsync；没人登记时订阅页不提供公众号",
+    ["reader.paragraph_lender"] = "可多个提供者：给本地书 / 无段评的章会话书借段评的书源 { id, label }；书源需实现 ParagraphReviewSource（configured / paragraphReviewsEnabled / searchBooksAsync 或 searchAsync、paragraphHotspotsAsync …）",
     ["web.routes"] = "远程管理接口 { name, handle(method, action, params, cb(status, table)), download?(action) -> { ctype, filename, body|path }|nil, dir?: string, assets?: string[], page?: { href, title, title_long?, desc?, icon, tile? }, l10n?: string, public?: { [action] = true } }（/api/<name>/<action>；assets 为 dir 下开放的静态文件；page 进顶栏与首页；l10n 为网页文案模块前缀；public 列出免浏览器配对的动作）",
     ["web.open_page"] = "启动远程管理并弹二维码引导到某个网页 fn(path, title, text, opts?) -> dialog|nil，opts.close_callback 在二维码关闭时调用，dialog:close() 可收起；path 形如 /xxx.html；单一提供者，没人登记时调用方退化为文字提示",
     ["note.item_actions"] = "书摘/笔记列表条目追加动作 { text, icon?, run(entry, ctx) }；entry 含 text / note / chapter，ctx 含 ui / snapshot",

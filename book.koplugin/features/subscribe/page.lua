@@ -178,16 +178,18 @@ function Page:insert(feed)
     self:refresh({ SubDB.feed(id) })
 end
 
---- 公众号：读微信读书书架里的公众号，带书架分组。
+--- 公众号：读来源书架里的公众号，带书架分组。
 function Page:addMp()
-    self.busy = _("正在读取微信读书书架…")
+    local provider = Subscribe.mpProvider()
+    if not provider then return end
+    self.busy = provider.busy
     self:redraw()
-    self.job = require("source.wechat.client"):shelfSyncAsync(function(data, err)
+    self.job = provider.client():shelfSyncAsync(function(data, err)
         self.busy, self.job = nil, nil
         self:redraw()
-        if not data then return toast(err or _("请先登录微信读书")) end
-        local accounts = require("source.wechat.mp").accounts(data)
-        if #accounts == 0 then return toast(_("微信读书书架里没有公众号")) end
+        if not data then return toast(err or provider.login_hint) end
+        local accounts = provider.mp().accounts(data)
+        if #accounts == 0 then return toast(provider.empty) end
         local have = {}
         for _idx, feed in ipairs(SubDB.feeds()) do
             if feed.kind == "mp" then have[feed.url] = true end
@@ -337,13 +339,17 @@ function Page:addRecommendedTag(lang, tag, label)
 end
 
 function Page:showAdd()
-    require("ui.themes.widgets.sheet"):new{ title = _("添加订阅"), items = {
+    local items = {
         { text = _("RSS / Atom"), callback = function() self:addUrl("rss") end },
         { text = _("网站文章链接"), callback = function() self:addUrl("site") end },
         { text = _("网页本身"), callback = function() self:addUrl("page") end },
-        { text = _("微信读书公众号"), callback = function() self:addMp() end },
-        { text = _("推荐"), callback = function() self:addRecommended() end },
-    } }:show()
+    }
+    local provider = Subscribe.mpProvider()
+    if provider then
+        items[#items + 1] = { text = provider.label, callback = function() self:addMp() end }
+    end
+    items[#items + 1] = { text = _("推荐"), callback = function() self:addRecommended() end }
+    require("ui.themes.widgets.sheet"):new{ title = _("添加订阅"), items = items }:show()
 end
 
 
