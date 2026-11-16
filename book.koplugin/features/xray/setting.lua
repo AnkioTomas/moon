@@ -19,12 +19,20 @@ Setting.defaults = {
     book_xray_enabled = true,
     book_xray_show_marks = false,
     book_xray_auto = false,
+    book_xray_events = false,
     book_xray_quality = "standard",
     book_xray_mark_style = "dashed",
     book_xray_mark_gray = 73,
     book_xray_mark_opacity = 100,
     book_xray_mark_offset = 0,
 }
+
+--- 事件（情节线）是否开启：默认关，关闭时不识别、不入库、不显示事件页签。
+---@return boolean
+function Setting.eventsEnabled()
+    local xray = require("utils.settings").get("features.xray")
+    return xray.book_xray_enabled and xray.book_xray_events == true
+end
 
 local QUALITY_ITEMS = {
     { value = "save", text = _("节约") },
@@ -75,21 +83,6 @@ function Setting.entries(desktop)
                             })
                         end,
                         function(iw)
-                            return Row.widget({
-                                width = iw, chevron = false,
-                                kind = "toggle", icon = "format_underlined", title = _("X-Ray 实体画线"),
-                                subtitle = _("默认关闭；也可在阅读快捷面板里随时开关，点标记查看详情"),
-                                status = (on and marks_on) and _("开") or _("关"),
-                                status_on = on and marks_on,
-                                callback = function()
-                                    if not on then return end
-                                    xray.book_xray_show_marks = not marks_on
-                                    refreshMarks()
-                                    save()
-                                end,
-                            })
-                        end,
-                        function(iw)
                             local auto = xray.book_xray_auto
                             return Row.widget({
                                 width = iw, chevron = false,
@@ -100,6 +93,21 @@ function Setting.entries(desktop)
                                 callback = function()
                                     if not on then return end
                                     xray.book_xray_auto = not auto
+                                    save()
+                                end,
+                            })
+                        end,
+                        function(iw)
+                            local ev = xray.book_xray_events
+                            return Row.widget({
+                                width = iw, chevron = false,
+                                kind = "toggle", icon = "timeline", title = _("X-Ray 事件"),
+                                subtitle = _("默认关闭；开启后识别时一并梳理情节线并支持自动更新，会多消耗 AI 额度；事件不画线"),
+                                status = (on and ev) and _("开") or _("关"),
+                                status_on = on and ev,
+                                callback = function()
+                                    if not on then return end
+                                    xray.book_xray_events = not ev
                                     save()
                                 end,
                             })
@@ -118,6 +126,23 @@ function Setting.entries(desktop)
                             })
                         end,
                     }
+                    local mark_rows = {
+                        function(iw)
+                            return Row.widget({
+                                width = iw, chevron = false,
+                                kind = "toggle", icon = "format_underlined", title = _("X-Ray 实体画线"),
+                                subtitle = _("默认关闭；也可在阅读快捷面板里随时开关，点标记查看详情"),
+                                status = (on and marks_on) and _("开") or _("关"),
+                                status_on = on and marks_on,
+                                callback = function()
+                                    if not on then return end
+                                    xray.book_xray_show_marks = not marks_on
+                                    refreshMarks()
+                                    save()
+                                end,
+                            })
+                        end,
+                    }
                     for _idx, row in ipairs(MarkStyle.rows(xray, Setting.KEYS, {
                         style = _("X-Ray 下划线样式"),
                         position = _("X-Ray 下划线位置"),
@@ -129,9 +154,12 @@ function Setting.entries(desktop)
                         if ui and ui.dialog then require("ui/uimanager"):setDirty(ui.dialog, "ui") end
                         save()
                     end)) do
-                        rows[#rows + 1] = row
+                        mark_rows[#mark_rows + 1] = row
                     end
-                    return { { title = _("X-Ray"), rows = rows } }
+                    return {
+                        { title = _("识别"), rows = rows },
+                        { title = _("画线"), rows = mark_rows },
+                    }
                 end,
             },
         },

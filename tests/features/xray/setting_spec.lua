@@ -55,9 +55,12 @@ local xray = require("features.xray.setting").entries(desktop)
 Assert.len(xray, 1)
 Assert.eq(xray[1].group, "reader")
 Assert.eq(xray[1].order, 13)
-local section = xray[1].page.sections()[1]
-Assert.eq(section.title, "X-Ray")
-Assert.len(section.rows, 8)
+local sections = xray[1].page.sections()
+local section, marks = sections[1], sections[2]
+Assert.eq(section.title, "识别")
+Assert.eq(marks.title, "画线")
+Assert.len(section.rows, 4)
+Assert.len(marks.rows, 5)
 local quality_row = section.rows[4](600)
 Assert.eq(quality_row.current, "standard")
 Assert.len(quality_row.items, 3)
@@ -72,15 +75,15 @@ Assert.eq(conf.xray.book_xray_quality, "high")
 Assert.eq(saved[#saved], "features.xray")
 Assert.eq(invalidated, 0, "档位不影响画线")
 Assert.eq(updates, 1)
-Assert.eq(section.rows[5](600).status, "虚线")
-section.rows[5](600).callback()
+Assert.eq(marks.rows[2](600).status, "虚线")
+marks.rows[2](600).callback()
 Assert.eq(conf.xray.book_xray_mark_style, "solid")
 Assert.eq(saved[#saved], "features.xray")
 Assert.eq(invalidated, 0, "样式只重画，不作废扫描缓存")
 Assert.eq(updates, 2)
-Assert.eq(section.rows[6](600).status, "+0 px")
-Assert.eq(section.rows[7](600).status, "73%")
-Assert.eq(section.rows[8](600).status, "100%")
+Assert.eq(marks.rows[3](600).status, "+0 px")
+Assert.eq(marks.rows[4](600).status, "73%")
+Assert.eq(marks.rows[5](600).status, "100%")
 Assert.eq(require("reader.mark_style").resolve(conf.xray, require("features.xray.setting").KEYS),
     "solid", "换算出样式")
 invalidated = 1
@@ -88,8 +91,8 @@ section = xray[1].page.sections()[1]
 section.rows[1](600).callback()
 Assert.is_false(conf.xray.book_xray_enabled)
 Assert.eq(invalidated, 2)
-section = xray[1].page.sections()[1]
-section.rows[2](600).callback()
+marks = xray[1].page.sections()[2]
+marks.rows[1](600).callback()
 Assert.eq(invalidated, 2, "X-Ray 关闭时画线开关不响应")
 
 package.loaded["features.translate.setting"] = nil
