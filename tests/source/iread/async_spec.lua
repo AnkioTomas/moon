@@ -71,14 +71,15 @@ Assert.is_nil(result[1].intro, "LuaJSON 的 null 应解成 nil，不能把函数
 
 reset()
 Client.exploreRulesAsync(done)
-reply(requests[1], { { id = 1, bookSourceName = "测试书源", exploreUrl = { "bad" } } })
+reply(requests[1], { { id = 1, bookSourceName = "测试书源", exploreUrl = "bad" } })
 Assert.is_nil(result)
 Assert.eq(reason, "响应无效")
 Client.exploreRulesAsync(done)
 reply(requests[2], { { id = 1, bookSourceName = "测试书源", exploreUrl = {
-    { title = "分组", url = "" }, { title = "分类", url = "https://example.test?page={{page}}" },
+    { title = "分组", url = "" }, { title = "↑ *** ↑" }, { title = "分类", url = "https://example.test?page={{page}}" },
 } } })
-Assert.len(result[1].exploreUrl, 2)
+Assert.len(result[1].exploreUrl, 1)
+Assert.eq(result[1].exploreUrl[1].title, "分类")
 
 reset()
 replies = { {} }

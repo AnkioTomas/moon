@@ -330,12 +330,18 @@ function Client.exploreRulesAsync(cb)
         if not validRows(rules, "bookSourceName") then cb(nil, err or _("响应无效")); return end
         for _idx, rule in ipairs(rules) do
             if type(rule.id) ~= "number" or rule.id < 1 or rule.id % 1 ~= 0
-                or rule.exploreUrl ~= nil and not validRows(rule.exploreUrl, "title") then
+                or rule.exploreUrl ~= nil and type(rule.exploreUrl) ~= "table" then
                 cb(nil, _("响应无效")); return
             end
+            -- 分类里常夹着没有 url 的分隔标题（如 "↑ *** ↑"），丢掉，不当作整包无效
+            local entries = {}
             for _entry_idx, entry in ipairs(rule.exploreUrl or {}) do
-                if type(entry.url) ~= "string" then cb(nil, _("响应无效")); return end
+                if type(entry) == "table" and type(entry.title) == "string" and entry.title ~= ""
+                    and type(entry.url) == "string" and entry.url ~= "" then
+                    entries[#entries + 1] = entry
+                end
             end
+            rule.exploreUrl = entries
         end
         cb(rules)
     end)
