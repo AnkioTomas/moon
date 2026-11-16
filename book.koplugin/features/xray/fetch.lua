@@ -27,9 +27,10 @@ local BULK_MAX_TOKENS = 16000
 local PROFILES = {
     save = { recap = 0, prior = false, caps = { 10, 5, 5 }, max_tokens = 10000,
         rule = "description 不超过 40 字，aliases 最多 2 个；只输出本页新出现或有重要新信息的实体。" },
-    standard = { recap = 5, prior = true, caps = { 25, 15, 15 }, max_tokens = BULK_MAX_TOKENS },
+    standard = { recap = 5, prior = true, caps = { 25, 15, 15 }, max_tokens = BULK_MAX_TOKENS,
+        rule = "description 不超过 80 字，aliases 最多 3 个。" },
     high = { recap = 10, prior = true, caps = { 40, 25, 25 }, max_tokens = BULK_MAX_TOKENS,
-        rule = "description 写详实（80 到 150 字）：身份、与其他人物的关系、关键经历；有别名或译名变体务必收全。" },
+        rule = "description 写详实（80 到 150 字，不得超过）：身份、与其他人物的关系、关键经历；有别名或译名变体务必收全。" },
 }
 
 local function profile()

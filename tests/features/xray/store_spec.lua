@@ -81,3 +81,18 @@ merged = Store.mergeEntities(merged, {
     { kind = "character", name = "Mina", aliases = {}, description = "a brave young woman of Whitby, wife of Jonathan" },
 })
 Assert.eq(merged[1].description, "a brave young woman of Whitby, wife of Jonathan")
+
+-- 描述超长不再继续增长；旧描述已超长时允许被压缩版替换。
+local long = string.rep("a", 700)
+merged = Store.mergeEntities({
+    { kind = "character", name = "Mina", aliases = {}, description = "short" },
+}, {
+    { kind = "character", name = "Mina", aliases = {}, description = long },
+})
+Assert.eq(merged[1].description, "short")
+merged = Store.mergeEntities({
+    { kind = "character", name = "Mina", aliases = {}, description = string.rep("a", 2000) },
+}, {
+    { kind = "character", name = "Mina", aliases = {}, description = "compact" },
+})
+Assert.eq(merged[1].description, "compact")

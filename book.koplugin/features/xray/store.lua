@@ -7,6 +7,9 @@ X-Ray 实体：别名去重合并与提示词快照。
 local Text = require("utils.text")
 
 local Store = {}
+--- 描述字节上限（约 200 汉字）与别名个数上限：模型不守字数时兜底，防止每轮合并越积越长。
+local MAX_DESCRIPTION = 600
+local MAX_ALIASES = 6
 local detail_fields = { "role", "description", "gender", "occupation" }
 
 --- 名字规范化（去空白 + 转小写），去重比较一律用它。
@@ -80,7 +83,7 @@ function Store.mergeEntities(existing, incoming)
                 --- 别名属于别的实体时不给当前实体，避免一个称呼同时指向两个人。
                 local function addAlias(alias)
                     local owner = alias_to_key[entityKey(kind, alias)]
-                    if seen[normName(alias)] or (owner and owner ~= hit) then return end
+                    if #cur.aliases >= MAX_ALIASES or seen[normName(alias)] or (owner and owner ~= hit) then return end
                     cur.aliases[#cur.aliases + 1] = alias
                     seen[normName(alias)] = true
                 end
@@ -89,7 +92,9 @@ function Store.mergeEntities(existing, incoming)
                 for index, field in ipairs(detail_fields) do
                     local value = Text.trim(item[field])
                     -- 新描述明显更短多半是模型偷懒，保留旧的，不丢已有信息。
-                    if value ~= "" and not (field == "description" and #value * 2 < #(cur.description or "")) then
+                    local old_len = #(cur.description or "")
+                    local bad = field == "description" and ((#value * 2 < old_len and old_len <= MAX_DESCRIPTION) or (#value > MAX_DESCRIPTION and #value > old_len))
+                    if value ~= "" and not bad then
                         cur[field] = value
                     end
                 end
