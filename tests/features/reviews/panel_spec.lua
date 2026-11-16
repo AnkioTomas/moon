@@ -1,6 +1,7 @@
 --[[-- 阅读快捷面板「显示段评」：写当前页实际用的源开关，不另存一份。 --]]
 
 local Assert = require("support.assert")
+require("utils.extension").add("reader.paragraph_lender", { id = "wechat", label = "微信读书" })
 
 package.preload["l10n"] = function() return { apply = function() end } end
 package.preload["gettext"] = function() return function(text) return text end end
@@ -22,6 +23,7 @@ package.loaded["features.reviews.link"] = {
 }
 local store = {}
 package.loaded["utils.settings"] = {
+    get = function() return {} end,
     getSource = function(id)
         store[id] = store[id] or {}
         return store[id]

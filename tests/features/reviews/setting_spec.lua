@@ -23,7 +23,7 @@ package.preload["source.registry"] = function()
                 { id = "wechat", name = "微信读书", abilities = { "他人段评" } },
                 { id = "local", name = "本地书籍", abilities = { "书架同步" } },
                 { id = "qidian", name = "起点读书", abilities = { "书架同步", "他人段评" } },
-                require("source.zhihu._meta"),
+                { id = "zhihu", name = "知乎盐选", abilities = { "他人段评" } },
             }
         end,
     }

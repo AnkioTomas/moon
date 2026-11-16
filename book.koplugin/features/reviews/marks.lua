@@ -314,10 +314,12 @@ local function currentTarget(self)
     end
     -- 其它章会话（京东读书）：关联了微信书城版才借
     if identity.chapter_idx then
-        if not Linked.getFor(identity) then return nil end
-        local wechat = require("source.registry").resolve("wechat") --[[@as ParagraphReviewSource]]
-        if not (wechat and wechat:configured() and wechat:paragraphReviewsEnabled()) then return nil end
-        return chapterTarget(self, identity, wechat)
+        local link = Linked.getFor(identity)
+        if not link then return nil end
+        local Lender = require("features.reviews.lender")
+        local lender = Lender.get(Lender.idOf(link))
+        if not (lender and lender:configured() and lender:paragraphReviewsEnabled()) then return nil end
+        return chapterTarget(self, identity, lender)
     end
     return Linked.target(self.ui, self.cache, function() redraw(self) end)
 end

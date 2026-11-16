@@ -1,6 +1,7 @@
 --[[-- features.reviews.linked：本地书关联微信书目，按当前页位置选微信章、页内文字找原句、findText 取框。 --]]
 
 local Assert = require("support.assert")
+require("utils.extension").add("reader.paragraph_lender", { id = "wechat", label = "微信读书" })
 local Stubs = require("support.stubs")
 Stubs.install()
 
@@ -311,7 +312,7 @@ Assert.is_nil(Linked.target(ui, Linked.newCache(), redraw))
 Linked.set(ui, { book_id = "834464", title = "活着", author = "余华" })
 Assert.eq(Linked.get(ui).book_id, "834464")
 local target = Linked.target(ui, Linked.newCache(), redraw)
-Assert.eq(target.key, "link\0" .. "834464")
+Assert.eq(target.key, "link\0wechat\0" .. "834464")
 source.on = false
 Assert.is_nil(Linked.target(ui, Linked.newCache(), redraw))
 source.on, source.logged_in = true, false

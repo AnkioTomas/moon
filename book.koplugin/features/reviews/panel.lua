@@ -1,8 +1,8 @@
 --[[--
-段评的阅读快捷面板：显示开关，以及给本地书关联微信读书书目。
+段评的阅读快捷面板：显示开关，以及给本地书关联可借段评的书目。
 
 显示开关写当前页实际用的那份 `show_paragraph_reviews`：本章属主源自己有段评就写它，
-否则写微信读书（本地书、京东读书借段评）。和书源设置页是同一处，不另存一份。
+否则写借段评的来源（本地书、京东读书借段评）。和书源设置页是同一处，不另存一份。
 
 @module koplugin.book.features.reviews.panel
 --]]
@@ -10,6 +10,7 @@
 require("l10n").apply()
 
 local _ = require("gettext")
+local T = require("ffi/util").template
 
 local Panel = {}
 
@@ -25,8 +26,14 @@ local function sourceId()
     if source and (source.chapterReviewHotspotsAsync or (identity.chapter_idx and source.paragraphHotspotsAsync)) then
         return source.id, true
     end
-    local wechat = require("source.registry").resolve("wechat")
-    if wechat and wechat:configured() then return wechat.id, false end
+    local Lender = require("features.reviews.lender")
+    local Linked = require("features.reviews.linked")
+    local link = identity.chapter_idx and Linked.getFor(identity) or nil
+    local readerui = package.loaded["apps/reader/readerui"]
+    local ui = readerui and readerui.instance
+    link = link or (ui and Linked.get(ui))
+    local lender = Lender.get(Lender.idOf(link))
+    if lender and lender:configured() then return lender.id, false end
     return nil, false
 end
 
@@ -66,8 +73,8 @@ function Panel.actions()
             end,
         },
         {
-            id = "wechat_reviews_link",
-            title = _("关联微信段评"),
+            id = "reviews_link",
+            title = _("关联段评"),
             icon = "forum",
             scope = "reader",
             ---@param ctx BookQuickPanelContext|nil

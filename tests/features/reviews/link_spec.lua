@@ -1,6 +1,7 @@
 --[[-- features.reviews.link：哪些书能关联书城版。 --]]
 
 local Assert = require("support.assert")
+require("utils.extension").add("reader.paragraph_lender", { id = "wechat", label = "微信读书" })
 local Stubs = require("support.stubs")
 Stubs.install()
 package.preload["ui.themes.widgets.toast"] = function() return {} end

@@ -2,6 +2,7 @@
 
 local Assert = require("support.assert")
 local Stubs = require("support.stubs")
+require("utils.extension").add("reader.paragraph_lender", { id = "wechat", label = "微信读书" })
 Stubs.install()
 local opened
 package.preload["features.reviews.sheet"] = function()

@@ -506,7 +506,7 @@ function Linked.tocAsync(source, book_id, cb)
     local book = { source_id = source.id, stable_id = book_id }
     local job
     job = source:loadTocAsync(book, function(toc, err)
-        if toc and not source:isTocCurrent(toc) then
+        if toc and source.isTocCurrent and not source:isTocCurrent(toc) then
             job = source:refreshTocAsync(book, cb)
             return
         end
@@ -525,10 +525,12 @@ end
 function Linked.target(ui, cache, redraw)
     local link = Linked.get(ui)
     if not (link and Linked.supported(ui.document)) then return nil end
-    local source = require("source.registry").resolve("wechat") --[[@as ParagraphReviewSource]]
-    if not (source:configured() and source:paragraphReviewsEnabled()) then return nil end
+    local Lender = require("features.reviews.lender")
+    local lender_id = Lender.idOf(link)
+    local source = Lender.get(lender_id)
+    if not (source and source:configured() and source:paragraphReviewsEnabled()) then return nil end
     return {
-        key = "link\0" .. link.book_id,
+        key = "link\0" .. tostring(lender_id) .. "\0" .. link.book_id,
         fetch = function(cb) return Linked.tocAsync(source, link.book_id, cb) end,
         place = function(toc)
             return Linked.place(ui, Linked.entries(ui, source, link.book_id, toc, cache, redraw), cache, redraw)

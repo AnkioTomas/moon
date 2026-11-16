@@ -56,12 +56,12 @@ end
 ---@param book WechatSearchBook
 ---@param identity BookIdentity|nil
 local function choose(ui, source, book, identity)
-    writeLink(ui, identity, { book_id = book.book_id, title = book.title, author = book.author })
+    writeLink(ui, identity, { source_id = source.id, book_id = book.book_id, title = book.title, author = book.author })
     repaint(ui)
     if source:paragraphReviewsEnabled() then
         toast(T(_("已关联「%1」"), book.title))
     else
-        toast(_("已关联。在微信读书设置中打开「显示段评」后显示"))
+        toast(T(_("已关联。在%1设置中打开「显示段评」后显示"), require("features.reviews.lender").label(source.id)))
     end
 end
 
@@ -72,14 +72,14 @@ end
 local function search(ui, source, identity)
     local props = ui.doc_props or {}
     require("ui.themes.widgets.input"):new{
-        title = _("搜索微信读书书目"),
+        title = T(_("搜索%1书目"), require("features.reviews.lender").label(source.id)),
         fields = { { text = props.title or "", hint = _("书名") } },
         callback = function(keyword)
             if not require("ui/network/manager"):isConnected() then
                 toast(_("未联网，无法搜索"))
                 return
             end
-            source:searchBooksAsync(keyword, function(books, err)
+            require("features.reviews.lender").search(source, keyword, function(books, err)
                 if not books then
                     toast(err or _("搜索失败"))
                     return
@@ -96,7 +96,7 @@ local function search(ui, source, identity)
                         callback = function() choose(ui, source, book, identity) end,
                     }
                 end
-                require("ui.themes.widgets.list"):new{ title = _("选择微信读书书目"), items = items }:show()
+                require("ui.themes.widgets.list"):new{ title = T(_("选择%1书目"), require("features.reviews.lender").label(source.id)), items = items }:show()
             end)
         end,
     }:show()
@@ -110,28 +110,51 @@ function Link.available(ui)
     local identity = identityOf()
     -- 订阅文章（ephemeral 源）不是书，没有可关联的书目。
     if not identity or identity.ephemeral then return false end
+    if not require("features.reviews.lender").registered() then return false end
     return Linked.supported(ui.document)
 end
 
 --- 快捷面板入口。
 ---@param ui table ReaderUI
 function Link.open(ui)
-    local source = require("source.registry").resolve("wechat") --[[@as ParagraphReviewSource]]
-    if not source:configured() then
-        toast(_("请先扫码登录微信读书"))
-        return
-    end
+    local Lender = require("features.reviews.lender")
     local identity = identityOf()
     local link = readLink(ui, identity)
-    if not link then
+
+    --- 用某个来源搜索；没登录先提示。
+    local function searchWith(id)
+        local source = Lender.get(id)
+        if not source then return end
+        if not source:configured() then
+            toast(T(_("请先登录%1"), Lender.label(id)))
+            return
+        end
         search(ui, source, identity)
+    end
+
+    --- 多个来源时先选借谁的段评，只有一个直接搜。
+    local function pickAndSearch()
+        local list = Lender.list()
+        if #list <= 1 then
+            searchWith(list[1] and list[1].id)
+            return
+        end
+        local items = {}
+        for i, item in ipairs(list) do
+            items[i] = { text = item.label, callback = function() searchWith(item.id) end }
+        end
+        require("ui.themes.widgets.list"):new{ centered = true, title = _("选择段评来源"), items = items }:show()
+    end
+
+    if not link then
+        pickAndSearch()
         return
     end
     require("ui.themes.widgets.list"):new{
         centered = true,
         title = T(_("已关联：%1"), link.title),
         items = {
-            { text = _("更换关联"), callback = function() search(ui, source, identity) end },
+            { text = _("更换关联"), callback = pickAndSearch },
             { text = _("解除关联"), callback = function()
                 writeLink(ui, identity, nil)
                 repaint(ui)
