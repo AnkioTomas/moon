@@ -37,4 +37,4 @@ end
 for _idx, meta in ipairs(Registry.list()) do
     Assert.is_true(type(meta.description) == "string", "内置源 " .. meta.id .. " 的 meta() 要带 _meta 的说明")
 end
-Assert.is_true(checked >= 17, "内置源 _meta 数量")
+Assert.is_true(checked >= 5, "内置源 _meta 数量")

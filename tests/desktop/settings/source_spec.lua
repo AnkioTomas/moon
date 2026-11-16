@@ -162,9 +162,6 @@ do
         local w = row()
         by_title[w.title] = w.icon
     end
-    Assert.eq(by_title["微信读书"], "chat")
-    Assert.eq(by_title["京东读书"], "shopping_bag")
-    Assert.eq(by_title["番茄小说"], "eco")
     Assert.eq(by_title["拷贝漫画"], "photo_library")
     Assert.is_true(by_title["Moon"] ~= "dns", "内置源不能掉回默认 dns")
     Assert.eq(by_title["Moon"], "nightlight")

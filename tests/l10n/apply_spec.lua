@@ -58,38 +58,38 @@ end
 -- 书源词典按自身语言回落，不进入核心目录或全局 gettext。
 do
     local M = applyFor("en_US")
-    local key = "起点分类响应无效"
-    local name, catalog = M.catalog("en_US", "source.qidian")
+    local key = "无法解析书籍信息"
+    local name, catalog = M.catalog("en_US", "source.18ta")
     Assert.eq(name, "en")
-    Assert.eq(catalog[key], "Invalid Qidian category response.")
+    Assert.eq(catalog[key], "Unable to parse book information")
     Assert.is_nil(en_catalog[key])
     Assert.is_nil(GetText.translation[key])
-    local translate = M.get("source.qidian")
+    local translate = M.get("source.18ta")
     Assert.eq(translate(key), catalog[key])
     Assert.is_nil(GetText.translation[key], "书源翻译不得写入全局 gettext")
     Assert.eq(translate("下载失败"), GetText("下载失败"), "共享文案复用 gettext")
     Assert.eq(translate("未知书源文案"), "未知书源文案")
-    Assert.eq(M.get("source.wechat")(key), key, "其它书源不能看到起点译文")
+    Assert.eq(M.get("source.kavita")(key), key, "其它书源不能看到起点译文")
 
     M = applyFor("zh_HK")
-    local _tw_name, tw = M.catalog("zh_HK", "source.qidian")
-    Assert.eq(M.get("source.qidian")(key), tw[key])
+    local _tw_name, tw = M.catalog("zh_HK", "source.18ta")
+    Assert.eq(M.get("source.18ta")(key), tw[key])
     Assert.is_nil(GetText.translation[key])
 
     M = applyFor("fr_FR")
-    Assert.eq(M.get("source.qidian")(key), catalog[key])
+    Assert.eq(M.get("source.18ta")(key), catalog[key])
     M = applyFor("zh_CN.UTF-8")
-    Assert.eq(M.get("source.qidian")(key), key)
+    Assert.eq(M.get("source.18ta")(key), key)
     Assert.eq(translationCount(), 0)
 end
 
 -- 书源元信息在独立 require 时也使用自己的词典。
 do
     applyFor("en")
-    package.loaded["source.qidian._meta"] = nil
-    local meta = require("source.qidian._meta")
-    Assert.eq(meta.description, "Qidian shelf and online reading")
-    Assert.is_nil(GetText.translation["起点中文网书架与在线阅读"])
+    package.loaded["source.18ta._meta"] = nil
+    local meta = require("source.18ta._meta")
+    Assert.eq(meta.description, "Aikanshu catalog and online chapter reading")
+    Assert.is_nil(GetText.translation["爱看书分类书库与按章在线阅读"])
 end
 
 -- 缺失的语言目录可回落，损坏的目录必须暴露错误。

@@ -87,10 +87,7 @@ do
         ids[m.id] = true
     end
     Assert.is_true(ids.moon)
-    Assert.is_true(ids.wechat)
-    Assert.is_true(ids.jdread)
     Assert.is_true(ids.copymanga)
-    Assert.is_true(ids.fanqie)
     Assert.is_true(ids["local"])
 end
 
@@ -130,32 +127,7 @@ do
 end
 
 do
-    Assert.eq(Registry.meta("wechat").type, "chapter")
-    Assert.eq(Registry.meta("jdread").type, "chapter")
     Assert.eq(Registry.meta("copymanga").type, "chapter")
-    Assert.eq(Registry.meta("fanqie").type, "chapter")
-end
-
-do
-    local src, err = Registry.create("jdread")
-    Assert.is_true(src ~= nil, err)
-    local caps = src:capabilities()
-    Assert.is_false(caps.stats_pull)
-    Assert.is_false(type(src.pushStatsAsync) == "function")
-end
-
-do
-    local src, err = Registry.create("wechat")
-    Assert.is_true(src ~= nil, err)
-    Assert.is_false(src:capabilities().scrape)
-    Assert.is_true(src:capabilities().edit)
-end
-
-do
-    local src, err = Registry.create("fanqie")
-    Assert.is_true(src ~= nil, err)
-    Assert.eq(src.id, "fanqie")
-    Assert.is_false(src:capabilities().stats_pull)
 end
 
 do
@@ -174,18 +146,18 @@ end
 -- 启用源：默认全开；禁用/启用非活跃源；活跃源禁止禁用
 do
     -- 无 enabled_sources（旧配置）：全真，listEnabled == list
-    Assert.is_true(Registry.isEnabled("wechat"))
+    Assert.is_true(Registry.isEnabled("kavita"))
     Assert.is_true(Registry.isEnabled("moon"))
     Assert.eq(#Registry.listEnabled(), #Registry.list())
 
     -- 禁用非活跃源：首次写入以全开初始化集合
-    Assert.is_true(Registry.setEnabled("wechat", false))
-    Assert.is_false(Registry.isEnabled("wechat"))
+    Assert.is_true(Registry.setEnabled("kavita", false))
+    Assert.is_false(Registry.isEnabled("kavita"))
     Assert.eq(#Registry.listEnabled(), #Registry.list() - 1)
 
     -- 再启用回来
-    Assert.is_true(Registry.setEnabled("wechat", true))
-    Assert.is_true(Registry.isEnabled("wechat"))
+    Assert.is_true(Registry.setEnabled("kavita", true))
+    Assert.is_true(Registry.isEnabled("kavita"))
     Assert.eq(#Registry.listEnabled(), #Registry.list())
 
     -- 活跃源（stub 固定 moon）禁止禁用；isEnabled 兜底恒 true
@@ -213,10 +185,10 @@ do
         }
     end
 
-    local first = Registry.resolve("wechat")
-    local second = Registry.resolve("wechat")
+    local first = Registry.resolve("kavita")
+    local second = Registry.resolve("kavita")
     Assert.eq(first, second)
-    Assert.eq(created.wechat, 1)
+    Assert.eq(created.kavita, 1)
     Assert.is_nil(created.moon)
 
     -- 活跃源与属主源共用缓存：current() 拿到的就是 resolve(activeId) 那个实例
@@ -225,23 +197,23 @@ do
 
     -- 换源不关旧实例（可能仍是打开中书籍的属主源），只复用缓存
     local common = require("utils.settings").get("source")
-    Assert.eq(Registry.setActive("wechat"), first)
+    Assert.eq(Registry.setActive("kavita"), first)
     Assert.eq(Registry.current(), first)
     Assert.is_nil(closed.moon)
     common.active_source = "moon"
 
     Registry.invalidate()
-    Assert.eq(closed.wechat, 1)
+    Assert.eq(closed.kavita, 1)
     Assert.eq(closed.moon, 1)
-    Assert.is_true(Registry.resolve("wechat") ~= first)
-    Assert.eq(created.wechat, 2)
+    Assert.is_true(Registry.resolve("kavita") ~= first)
+    Assert.eq(created.kavita, 2)
     local moon = Registry.resolve("moon")
-    local wechat = Registry.resolve("wechat")
-    Registry.invalidate("wechat")
-    Assert.eq(closed.wechat, 2)
+    local kavita = Registry.resolve("kavita")
+    Registry.invalidate("kavita")
+    Assert.eq(closed.kavita, 2)
     Assert.eq(closed.moon, 1, "单源清理不关闭其它书源")
     Assert.eq(Registry.resolve("moon"), moon)
-    Assert.is_true(Registry.resolve("wechat") ~= wechat)
+    Assert.is_true(Registry.resolve("kavita") ~= kavita)
     Registry.invalidate()
     Registry.create = original_create
 
@@ -254,12 +226,12 @@ end
 
 -- 源模块加载失败是代码缺陷：直接抛出，不从列表里悄悄藏掉。
 do
-    package.loaded["source.jdread"] = nil
-    package.preload["source.jdread"] = function() error("boom") end
-    Assert.errors(function() Registry.meta("jdread") end)
+    package.loaded["source.bookorbit"] = nil
+    package.preload["source.bookorbit"] = function() error("boom") end
+    Assert.errors(function() Registry.meta("bookorbit") end)
     Assert.errors(function() Registry.list() end)
-    package.preload["source.jdread"] = nil
-    package.loaded["source.jdread"] = nil
+    package.preload["source.bookorbit"] = nil
+    package.loaded["source.bookorbit"] = nil
 end
 
 Assert.is_nil(Registry.meta("nope"))
@@ -282,13 +254,13 @@ for _, k in ipairs({
     "utils.settings",
     "source.moon.client",
     "source.moon.mapper",
-    "source.wechat.auth",
-    "source.wechat.client",
-    "source.wechat.mapper",
-    "source.wechat.chapter",
+    "source.kavita.auth",
+    "source.kavita.client",
+    "source.kavita.mapper",
+    "source.kavita.chapter",
     "source.registry",
     "source.moon",
-    "source.wechat",
+    "source.kavita",
 }) do
     package.preload[k] = nil
     package.loaded[k] = nil

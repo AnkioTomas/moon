@@ -146,7 +146,7 @@ end
 
 -- 旧账号的服务端笔记 id 不是新账号的上传确认，正文、备注与定位仍保留。
 do
-    for _idx, id in ipairs({ "wechat", "kavita" }) do
+    for _idx, id in ipairs({ "kavita" }) do
         local real = require("source." .. id).new()
         local source = fixture("account-note-ids-" .. id, true)
         source.resetAccountAnnotations = real.resetAccountAnnotations
@@ -165,15 +165,9 @@ do
         Assert.eq(annotations[1].text, item.text)
         Assert.eq(annotations[1].note, item.note)
         Assert.eq(annotations[1].pos0, item.pos0)
-        if id == "wechat" then
-            Assert.is_nil(annotations[1].wr_bookmark_id)
-            Assert.is_nil(annotations[1].wr_review_id)
-            Assert.is_true(require("source.wechat.notes").preparePush(annotations), "保留的笔记必须能上传新账号")
-        else
-            Assert.is_nil(annotations[1].kavita_id)
-            Assert.is_nil(annotations[1].kavita_note)
-            Assert.eq(annotations[1].kavita_xpath, item.kavita_xpath, "源坐标不丢")
-        end
+        Assert.is_nil(annotations[1].kavita_id)
+        Assert.is_nil(annotations[1].kavita_note)
+        Assert.eq(annotations[1].kavita_xpath, item.kavita_xpath, "源坐标不丢")
     end
 end
 
@@ -197,13 +191,6 @@ do
     NoteDB.prepareAccountSync = original
     done({ ok = true })
     Assert.len(StatsDB.unsyncedBySource(source.id, 20), 0, "旧账号仍可确认成功，不重复上报")
-end
-
--- 真源能力不能和加架实现分叉：番茄双向书架必须声明 shelf_add。
-do
-    local fanqie = require("source.fanqie").new()
-    Assert.is_true(fanqie:capabilities().shelf_add,
-        "番茄有 addToShelfAsync，换账号必须重推本地成员")
 end
 
 -- 支持加架的源把旧成员推到新书架，失败的成员保持脏，不被快照下架。

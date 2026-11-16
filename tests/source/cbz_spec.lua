@@ -141,10 +141,7 @@ end
 
 do -- 所有漫画源都走共用打包器。
     local files = {
-        "book.koplugin/source/fanqie/comic.lua",
-        "book.koplugin/source/kuaikan/chapter.lua",
         "book.koplugin/source/copymanga/chapter.lua",
-        "book.koplugin/source/zymk/chapter.lua",
     }
     for _idx, rel in ipairs(files) do
         local file = assert(io.open(rel, "r"))
