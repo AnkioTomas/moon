@@ -24,7 +24,7 @@ package.preload["desktop.detail.scrape.novel"] = function()
     end }
 end
 local real_registry = package.loaded["source.registry"]
-package.loaded["source.registry"] = { listEnabled = function() return { { id = "weread", name = "微信读书" }, { id = "douban", name = "豆瓣" }, { id = "local", name = "本地" } } end,
+package.loaded["source.registry"] = { listEnabled = function() return { { id = "other", name = "其他" }, { id = "douban", name = "豆瓣" }, { id = "weread", name = "微信读书" }, { id = "local", name = "本地" } } end,
     external = function(id) return id ~= "local" and {} or nil end }
 for _, name in ipairs({ "desktop.detail.scrape.douban", "desktop.detail.scrape.novel", "desktop.detail.scrape.search" }) do
     package.loaded[name] = nil
@@ -61,17 +61,36 @@ do
     Assert.is_true(calls.cancelled)
 end
 
--- 第三方书源（weread）经数据源，结果来源标记 weread；空结果 / 报错都是错误
+-- 第三方书源（other）经数据源，结果来源标记 other；空结果 / 报错都是错误
 do
     local rec, cb = recorder()
-    Search.searchAsync("活着", "weread", cb)
-    Assert.eq(calls[2], "weread:活着:weread")
+    Search.searchAsync("活着", "other", cb)
+    Assert.eq(calls[2], "other:活着:other")
     pending({}, nil)
     Assert.eq(rec.err, "无搜索结果")
     Assert.is_nil(rec.source)
-    Search.searchAsync("活着", "weread", cb)
+    Search.searchAsync("活着", "other", cb)
     pending(nil, "挂了")
     Assert.eq(rec.err, "挂了")
+end
+
+-- 内置平台搜索走自己的模块，不经书源；与同名第三方书源只列一次
+do
+    local seen
+    package.preload["desktop.detail.scrape.platform.weread"] = function()
+        return { searchAsync = function(q, cb) seen = q cb({ { title = "活着" } }) return nil end }
+    end
+    local rec, cb = recorder()
+    Search.searchAsync("活着", "weread", cb)
+    Assert.eq(seen, "活着")
+    Assert.eq(rec.source, "weread")
+    local count = 0
+    for _, src in ipairs(Search.sources()) do
+        if src.id == "weread" or src.id == "douban" then count = count + 1 end
+    end
+    Assert.eq(count, 2)
+    package.preload["desktop.detail.scrape.platform.weread"] = nil
+    package.loaded["desktop.detail.scrape.platform.weread"] = nil
 end
 
 for _, name in ipairs({ "desktop.detail.scrape.douban", "desktop.detail.scrape.novel", "desktop.detail.scrape.search" }) do

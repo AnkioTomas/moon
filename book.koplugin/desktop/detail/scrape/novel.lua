@@ -1,5 +1,5 @@
 --[[--
-数据源元数据搜索：微信读书、七猫、晋江、起点、番茄、长佩、潇湘都走各自数据源自带的 searchAsync，
+数据源元数据搜索：已启用的第三方书源走各自数据源自带的 searchAsync（内置平台搜索见 platform/），
 这里只把 Book 映射成刮削统一行（title/author/intro/tags/cover_url/publisher/year/isbn/rating/series/source）
 
 @module koplugin.book.desktop.detail.scrape.novel
