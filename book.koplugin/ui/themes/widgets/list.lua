@@ -14,6 +14,7 @@
 
 subtitle 只在全屏标题栏里显示；居中面板点外面关，全屏点右上角或返回键关；左右滑翻页。
 居中面板可给 anchor 矩形（贴着按钮弹出，每页行数按锚点上下较大一侧的空间算）与 inner_width（内容宽上限，物理像素）。
+columns：每行几项（默认 1），按行优先排；多列时不画右侧状态字，每页条数 = 列数 × 行数。
 左上角按钮：left_icon + left_callback（仅全屏）。
 items：{ text, value, icon, mandatory（右侧状态字）, widget（右侧控件，优先于 mandatory；
          可给函数，翻到该页才构建）, image / image_w / image_h（缩略图，逻辑像素）,
@@ -35,6 +36,7 @@ items：{ text, value, icon, mandatory（右侧状态字）, widget（右侧控�
 --]]
 
 local UIManager = require("ui/uimanager")
+local HorizontalGroup = require("ui/widget/horizontalgroup")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
 local Theme = require("ui.themes")
@@ -115,7 +117,7 @@ function List:updateView()
     if type(a) == "table" then
         room = math.max(a.y, self.dimen.h - a.y - a.h) - Theme.px(t.space.sm) * 2
     end
-    self.per_page = math.max(1, math.floor((room - chrome) / self.pitch))
+    self.per_page = math.max(1, math.floor((room - chrome) / self.pitch)) * (self.columns or 1)
     self.page = math.max(1, math.min(self:pages(), self.page or self:checkedPage()))
     self:rebuild()
 end
@@ -190,12 +192,16 @@ function List:rebuild()
     local pages = self:pages()
     local rows = VerticalGroup:new{ align = "left" }
     local first = (self.page - 1) * self.per_page
+    local columns = self.columns or 1
+    local cell_w = math.floor(self.row_w / columns)
+    local line
     for i = first + 1, math.min(#self.items, first + self.per_page) do
         local item = self.items[i]
         local status = item.widget
         if type(status) == "function" then status = status() end
-        rows[#rows + 1] = Row.widget({
-            width = self.row_w,
+        if columns > 1 then status = nil end
+        local cell = Row.widget({
+            width = cell_w,
             icon = self:markIcon(item),
             image = item.image,
             image_w = item.image_w,
@@ -210,6 +216,15 @@ function List:rebuild()
             enabled = item.enabled,
             callback = function() self:choose(item) end,
         })
+        if columns == 1 then
+            rows[#rows + 1] = cell
+        else
+            if (i - first - 1) % columns == 0 then
+                line = HorizontalGroup:new{ align = "top" }
+                rows[#rows + 1] = line
+            end
+            line[#line + 1] = cell
+        end
     end
     local pager = pages > 1 and Pager.widget({
         width = self.row_w,
@@ -222,7 +237,8 @@ function List:rebuild()
         local body = VerticalGroup:new{ align = "left", rows }
         if pager then
             -- 末页不满也补成整页高，翻页时面板和翻页条不跳位置。
-            local missing = first + self.per_page - math.min(#self.items, first + self.per_page)
+            local shown = math.min(#self.items, first + self.per_page) - first
+            local missing = math.ceil(self.per_page / columns) - math.ceil(shown / columns)
             body[#body + 1] = VerticalSpan:new{ width = missing * self.pitch }
             body[#body + 1] = pager
         end

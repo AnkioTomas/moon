@@ -42,6 +42,14 @@ rows[1]:onTapThemeArea()
 Assert.eq(Kit.closed[#Kit.closed], list)
 Assert.eq(picked, 15)
 
+-- 多列：每页条数 = 列数 × 行数，末页按行补齐，点按仍对应各自的项。
+list = List:new{ items = items(40), columns = 2 }
+Assert.eq(list.per_page, 28)
+Assert.eq(list:pages(), 2)
+Assert.len(Kit.taps(list), 28)
+list:goPage(2)
+Assert.len(Kit.taps(list), 12)
+
 -- 翻页夹到范围内；换成更少的项时停在末页。
 list = List:new{ items = items(30) }
 Assert.eq(list.page, 1)
