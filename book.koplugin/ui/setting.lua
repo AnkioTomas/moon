@@ -24,6 +24,11 @@ return {
         library_style = "kindle",
         -- 封面四角：theme 跟界面风格；round / square 只改封面，不动按钮和对话框。
         library_cover_radius = "theme",
+        -- 封面来源：image 加载封面图（无图用文字封面）；text 一律不加载、只用文字封面。
+        library_cover_mode = "image",
+        -- 文字封面风格：color 按书名取色；plain 白底黑字。truncate：书名过长自动截断（否则缩小字号排满）。
+        library_text_cover_style = "color",
+        library_text_cover_truncate = true,
         library_tap = "open",
         -- 双击 / 长按封面：none / open / detail。开双击后书库页的单击要多等一个双击间隔。
         library_double_tap = "none",

@@ -65,4 +65,22 @@ cover = PlainCover:new{ title = "ABC", author = "", width = 100, height = 140 }
 Assert.eq(#vivid_calls, 1, "彩屏补一次饱和")
 Assert.eq(cover.bg, 0x112233, "补饱和后的色板才是封面底色")
 
+local function painted(opts)
+    local seen = {}
+    local c = PlainCover:new(opts)
+    for _idx, col in ipairs(c.columns) do
+        for _jdx, ch in ipairs(col) do
+            ch.paintTo = function(_, _bb, px, py) seen[#seen + 1] = { ch.text, px, py } end
+        end
+    end
+    local bb = { paintRectRGB32 = function() end, paintBorder = function() end }
+    c:paintTo(bb, 0, 0)
+    return seen, c
+end
+local seen = painted{ title = "ABCDE", author = "", width = 100, height = 140 }
+Assert.eq(#seen, 4, "截断为四字且都画出")
+seen = painted{ title = "ABCDE", author = "", width = 100, height = 140, truncate = false }
+Assert.eq(#seen, 5, "不截断时转列画全")
+Assert.is_true(seen[5][2] < seen[1][2], "转到左边一列")
+
 return true

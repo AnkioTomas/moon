@@ -526,6 +526,11 @@ function Book.cover(plugin, source, book, cw, ch, opts)
     else
         req = source_req
     end
+    local ui_conf = MoonSettings.get("ui")
+    local text_only = ui_conf.library_cover_mode == "text" and not (type(opts.src) == "string" and opts.src ~= "")
+    if text_only then
+        req, cached_cover = nil, nil
+    end
     local t = Theme.current()
     -- 封面圆角在 raised；image 半径故意为 0（通用图）。无阴影时不能整段换成 image，
     -- 否则柔和主题侧封面丢圆角，堆叠底边对齐时只看见中间本顶部是圆的。
@@ -569,6 +574,8 @@ function Book.cover(plugin, source, book, cw, ch, opts)
         fallback = PlainCover:new{
             title = title,
             author = Book.author(book),
+            style = ui_conf.library_text_cover_style,
+            truncate = ui_conf.library_text_cover_truncate,
             width = cover_w,
             height = cover_h,
         },

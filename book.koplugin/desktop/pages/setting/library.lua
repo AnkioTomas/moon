@@ -18,6 +18,14 @@ local COVER_RADII = {
     { value = "round", text = _("圆角") },
     { value = "square", text = _("直角") },
 }
+local COVER_MODES = {
+    { value = "image", text = _("加载封面") },
+    { value = "text", text = _("仅文字封面") },
+}
+local TEXT_COVER_STYLES = {
+    { value = "color", text = _("彩色底") },
+    { value = "plain", text = _("白底黑字") },
+}
 local RANDOM_SCOPES = {
     { value = "new", text = _("未读") },
     { value = "reading", text = _("未读 + 阅读中") },
@@ -143,6 +151,12 @@ function Library:sections(desktop)
                 _("Kindle：状态叠在封面上；Kobo：封面干净，下载状态、进度和更多收在封面下方"), STYLES),
             choiceRow(desktop, "library_cover_radius", "rounded_corner", _("封面圆角"),
                 _("只改书封四角；跟随主题时与界面风格一致"), COVER_RADII),
+            choiceRow(desktop, "library_cover_mode", "image", _("封面来源"),
+                _("选「仅文字封面」则不加载封面图，全部用书名生成封面"), COVER_MODES),
+            choiceRow(desktop, "library_text_cover_style", "palette", _("文字封面风格"),
+                _("彩色底：按书名取色；白底黑字：简洁朴素"), TEXT_COVER_STYLES),
+            toggleRow(desktop, "library_text_cover_truncate", "content_cut", _("文字封面截断标题"),
+                _("标题过长时自动截断为四字；关闭则自动转到下一列显示")),
             toggleRow(desktop, "library_title", "title", _("显示名称"), _("封面下方显示书名")),
             toggleRow(desktop, "library_author", "person", _("显示作者"), _("书名下方显示作者")),
         } },
