@@ -264,6 +264,10 @@ function Page.sections(desktop)
             icon = "space_bar", title = _("底栏文字不变灰"), subtitle = _("未选中的图标文字与正文同色"),
             on = Core.plainTabbar(), apply = function(on) Core.setPlainTabbar(on) end,
         })
+        rows[#rows + 1] = toggleRow(desktop, {
+            icon = "opacity", title = _("底栏选中色半透明"), subtitle = _("选中格底色叠在壁纸上，不再是实心色块"),
+            on = Core.translucentTabbar(), apply = function(on) Core.setTranslucentTabbar(on) end,
+        })
     end
 
     local scope_rows = {}

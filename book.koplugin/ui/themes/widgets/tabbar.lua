@@ -11,6 +11,7 @@
   Tabbar.widget({ width = w, tabs = { { id = "home", text = "首页", icon = "home" } },
       active = "home", on_tab = function(id) … end })
 
+opts.translucent：壁纸透底时用，选中格浅色底按 50% 叠在壁纸上（深色或彩色选中底不处理，字会看不清）。
 opts.plain：壁纸透底时用，未选中格的图标文字用主文字色而不是 faint（选中格不变）。
 opts.show_labels：false 时只显示图标；高度与触摸区不变。
 
@@ -82,6 +83,8 @@ function Tabbar.widget(opts)
                 style = active and { bg = sel.bg, border = 0 } or { bg = t.color.page },
                 width = cell_w,
                 height = cell_h - mark,
+                bg_alpha = active and opts.translucent and type(sel.bg) == "number" and sel.bg >= 0xC0
+                    and sel.bg <= 0xFF and 50 or nil,
                 label,
             },
         }

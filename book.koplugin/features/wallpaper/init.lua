@@ -173,6 +173,17 @@ function M.plainTabbar()
     return conf().wallpaper_tabbar_plain == true
 end
 
+---@return boolean
+function M.translucentTabbar()
+    return conf().wallpaper_tabbar_translucent == true
+end
+
+---@param on boolean
+function M.setTranslucentTabbar(on)
+    conf().wallpaper_tabbar_translucent = on == true
+    save()
+end
+
 ---@param on boolean
 function M.setPlainTabbar(on)
     conf().wallpaper_tabbar_plain = on == true
@@ -516,6 +527,7 @@ Ext.add("desktop.backdrop", {
     content = function(widget, tab) M.hollow(widget, tab) end,
     tabbar = function(bar, tab) M.hollowBars(bar, tab, M.bars().bottom) end,
     plain_tabbar = function(tab) return M.plainTabbar() and M.bars().bottom and M.enabled(tab) end,
+    translucent_tabbar = function(tab) return M.translucentTabbar() and M.bars().bottom and M.enabled(tab) end,
     wrap = function(w, h, child, tab) return M.wrap(tab, w, h, child) end,
 })
 

@@ -22,6 +22,8 @@ Setting.defaults = {
     wallpaper_tabbar = true,
     -- 底栏透出壁纸时：未选中格的图标文字跟正文同色，不降成灰色。默认关（保持原来的强调样式）。
     wallpaper_tabbar_plain = false,
+    -- 底栏透出壁纸时：选中格底色半透明（白色叠在壁纸上），不再是一块实心灰。默认关。
+    wallpaper_tabbar_translucent = false,
     wallpaper_contain = false,
     -- 默认淡一点：选了图铺满各界面时不至于盖住内容。
     wallpaper_opacity = 30,

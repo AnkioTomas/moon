@@ -225,6 +225,7 @@ local function tabbar(self)
     local bar = Tabbar.widget{
         show_labels = MoonSettings.get("ui").tabbar_labels,
         plain = backdrop and backdrop.plain_tabbar(self.tab),
+        translucent = backdrop and backdrop.translucent_tabbar(self.tab),
         width = self.dimen.w,
         tabs = self._tabs,
         active = self.tab,

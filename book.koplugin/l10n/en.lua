@@ -2335,4 +2335,6 @@ return {
     ["选择%1书目"] = "Choose a book from %1",
     ["已关联。在%1设置中打开「显示段评」后显示"] = "Linked. Turn on \"Show paragraph reviews\" in the %1 settings to see them",
     ["没有可用的公众号来源"] = "No official-account source is available",
+    ["底栏选中色半透明"] = "Translucent selected tab",
+    ["选中格底色叠在壁纸上，不再是实心色块"] = "Selected cell fill is blended over the wallpaper instead of a solid block",
 }
