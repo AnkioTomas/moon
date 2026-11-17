@@ -29,6 +29,7 @@ local paint_order
 local shape_log
 local accent = 0x0756AD
 
+local pixel_luma = 255
 local function buffer()
     return {
         data = ffi.new("uint8_t[?]", 100 * 200 * 4),
@@ -53,6 +54,9 @@ local function buffer()
         colorblitFromRGB32 = function(_self, _source, x, y, _ox, _oy, _w, _h, color)
             text_log.blit = { x = x, y = y, color = color, rgb = true }
         end,
+        getWidth = function() return 100 end,
+        getHeight = function() return 200 end,
+        getPixel = function() return { a = pixel_luma } end,
         copy = function()
             if paint_order then paint_order[#paint_order + 1] = "snapshot" end
             return { free = function() snapshot_frees = snapshot_frees + 1 end }
@@ -86,6 +90,7 @@ package.preload["ffi/blitbuffer"] = function()
         COLOR_GRAY_5 = 5,
         COLOR_GRAY_D = 13,
         isColor8 = function(color) return color <= 255 end,
+        Color8 = function(a) return a end,
         new = function(_, _, buffer_type)
             buffer_types[#buffer_types + 1] = buffer_type
             return buffer()
@@ -93,6 +98,8 @@ package.preload["ffi/blitbuffer"] = function()
     }
 end
 
+-- 本 spec 里颜色是数字；真实 Color8 有 .a，补上让对比度计算能跑。
+debug.setmetatable(0, { __index = function(n, key) if key == "a" then return n end end })
 local color_screen = true
 package.loaded["device"] = { screen = { night_mode = false, isColorEnabled = function() return color_screen end } }
 package.preload["ui.themes"] = function()
@@ -317,7 +324,7 @@ local ok_run, err_run = pcall(function()
     -- 公共 paintText 必须用 not block.color 判缺省，不能只修某一个主体。
     reset()
     text_log = {}
-    local toxic = setmetatable({ tag = "toxic" }, {
+    local toxic = setmetatable({ tag = "toxic", a = 0 }, {
         __eq = function(_, other)
             if other == nil then error("attempt to index a nil value") end
             return false
@@ -334,11 +341,23 @@ local ok_run, err_run = pcall(function()
     })
     Assert.is_true(ok, tostring(err))
     Assert.eq(text_log.blit.color, toxic, "票根粗体有显式色时不得改走主题 accent")
+    Assert.eq(text_log.blit.color.a, 0)
+
+    -- 直接画在深色背景上的灰度文字反色；深底上本就是浅字（对比够）保持不变。
+    pixel_luma = 20
+    text_log = {}
+    Assert.is_true((Render.write("/tmp/compose.png", nil, { { text = "深底", box = false } })))
+    Assert.eq(text_log.blit.color, 254, "黑字（mock 里是 1）落在深底上反成 255-1")
+    text_log = {}
+    Assert.is_true((Render.write("/tmp/compose.png", nil, { { text = "浅字", box = false, color = 255 } })))
+    Assert.eq(text_log.blit.color, 255, "白字在深底上对比够，不反色")
+    pixel_luma = 255
     -- 统计柱 Chart.appendBars highlight_last 末项：粗体 + 显式色 + accent，同一条判空路径。
     for _idx, enabled in ipairs({ true, false }) do
         color_screen = enabled
         reset()
         text_log = {}
+        pixel_luma = enabled and 0 or 255 -- 替身里 accent 是巨大的数字，放在深底上才算「浅字」不被反色；灰度屏的显式色 a=0 放在白底上
         BB.isColor8 = function(c)
             if rawequal(c, toxic) then return true end
             return old_is_color8(c)
@@ -350,6 +369,7 @@ local ok_run, err_run = pcall(function()
         Assert.eq(text_log.blit.color, enabled and accent or toxic,
             enabled and "彩屏：accent 覆盖显式色" or "灰度屏：保留显式色")
     end
+    pixel_luma = 255
     color_screen = true
     BB.isColor8 = old_is_color8
 
@@ -367,6 +387,7 @@ local ok_run, err_run = pcall(function()
         for _mode_idx, enabled in ipairs({ true, false }) do
             color_screen = enabled
             text_log = {}
+            pixel_luma = enabled and 0 or 255 -- 替身里 accent 是巨大的数字，只在深底上算浅字
             Assert.is_true((Render.write("/tmp/compose.png", nil, { { text = "书名", bold = true, box = false } })))
             Assert.eq(text_log.blit.color, enabled and accent or 1)
             Assert.eq(text_log.blit.rgb, enabled)
@@ -523,6 +544,7 @@ local ok_run, err_run = pcall(function()
     Assert.is_false(Render.hasAlpha({ decoded = true }), "非 RGB32 / 无类型一律不透明")
 end)
 
+debug.setmetatable(0, nil)
 os.rename = real_rename
 os.remove = real_remove
 if not ok_run then error(err_run) end

@@ -33,15 +33,13 @@ local function updateOverlay(desktop)
     if desktop.settings_overlay then desktop.settings_overlay:updateView() end
 end
 
---- 设置项变更后重建设置页，并重新合成锁屏图。
+--- 合成一次锁屏图并提示结果，完成后刷新预览。
 --- 只有当前配置能离线出图时才直接生成，否则等联网——不然壁纸源拉不到会白跑一次。
 ---@param desktop table 桌面实例
-local function refreshAfterChange(desktop)
-    desktop:updateView()
-    --- 合成一次锁屏图并提示结果，完成后刷新预览。
-    local function refresh()
+local function generate(desktop)
+    local function run()
         Toast:new{ text = _("正在生成锁屏图…"), timeout = 2 }:show()
-        -- 合成在主线程同步绘制；nextTick 仍排在重绘之前，必须隔一帧才能先把选中态和提示画出来。
+        -- 合成在主线程同步绘制；nextTick 仍排在重绘之前，必须隔一帧才能先把提示画出来。
         UIManager:tickAfterNext(require("ui.guard").wrap("lockscreen refresh", function()
             LockScreen.refresh(function(ok, err)
                 updateOverlay(desktop)
@@ -50,15 +48,21 @@ local function refreshAfterChange(desktop)
                         or T(_("生成失败: %1"), tostring(err or ""):match("[^\n]*")),
                     timeout = 2,
                 }:show()
-            end, nil, "settings")
+            end, true, "settings")
             if LockScreen.running() then updateOverlay(desktop) end
         end))
     end
     if Compose.plan().offline then
-        refresh()
+        run()
     else
-        NetworkMgr:runWhenConnected(refresh)
+        NetworkMgr:runWhenConnected(run)
     end
+end
+
+--- 设置项变更：只重建设置页，不自动出图——改完几项再点「刷新锁屏图」一次生成。
+---@param desktop table 桌面实例
+local function refreshAfterChange(desktop)
+    desktop:updateView()
 end
 
 --- 导航行；opts 即 Row.widget 参数（宽度在绘制时补上）。
@@ -149,7 +153,8 @@ function Lockscreen:rows(desktop)
                     if enabled then
                         desktop:updateView()
                     else
-                        refreshAfterChange(desktop)
+                        desktop:updateView()
+                        generate(desktop)
                     end
                 end,
             })
@@ -309,6 +314,12 @@ function Lockscreen:rows(desktop)
             end,
         }
     end
+
+    rows[#rows + 1] = navRow{
+        icon = "refresh", title = _("刷新锁屏图"),
+        subtitle = _("改完设置后点这里重新生成；不点则保留上一张"),
+        callback = function() generate(desktop) end,
+    }
 
     local path = generatedPath()
     if path then

@@ -128,7 +128,7 @@ local desktop = {
 
 has_ads = true
 local ad_rows = Lockscreen:rows(desktop)
-Assert.len(ad_rows, 4, "广告版 Kindle 多一行去广告提醒")
+Assert.len(ad_rows, 5, "广告版 Kindle 多一行去广告提醒")
 ad_rows[2]({}).callback()
 local ad_confirm = Themed.last("confirm")
 remove_ok = false
@@ -144,14 +144,19 @@ log = {}
 has_ads = false
 
 local rows = Lockscreen:rows(desktop)
-Assert.len(rows, 3, "非海报墙背景没有「海报风格」行")
+Assert.len(rows, 4, "非海报墙背景没有「海报风格」行；末尾是「刷新锁屏图」")
 rows[2]({}).callback()
 local popup = Themed.last("list")
 Assert.not_nil(popup)
 popup.on_select("folder")
 
--- 点击回调内只改配置、刷视图、弹提示；合成推到下一帧重绘之后。
-Assert.eq(table.concat(log, ","), "set:folder,desktop.updateView,show:正在生成锁屏图…")
+-- 改设置只改配置、刷视图，不自动出图。
+Assert.eq(table.concat(log, ","), "set:folder,desktop.updateView")
+Assert.len(ticks, 0)
+
+-- 点「刷新锁屏图」才合成：提示先出，合成推到下一帧重绘之后。
+rows[4]({}).callback()
+Assert.eq(log[#log], "show:正在生成锁屏图…")
 Assert.len(ticks, 1)
 
 ticks[1]()
@@ -171,7 +176,7 @@ Assert.eq(log[#log], "show:生成失败: boom")
 -- 海报墙背景：背景下面多「海报风格」「海报排序」，选中后写配置并走同一条刷新链路。
 background_mode = "poster"
 local poster_rows = Lockscreen:rows(desktop)
-Assert.len(poster_rows, 5)
+Assert.len(poster_rows, 6)
 local style_row = poster_rows[3]({})
 Assert.eq(style_row.title, "海报风格")
 Assert.eq(style_row.status, "竖屏排版")
@@ -182,8 +187,8 @@ ticks = {}
 popup.on_select("vertical")
 Assert.len(ticks, 0, "选中当前值不重出图")
 popup.on_select("standard")
-Assert.eq(log[#log - 2], "poster:standard")
-Assert.len(ticks, 1)
+Assert.eq(log[#log - 1], "poster:standard")
+Assert.len(ticks, 0, "改设置不自动出图")
 local sort_row = poster_rows[4]({})
 Assert.eq(sort_row.title, "海报排序")
 Assert.eq(sort_row.status, "最近阅读")
@@ -194,13 +199,13 @@ ticks = {}
 popup.on_select("recent_read")
 Assert.len(ticks, 0, "选中当前排序不重出图")
 popup.on_select("recent_added")
-Assert.eq(log[#log - 2], "sort:recent_added")
-Assert.len(ticks, 1)
+Assert.eq(log[#log - 1], "sort:recent_added")
+Assert.len(ticks, 0, "改设置不自动出图")
 
 -- 自定义背景：多一行「选择图片」，只列图片文件；所在目录不存在时从主目录开始。
 component_id, background_mode = "current", "custom"
 local custom_rows = Lockscreen:rows(desktop)
-Assert.len(custom_rows, 4)
+Assert.len(custom_rows, 5)
 local pick = custom_rows[3]({})
 Assert.eq(pick.title, "选择图片")
 Assert.matches(pick.subtitle, "^/nonexistent/custom%.png · 600 × 800$")
@@ -211,8 +216,8 @@ Assert.is_true(chooser.filter("a.JPG"))
 Assert.is_false(chooser.filter("a.epub"))
 ticks = {}
 chooser.on_select("/mnt/us/me.png")
-Assert.eq(log[#log - 2], "image:/mnt/us/me.png")
-Assert.len(ticks, 1, "选完立刻重出图")
+Assert.eq(log[#log - 1], "image:/mnt/us/me.png")
+Assert.len(ticks, 0, "选完不自动重出图")
 
 -- 文件夹背景：「选择文件夹」从当前文件夹开始，只能选目录。
 background_mode = "folder"
@@ -225,9 +230,9 @@ Assert.is_false(chooser.select_file)
 Assert.eq(chooser.path, "/")
 Assert.is_nil(chooser.filter)
 chooser.on_select("/mnt/us/walls")
-Assert.eq(log[#log - 2], "folder:/mnt/us/walls")
+Assert.eq(log[#log - 1], "folder:/mnt/us/walls")
 
--- 文字海报：「选择字体…」只打开字体选择器，选定字体后才写配置并重出图。
+-- 文字海报：「选择字体…」只打开字体选择器，选定字体后才写配置。
 local picker
 package.preload["ui.widgets.fontpicker"] = function() return { open = function(opts) picker = opts end } end
 package.preload["features.lockscreen.typo"] = function()
@@ -248,7 +253,7 @@ Assert.len(ticks, 0, "打开字体选择器时不重出图")
 Assert.len(log, 0)
 picker.on_select({}, "syst", "思源宋体")
 Assert.eq(log[1], "font:syst")
-Assert.len(ticks, 1, "选定字体后才重出图")
+Assert.len(ticks, 0, "选定字体后也不自动重出图")
 
 
 -- 一言主体：附加「联网刷新」「句子类型」，与首页共用设置。
@@ -268,7 +273,7 @@ package.preload["ui.hitokoto_settings"] = function()
 end
 component_id, background_mode = "hitokoto", "bing"
 local hitokoto_rows = Lockscreen:rows(desktop)
-Assert.len(hitokoto_rows, 5, "一言主体多「联网刷新」和「句子类型」两行")
+Assert.len(hitokoto_rows, 6, "一言主体多「联网刷新」和「句子类型」两行")
 local ttl_row = hitokoto_rows[4]({})
 Assert.eq(ttl_row.title, "联网刷新")
 Assert.eq(ttl_row.status, "1 小时")
@@ -278,8 +283,8 @@ ticks, log = {}, {}
 Themed.last("list").on_select(3600)
 Assert.len(ticks, 0, "选中当前间隔不重出图")
 Themed.last("list").on_select(600)
-Assert.eq(log[#log - 2], "ttl:600")
-Assert.len(ticks, 1)
+Assert.eq(log[#log - 1], "ttl:600")
+Assert.len(ticks, 0, "改设置不自动出图")
 local types_row = hitokoto_rows[5]({})
 Assert.eq(types_row.title, "句子类型")
 Assert.eq(types_row.status, "全部")
@@ -290,6 +295,6 @@ types_opts.on_close()
 Assert.len(ticks, 0, "类型没改不重出图")
 types_opts.on_change()
 types_opts.on_close()
-Assert.len(ticks, 1, "类型改了才重出图")
+Assert.len(ticks, 0, "类型改了也不自动出图")
 
 return true

@@ -242,6 +242,58 @@ local function paintBackground(bb, path, w, h, fill, contain, decoded, transpare
     return ok, err
 end
 
+--- 像素 / 颜色的亮度（0-255）。
+---@param c ffi.cdata*
+---@return number
+local function lumaOf(c)
+    if c.getColorRGB32 then
+        local rgb = c:getColorRGB32()
+        return 0.299 * rgb.r + 0.587 * rgb.g + 0.114 * rgb.b
+    end
+    return c.a
+end
+
+--- 文字框下的平均亮度与离散度（0-255）：在已绘制的画布上网格取样，背景图 / 卡片 / 遮罩都算进去。
+--- 离散度大说明是照片之类的杂乱底，单靠反色不够。
+---@param bb BlitBuffer
+---@param x number
+---@param y number
+---@param width number
+---@param height number
+---@return number mean, number spread
+local function backdropLuma(bb, x, y, width, height)
+    local cw, ch = bb:getWidth(), bb:getHeight()
+    local sum, sum2, n = 0, 0, 0
+    for row = 0, 5 do
+        for col = 0, 11 do
+            local px = math.min(cw - 1, math.max(0, math.floor(x + width * (col + 0.5) / 12)))
+            local py = math.min(ch - 1, math.max(0, math.floor(y + height * (row + 0.5) / 6)))
+            local l = lumaOf(bb:getPixel(px, py))
+            sum, sum2, n = sum + l, sum2 + l * l, n + 1
+        end
+    end
+    local mean = sum / n
+    return mean, math.sqrt(math.max(0, sum2 / n - mean * mean))
+end
+
+--- 底色偏深（含中灰）用浅字，否则用深字；字已经在正确一侧且对比够就保持原样。
+--- 灰度字优先取反保留层次；取反后仍不够或是彩色字（accent）则落到黑 / 白。
+---@param color ffi.cdata*
+---@param luma number
+---@return ffi.cdata*
+local function contrastColor(color, luma)
+    local light = luma < 165
+    local own = lumaOf(color)
+    if (own >= 128) == light and math.abs(own - luma) >= 64 then return color end
+    if Blitbuffer.isColor8(color) then
+        local inverted = 255 - color.a
+        if (inverted >= 128) == light and math.abs(inverted - luma) >= 96 then
+            return Blitbuffer.Color8(inverted)
+        end
+    end
+    return light and Blitbuffer.COLOR_WHITE or Blitbuffer.COLOR_BLACK
+end
+
 --- 将文本块绘制到离屏缓冲。
 ---@param bb BlitBuffer 目标 Blitbuffer
 ---@param block table 文本块描述
@@ -259,6 +311,16 @@ local function paintText(bb, block, w)
     local widget = TextBoxWidget:new(opts)
     local size = widget:getSize()
     local y = block.y or 0
+    -- 直接画在背景上的灰度文字按底色亮度自动反色；带白框的文字底色固定为白，不用算。
+    local halo
+    if block.box == false then
+        local luma, spread = backdropLuma(bb, x, y, width, size.h)
+        color = contrastColor(color, luma)
+        -- 照片这类杂乱底：再描一圈反向色，亮暗交错处也读得清。
+        if spread > 28 then
+            halo = lumaOf(color) < 128 and Blitbuffer.COLOR_WHITE or Blitbuffer.COLOR_BLACK
+        end
+    end
     if block.box ~= false then
         local pad = block.padding or 10
         bb:paintRect(x - pad, y - pad, width + pad * 2, size.h + pad * 2, Blitbuffer.COLOR_WHITE)
@@ -266,6 +328,11 @@ local function paintText(bb, block, w)
     if mask_text then
         -- 白字黑底作覆盖度蒙版，背景透出，RGB 字形也不会被原生绘制转灰。
         local mask = widget._bb
+        if halo then
+            for _idx, d in ipairs({ { -1, 0 }, { 1, 0 }, { 0, -1 }, { 0, 1 }, { -1, -1 }, { 1, 1 }, { -1, 1 }, { 1, -1 } }) do
+                bb.colorblitFrom(bb, mask, x + d[1], y + d[2], 0, 0, mask:getWidth(), mask:getHeight(), halo)
+            end
+        end
         local paint = Blitbuffer.isColor8(color) and bb.colorblitFrom or bb.colorblitFromRGB32
         paint(bb, mask, x, y, 0, 0, mask:getWidth(), mask:getHeight(), color)
     else

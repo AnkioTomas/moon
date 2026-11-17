@@ -1179,6 +1179,8 @@ return {
     ["重新安装"] = "Reinstall",
     ["重新安装失败：%1"] = "Reinstall failed: %1",
     ["锁屏"] = "Lock screen",
+    ["刷新锁屏图"] = "Refresh lock screen image",
+    ["改完设置后点这里重新生成；不点则保留上一张"] = "Regenerate after changing settings; otherwise the previous image is kept",
     ["锁屏图已更新"] = "Lock screen image updated",
     ["键盘布局"] = "Keyboard layout",
     ["镜像地址（可选，留空自动选择）"] = "Mirror URL (optional, auto if empty)",
