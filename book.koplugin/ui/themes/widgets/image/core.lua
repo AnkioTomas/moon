@@ -314,6 +314,20 @@ local function requestPaint(box)
     end)
 end
 
+--- 服务端生成的占位封面是 SVG（书名放在 foreignObject 里），NanoSVG 不画 foreignObject，
+--- 渲染出来只有底色、边框和作者。这类文件不算封面，交给 fallback 画本地文字封面。
+---@param path string
+---@return boolean
+local function blankSvg(path)
+    local size = lfs.attributes(path, "size")
+    if not size or size > 16 * 1024 then return false end
+    local f = io.open(path, "rb")
+    if not f then return false end
+    local head = f:read("*a")
+    f:close()
+    return head:find("<svg", 1, true) ~= nil and head:find("<foreignObject", 1, true) ~= nil
+end
+
 --- 通用图片框：固定尺寸占位；文件就绪后交给 ImageWidget（和封面浏览器一样）。
 ---@param src string|nil 图片来源地址或参与像素读取的源画布，具体形式由参数类型限定
 ---@param headers table|nil 图片下载所需的 HTTP 请求头
@@ -474,6 +488,11 @@ local function asyncBox(src, headers, w, h, alpha, fb, on_ready, fallback_src, i
     --- SVG 不进位图缓存：ImageWidget 按后缀走 NanoSVG（保比例、直通 alpha），renderImageFile 会拉满目标框。
     ---@param path string 图片或书籍的本地文件路径
     function box:_showFile(path)
+        if blankSvg(path) then
+            self:_fallback()
+            self:_settle()
+            return
+        end
         local w, h = self._inner_w, self._inner_h
         local large = not cheap(path, w, h)
         self._big = large and not path:lower():match("%.svg$")
