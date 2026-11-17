@@ -263,7 +263,8 @@ function Chapter.afterBootstrap(plugin, session)
             if err or toc and #toc > 0 then
                 require("reader.session.progress").onTocReady(session, err)
             end
-            if not err then Chapter.afterBootstrap(plugin, session) end
+            -- 读库失败也往下走：toc 已是空表，refreshTocIfNeeded 会联网重拉，不用用户手动刷新。
+            Chapter.afterBootstrap(plugin, session)
         end)
         return
     end
@@ -312,8 +313,8 @@ function Chapter.refreshTocIfNeeded(session)
         return
     end
     -- 节流挡住时保留 open_refresh，后续翻页或联网再试。
-    if not require("source.toc").allowRefresh(identity.source_id, identity.stable_id) then
-        if not has_toc then require("reader.session.progress").onTocReady(session, _("目录为空")) end
+    -- 没有目录时不节流：空目录没有可保护的旧数据，必须尽快拉回来。
+    if has_toc and not require("source.toc").allowRefresh(identity.source_id, identity.stable_id) then
         return
     end
     local completed = false

@@ -116,6 +116,12 @@ end
 ---@param fetched_at integer|nil
 ---@return boolean
 function TocDB.put(source_id, stable_id, list, fetched_at)
+    -- 已有目录时拒绝空列表：源接口偶发返回空，不能把本地好目录整体抹掉。
+    if #list == 0 and DB.rowexec("SELECT 1 FROM toc_entries WHERE source_id=? AND stable_id=? LIMIT 1;",
+        source_id, stable_id) then
+        logger.warn("book.toc refuse empty list", source_id, stable_id)
+        return false
+    end
     local BookDB = require("book.books_db")
     local encoded = {}
     for i, chapter in ipairs(list) do

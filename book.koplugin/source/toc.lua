@@ -242,7 +242,9 @@ function Toc.readAsync(source_id, stable_id, cb)
             end
             fetched_at, revision = current_at, current_revision
         elseif revision ~= current_revision then
-            finish(nil, "toc snapshot changed"); return
+            -- 分页读到一半被新写入换了快照：从头重读，不能把半截 / 报错当成空目录。
+            list, after, revision = {}, 0, nil
+            UI:nextTick(step); return
         end
         local page = TocDB.readPage(source_id, stable_id, after)
         if not page then finish(nil, "toc read failed"); return end
