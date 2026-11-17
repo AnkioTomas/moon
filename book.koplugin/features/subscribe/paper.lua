@@ -3,10 +3,9 @@
 
   [全部 ⌄]                          [+] [⟳] [↓] [🗑]
   ─────────────────────────────────────────────
-  未读文章                                  940
-  未读  全部  收藏                      [🔍 搜索]
+  未读  全部  收藏                  940  [🔍 搜索]
   ─────────────────────────────────────────────
-  • 标题最多两行……………………………………………
+  • 标题只占一行……………………………………………
     来源 · 分组 · 10-24
   ★ 已收藏的文章
     来源 · 10-24
@@ -14,7 +13,7 @@
   [<]              第 1 / 20 页             [>]
 
 左上角下拉选范围（全部 / 分组 / 单个源）；右上角依次是添加、刷新当前范围、缓存当前范围未读、订阅源管理。
-点条目打开文章，点右侧星标收藏 / 取消收藏；已读条目标题淡灰、没有圆点。
+点条目打开文章，点右侧星标收藏 / 取消收藏；已读条目标题淡灰、圆点变空心。
 
 @module koplugin.book.features.subscribe.paper
 --]]
@@ -40,9 +39,9 @@ local _ = require("gettext")
 
 local PAGE_MAX = 20
 local MODES = {
-    { id = "unread", label = function() return _("未读") end, title = function() return _("未读文章") end },
-    { id = "all", label = function() return _("全部") end, title = function() return _("全部文章") end },
-    { id = "star", label = function() return _("收藏") end, title = function() return _("收藏文章") end },
+    { id = "unread", label = function() return _("未读") end },
+    { id = "all", label = function() return _("全部") end },
+    { id = "star", label = function() return _("收藏") end },
 }
 
 ---@class BookSubscribePaper
@@ -96,7 +95,6 @@ function Paper.view(page, w, h)
     local opts = page:spec()
     opts.mode = mode.id
     local ink, faint = t.color.ink, t.color.faint
-    local big = Theme.face("cfont", math.floor(t.font.hero * 0.7))
 
     local function ico(name, color)
         return Icon.widget{ name = name, size = t.control.icon, color = Theme.color(color or ink) }
@@ -123,17 +121,14 @@ function Paper.view(page, w, h)
     local head = VerticalGroup:new{ align = "left", VerticalSpan:new{ width = sm }, ends(pick, tools),
         VerticalSpan:new{ width = sm }, padded(rule(iw, math.max(1, Theme.px(2)))) }
 
-    -- 大标题 + 总数
     local _first, total = SubDB.stream(opts, 1, 0)
     local status = page:status()
-    local title = ends(Text.line("hero", q ~= "" and T(_("搜索：%1"), q) or mode.title(), { width = iw - math.floor(iw / 4), face = big }),
-        Text.line("hero", tostring(total), { width = math.floor(iw / 4), face = big }))
 
     -- 筛选行：未读 全部 收藏 │ 搜索
     local tabs = HorizontalGroup:new{ align = "top" }
     for _idx, m in ipairs(MODES) do
         local active = m.id == mode.id
-        local label = Text.line("body", m.label(), { bold = active, color = active and t.color.accent or faint })
+        local label = Text.line("body", m.label(), { bold = active, color = active and t.color.accent or faint, optical = true })
         local cell = VerticalGroup:new{ align = "center", label, VerticalSpan:new{ width = sm },
             rule(label:getSize().w, active and math.max(2, Theme.px(2)) or 0, t.color.accent) }
         tabs[#tabs + 1] = area(HorizontalGroup:new{ cell, HorizontalSpan:new{ width = pad } }, function()
@@ -141,18 +136,24 @@ function Paper.view(page, w, h)
         end)
     end
     local search = area(HorizontalGroup:new{ align = "center", ico("search", q ~= "" and t.color.accent or faint),
-        HorizontalSpan:new{ width = sm }, Text.line("body", _("搜索"), { color = q ~= "" and t.color.accent or faint }) },
+        HorizontalSpan:new{ width = sm }, Text.line("body", q ~= "" and q or _("搜索"), { color = q ~= "" and t.color.accent or faint, optical = true }) },
         function() Paper.search(page) end)
-    local filter = VerticalGroup:new{ align = "left", ends(tabs, search), padded(rule(iw, 1, t.color.faint)) }
+    local count = Text.line("body", tostring(total), { color = faint, optical = true })
+    local right = HorizontalGroup:new{ align = "center", count, HorizontalSpan:new{ width = pad }, search }
+    -- 页签带下划线、比搜索行高；右侧补同样高度，两边文字才在同一水平线上。
+    local underline = sm + math.max(2, Theme.px(2))
+    right = VerticalGroup:new{ align = "right", right, VerticalSpan:new{ width = underline } }
+    local filter = VerticalGroup:new{ align = "left", VerticalSpan:new{ width = sm }, ends(tabs, right),
+        padded(rule(iw, 1, t.color.faint)) }
 
-    -- 文章行：固定高度（标题两行 + 来源行），分页数才稳定。
+    -- 文章行：固定高度（标题一行 + 来源行），分页数才稳定。
     local bullet_w = Text.line("title", "★"):getSize().w
     local star_w = Theme.px(56)
     local text_w = iw - bullet_w - sm - star_w
-    local title_h = Text.box("body", "国\n国", text_w, { max_lines = 2, bold = true, transparent = true }):getSize().h
+    local title_h = Text.line("body", "国", { bold = true }):getSize().h
     local meta_h = Text.line("caption", "国", {}):getSize().h
-    local row_h = title_h + meta_h + sm * 2 + Theme.px(t.space.xs)
-    local avail = h - head:getSize().h - title:getSize().h - filter:getSize().h - Theme.px(t.control.height)
+    local row_h = title_h + meta_h + sm + Theme.px(t.space.xs)
+    local avail = h - head:getSize().h - filter:getSize().h - Theme.px(t.control.height)
     local size = math.max(1, math.min(PAGE_MAX, math.floor(avail / row_h)))
     page.pages = math.max(1, math.ceil(total / size))
     page.page = math.max(1, math.min(page.page, page.pages))
@@ -163,23 +164,28 @@ function Paper.view(page, w, h)
         local meta = { item.feed_title }
         if item.grp ~= "" then meta[#meta + 1] = item.grp end
         if item.time > 0 then meta[#meta + 1] = os.date("%m-%d", item.time) end
-        local mark = item.read and "" or "•"
         local body = VerticalGroup:new{ align = "left",
-            Text.box("body", item.title, text_w, { max_lines = 2, bold = not item.read, transparent = true,
+            Text.line("body", item.title, { width = text_w, bold = not item.read, optical = true,
                 color = item.read and faint or t.color.accent }),
             VerticalSpan:new{ width = Theme.px(t.space.xs) },
-            Text.line("caption", table.concat(meta, " · "), { width = text_w, color = faint }) }
-        local mark_widget = Text.line("title", mark ~= "" and mark or " ")
+            Text.line("caption", table.concat(meta, " · "), { width = text_w, color = faint, optical = true }) }
+        -- 未读实心点、已读空心圈：同一直径，在标题行高度内居中，和标题文字同一水平线。
+        local dot = Theme.px(8)
+        local mark_widget = CenterContainer:new{ dimen = Geom:new{ w = bullet_w, h = title_h },
+            Box:new{ width = dot, height = dot, keep_bg = true, style = item.read
+                and { border = math.max(1, Theme.px(1)), border_color = faint, radius = 999 }
+                or { bg = t.color.accent, radius = 999 } } }
         local content = HorizontalGroup:new{ align = "top",
-            mark_widget, HorizontalSpan:new{ width = bullet_w - mark_widget:getSize().w + sm }, body }
+            mark_widget, HorizontalSpan:new{ width = bullet_w - mark_widget:getSize().w + sm }, body,
+            HorizontalSpan:new{ width = math.max(0, text_w - body:getSize().w) } }
         local function toggleStar()
             SubDB.setStarred(item.feed_id, item.guid, not item.starred)
             require("ui.themes.widgets.toast"):new{ text = item.starred and _("已取消收藏") or _("已收藏"), timeout = 2 }:show()
             page:redraw()
         end
         local body_h = row_h - 1
-        local cell = VerticalGroup:new{ align = "left", VerticalSpan:new{ width = sm }, content,
-            VerticalSpan:new{ width = math.max(0, body_h - sm - content:getSize().h) } }
+        local cell = VerticalGroup:new{ align = "left", VerticalSpan:new{ width = math.floor(sm / 2) }, content,
+            VerticalSpan:new{ width = math.max(0, body_h - math.floor(sm / 2) - content:getSize().h) } }
         -- 图标字体只有描边星；已收藏用实心 ★ 字符，大小对齐图标
         local star_glyph = item.starred and Text.line("title", "★", { color = t.color.accent }) or ico("star", faint)
         local star = area(CenterContainer:new{ dimen = Geom:new{ w = star_w, h = body_h }, star_glyph }, toggleStar)
@@ -194,7 +200,7 @@ function Paper.view(page, w, h)
             Text.box("body", empty, iw, { color = faint, transparent = true }) })
     end
 
-    local group_all = VerticalGroup:new{ align = "left", head, title, filter, list,
+    local group_all = VerticalGroup:new{ align = "left", head, filter, list,
         VerticalSpan:new{ width = math.max(0, avail - list:getSize().h) } }
     group_all[#group_all + 1] = Pager.widget({
         width = w, page = page.page, pages = page.pages, title = T(_("第 %1 / %2 页"), page.page, page.pages),
