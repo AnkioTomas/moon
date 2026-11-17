@@ -157,3 +157,28 @@ _G.G_reader_settings = previous_settings
 if not ok_run then
     error(err_run)
 end
+
+-- 自动锁屏时间：读写 KOReader 的 auto_suspend_timeout_seconds，并让在跑的插件重排计时。
+do
+    local before = _G.G_reader_settings
+    local store = {}
+    _G.G_reader_settings = {
+        readSetting = function(_self, key, default) if store[key] == nil then return default end return store[key] end,
+        saveSetting = function(_self, key, value) store[key] = value end,
+    }
+    Assert.eq(Settings.autoSuspend(), 900)
+    store.auto_suspend_timeout_seconds = 0
+    Assert.eq(Settings.autoSuspend(), -1, "0 与负数都是从不")
+    local calls = {}
+    local plugin = {
+        _unschedule = function() calls[#calls + 1] = "unschedule" end,
+        _start = function() calls[#calls + 1] = "start" end,
+    }
+    Settings.setAutoSuspend(300, { autosuspend = plugin })
+    Assert.eq(store.auto_suspend_timeout_seconds, 300)
+    Assert.eq(plugin.auto_suspend_timeout_seconds, 300)
+    Assert.eq(table.concat(calls, ","), "unschedule,start")
+    Settings.setAutoSuspend(-1, nil)
+    Assert.eq(Settings.autoSuspend(), -1)
+    _G.G_reader_settings = before
+end

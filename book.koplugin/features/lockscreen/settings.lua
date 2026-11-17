@@ -288,4 +288,24 @@ function M.setCustomMessage(message)
     save("lock_screen_custom_message", message ~= "" and message or nil)
 end
 
+--- 无操作多久自动休眠（锁屏），秒；从不 = -1。KOReader 自动休眠插件的同一项设置，缺省 15 分钟。
+---@return integer
+function M.autoSuspend()
+    local seconds = G_reader_settings:readSetting("auto_suspend_timeout_seconds", 15 * 60)
+    return seconds > 0 and seconds or -1
+end
+
+--- 改自动休眠时间：写 KOReader 设置，并让已在跑的自动休眠插件按新值重排计时。
+---@param seconds integer -1 = 从不
+---@param ui table|nil 当前 FM / 阅读器（取 ui.autosuspend）
+function M.setAutoSuspend(seconds, ui)
+    G_reader_settings:saveSetting("auto_suspend_timeout_seconds", seconds)
+    local plugin = ui and ui.autosuspend
+    if plugin then
+        plugin.auto_suspend_timeout_seconds = seconds
+        plugin:_unschedule()
+        plugin:_start()
+    end
+end
+
 return M
