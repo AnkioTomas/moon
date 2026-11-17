@@ -434,6 +434,8 @@ return {
     ["地址必须是 IPv4 或 IPv6"] = "Address must be an IPv4 or IPv6 address",
     ["删除 %1 的解析绑定？"] = "Remove the binding for %1?",
     ["已绑定 %1 个"] = "%1 bound",
+    ["休眠时关闭 Wi-Fi"] = "Turn off Wi-Fi when sleeping",
+    ["按电源键或自动休眠时替你关掉 Wi-Fi，省电"] = "Turns Wi-Fi off for you when the device sleeps (power key or auto-sleep) to save power",
     ["网络超时"] = "Network timeout",
     ["普通请求的默认超时；下载等按倍率放大（如下载 %1 秒）"] = "Regular-request default; downloads etc. scale by ratio (e.g. download %1 s)",
     ["强制文字识别"] = "Forced OCR",

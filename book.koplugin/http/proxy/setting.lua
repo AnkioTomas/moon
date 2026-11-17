@@ -155,6 +155,7 @@ function Setting.entry(desktop)
                     { title = _("HTTP 代理"), rows = Setting.rows(desktop) },
                     { title = _("DNS"), rows = { Setting.dnsRow(desktop), Setting.bindRow(desktop) } },
                     { title = _("超时"), rows = { Setting.timeoutRow(desktop) } },
+                    { title = _("Wi-Fi"), rows = { Setting.wifiRow(desktop) } },
                 }
             end,
         },
@@ -430,6 +431,25 @@ function Setting.timeoutRow(desktop)
                         desktop:updateView()
                     end,
                 }:show()
+            end,
+        })
+    end
+end
+
+--- 「休眠时关闭 Wi-Fi」开关。
+---@param desktop BookDesktop
+---@return fun(iw: number): table
+function Setting.wifiRow(desktop)
+    return function(iw)
+        local on = require("http.wifi").enabled()
+        return Row.widget({
+            width = iw, kind = "toggle", icon = "wifi_off",
+            title = _("休眠时关闭 Wi-Fi"),
+            subtitle = _("按电源键或自动休眠时替你关掉 Wi-Fi，省电"),
+            status = on and _("开") or _("关"), status_on = on,
+            callback = function()
+                require("http.wifi").setEnabled(not on)
+                desktop:updateView()
             end,
         })
     end

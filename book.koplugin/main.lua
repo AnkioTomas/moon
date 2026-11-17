@@ -106,13 +106,14 @@ local function init(self)
 end
 BookPlugin.init = Guard.wrap("init", init)
 
---- 休眠前：结清阅读状态，生成锁屏图，停远程服务，暂停后台任务；桌面在窗口栈上时自行收 Suspend。
+--- 休眠前：结清阅读状态，生成锁屏图，停远程服务，暂停后台任务，按设置关 Wi-Fi；桌面在窗口栈上时自行收 Suspend。
 function BookPlugin:onSuspend()
     logger.info("book lifecycle suspend")
     Wake.suspend()
     Wake.timed("tasks.onSuspend", Guard.call, "tasks.onSuspend", Tasks.onSuspend)
     Wake.timed("session.onSuspend", Guard.call, "session.onSuspend", Session.onSuspend, self)
     Wake.timed("hooks.onSuspend", Features.emit, "onSuspend", self)
+    Wake.timed("wifi.onSuspend", Guard.call, "wifi.onSuspend", require("http.wifi").onSuspend)
     logger.info("book lifecycle suspend done")
     logger.flush()
 end
