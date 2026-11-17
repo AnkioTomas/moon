@@ -57,6 +57,11 @@ end
 
 local ReaderMenu = {}
 function ReaderMenu:setUpdateItemTable()
+    if self.menu_items then
+        -- 模拟 MenuSorter：排序会摘走 KOMenu:menu_buttons，二次排序必崩
+        assert(self.menu_items["KOMenu:menu_buttons"], "menu_items 已被排序过")
+        self.menu_items["KOMenu:menu_buttons"] = nil
+    end
     self.tab_item_table = {
         { id = "navi", icon = "appbar.navigation" },
         { id = "setting", icon = "appbar.settings", { id = "status_bar" } },
@@ -113,6 +118,17 @@ TouchMenu.onCloseWidget({ tab_item_table = menu.tab_item_table })
 Assert.is_nil(tab._book_panel_editing)
 Assert.is_nil(menu.tab_item_table[2]._book_panel_editing)
 Assert.eq(native_closes, 1, "原生 onCloseWidget 照常执行")
+
+-- 物理键盘接入会把 tab_item_table 置 nil，第二次重建不能在已排序的 menu_items 上重排。
+local kb_menu = setmetatable({
+    ui = ui,
+    menu_items = { ["KOMenu:menu_buttons"] = {}, setting = { icon = "appbar.settings" } },
+}, { __index = ReaderMenu })
+kb_menu:setUpdateItemTable()
+kb_menu.tab_item_table = nil
+kb_menu:setUpdateItemTable()
+Assert.len(kb_menu.tab_item_table, 4)
+Assert.eq(kb_menu.menu_items.setting.icon, "appbar.settings")
 
 local first_menu_patch = ReaderMenu.setUpdateItemTable
 Native.onCreate(ui, { reader = true })

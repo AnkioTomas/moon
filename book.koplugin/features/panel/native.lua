@@ -465,6 +465,34 @@ local function patchDrawerTab(menu)
     end
 end
 
+--- KOReader 的 MenuSorter 会就地吃掉 menu_items（摘走 KOMenu:menu_buttons、改写顶层项），
+--- 但插入物理键盘（翻页器、蓝牙键盘）会把 tab_item_table 置 nil 触发第二次 setUpdateItemTable，
+--- 在已排序的表上重排必崩。每次重建前还原成第一次排序前的样子。
+---@param menu table FileManagerMenu | ReaderMenu
+local function copyItems(items)
+    local copy = {}
+    for key, value in pairs(items) do
+        local item = value
+        if type(value) == "table" then
+            item = {}
+            for k, v in pairs(value) do item[k] = v end
+        end
+        copy[key] = item
+    end
+    return copy
+end
+
+local function resetMenuItems(menu)
+    local items = menu.menu_items
+    if items and items["KOMenu:menu_buttons"] then
+        menu._book_menu_base = copyItems(items)
+        return
+    end
+    local fresh = copyItems(menu._book_menu_base or {})
+    fresh["KOMenu:menu_buttons"] = {}
+    menu.menu_items = fresh
+end
+
 --- 一次性 patch 文件管理器菜单，注入桌面面板 Tab。
 local function installFileManagerMenu()
     local FMMenu = require("apps/filemanager/filemanagermenu")
@@ -472,6 +500,7 @@ local function installFileManagerMenu()
     FMMenu._book_desktop_panel_patched = true
     local original = FMMenu.setUpdateItemTable
     FMMenu.setUpdateItemTable = function(self, ...)
+        resetMenuItems(self)
         original(self, ...)
         injectDesktopTab(self)
         patchDrawerTab(self)
@@ -503,6 +532,7 @@ local function installReaderMenu()
     end
     local original = ReaderMenu.setUpdateItemTable
     ReaderMenu.setUpdateItemTable = function(self, ...)
+        resetMenuItems(self)
         original(self, ...)
         NativeSettings.inject(self)
         injectDesktopTab(self)
