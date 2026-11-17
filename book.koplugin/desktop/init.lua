@@ -30,6 +30,7 @@ local Geom = require("ui/geometry")
 local InputContainer = require("ui/widget/container/inputcontainer")
 local Gesture = require("desktop.gesture")
 local Sync = require("desktop.sync")
+local TabIcons = require("desktop.tab_icons")
 local Guard = require("ui.guard")
 local Input = require("ui.input")
 local MoonSettings = require("utils.settings")
@@ -167,6 +168,9 @@ local function desktopTabs()
         end
     end
     tabs[#tabs + 1] = { id = "settings", text = _("设置"), icon = "settings" }
+    for _idx, tab in ipairs(tabs) do
+        tab.icon_file = TabIcons.file(tab.id)
+    end
     return tabs, room
 end
 
@@ -224,6 +228,11 @@ local function tabbar(self)
         width = self.dimen.w,
         tabs = self._tabs,
         active = self.tab,
+        on_hold = function(id)
+            for _idx, t in ipairs(self._tabs) do
+                if t.id == id then TabIcons.menu(self, t) end
+            end
+        end,
         on_tab = function(id, rect)
             local cell
             for _idx, t in ipairs(self._tabs) do

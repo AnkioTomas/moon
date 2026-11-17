@@ -12,7 +12,7 @@ Kit.sections.store = {}
 Kit.sections.extensions = {}
 Kit.sections.subscribe = {}
 Kit.sections.clock = { ntp_auto = false }
-Kit.sections.desktop = {}
+Kit.sections.desktop = { tab_icons = {} }
 
 local Widget = require("ui/widget/widget")
 

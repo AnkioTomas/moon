@@ -66,7 +66,7 @@ Assert.eq(type(cfg.hidden_pages), "table", "读路径写回空表")
 Assert.eq(type(cfg.hidden_cards), "table")
 
 -- 统计页总开关只控制桌面入口，不改各页和卡片的显隐配置。
-Kit.sections.desktop = {}
+Kit.sections.desktop = { tab_icons = {} }
 package.preload["ui.themes.widgets.row"] = function()
     return { widget = function(opts) return opts end }
 end

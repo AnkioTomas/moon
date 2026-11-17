@@ -13,6 +13,8 @@ return {
         -- 启动项为月读时，顶部菜单的抽屉（文件浏览器）图标直接回月读桌面。
         drawer_opens_desktop = true,
         insight_enabled = true,
+        -- 底栏内置页签的自定义图标：页签 id → 图片路径（desktop/tab_icons.lua）。
+        tab_icons = {},
         -- 有键设备上用物理翻页键（侧键 / 音量键）翻桌面当前页签；关掉后按键交给文件管理器。
         page_keys = true,
         library_sort = "recent_added",
