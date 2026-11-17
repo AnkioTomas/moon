@@ -18,7 +18,7 @@ package.preload["ui.themes"] = function()
     }
 end
 package.preload["ui.themes.widgets.text"] = function()
-    return { tint = function(widget) return widget end }
+    return { tint = function(widget) return widget end, optical = function(widget) return widget end }
 end
 package.preload["ui/geometry"] = function()
     return { new = function(_, opts) return opts end }

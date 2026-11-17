@@ -174,6 +174,7 @@ local TextWidget = Widget:extend{
     getSize = function(self)
         return geom{ w = math.min(#self.text * 5, self.max_width or math.huge), h = 10 }
     end,
+    getBaseline = function() return 8 end,
     setText = function(self, text) self.text = text end,
     free = function() end,
 }

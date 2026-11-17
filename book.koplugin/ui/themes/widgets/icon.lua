@@ -111,6 +111,7 @@ function Icon.label(opts)
         fgcolor = opts.text_color or color,
         max_width = opts.max_width,
     })
+    if not column then Text.optical(text) end
     group[1] = opts.trailing and text or icon
     group[2] = (column and VerticalSpan or HorizontalSpan):new{ width = opts.gap or Theme.px(4) }
     group[3] = opts.trailing and icon or text

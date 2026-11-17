@@ -63,7 +63,7 @@ package.preload["ui.themes"] = function()
                 font = { caption = 11 },
             }
         end,
-        face = function() return {} end,
+        face = function() return { size = 12 } end,
     }
 end
 package.preload["features.lockscreen.settings"] = function()

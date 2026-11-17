@@ -72,7 +72,7 @@ function Button:content(t, ink, max_w)
     if self.icon then
         return Icon.widget{ name = self.icon, size = icon_size, color = Theme.color(ink) }
     end
-    return Text.line(small and "caption" or "body", self.text, { width = max_w, color = ink })
+    return Text.line(small and "caption" or "body", self.text, { width = max_w, color = ink, optical = true })
 end
 
 --- 按钮缺省高度（物理像素）；工具条按它排版。

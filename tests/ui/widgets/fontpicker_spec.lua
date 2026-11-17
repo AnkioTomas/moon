@@ -20,7 +20,7 @@ package.preload["ui/font"] = function()
         -- 只数字体文件预览；主题文字 / 图标字体也走 getFace。
         getFace = function(_, id)
             if id:match("%.ttf$") then getface_n = getface_n + 1 end
-            return { id = id }
+            return { id = id, size = 12 }
         end,
     }
 end

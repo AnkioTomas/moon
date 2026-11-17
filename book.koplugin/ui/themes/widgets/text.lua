@@ -4,6 +4,7 @@
   Text.line("title", "书名", { width = w })          -- 单行，超宽截断
   Text.box("body", long_text, w, { align = "center" })  -- 多行自动换行
 
+opts.optical 把单行文字基线下移到视觉居中（放在垂直居中的容器里用）。
 opts.color 是颜色令牌；title / hero 默认强调色并加粗，opts.bold 可覆盖。
 
 @module koplugin.book.ui.themes.widgets.text
@@ -55,6 +56,17 @@ function Text.tint(widget)
             TextWidget.paintTo(self, tinted_canvas(bb), x, y)
         end
     end
+    return widget
+end
+
+--- 单行文字视觉居中：行盒按「上伸 + 下伸」算，汉字字身落在盒子偏上，
+--- 放进垂直居中的容器里整排看起来偏高。把基线下移到字身中心对齐盒子中心（盒子高度不变）。
+---@param widget table TextWidget
+---@return table
+function Text.optical(widget)
+    local baseline = widget:getBaseline()
+    local shift = math.floor(widget:getSize().h / 2 - (baseline - 0.38 * widget.face.size) + 0.5)
+    if shift > 0 then widget.forced_baseline = baseline + shift end
     return widget
 end
 
@@ -118,13 +130,14 @@ end
 function Text.line(role, text, opts)
     opts = opts or {}
     local theme = Theme.current()
-    return Text.tint(TextWidget:new{
+    local widget = Text.tint(TextWidget:new{
         text = text,
         face = opts.face or Text.face(role),
         bold = bold(opts, role),
         max_width = opts.width,
         fgcolor = Theme.color(opts.color or (BOLD[role] and theme.color.accent or theme.color.ink)),
     })
+    return opts.optical and Text.optical(widget) or widget
 end
 
 --- 多行文字；给 height 时超出部分可经 TextBoxWidget:scrollDown 翻页。
