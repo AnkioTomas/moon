@@ -1324,6 +1324,8 @@ return {
     ["分享"] = "Share",
     ["分享锁屏图"] = "Share lock screen",
     ["选择图片"] = "Choose image",
+    ["恢复默认图标"] = "Restore default icon",
+    ["无法读取这张图片"] = "Cannot read this image",
     ["选择文件夹"] = "Choose folder",
     ["正在生成票根…"] = "Generating ticket…",
     ["票根生成失败：%1"] = "Failed to generate ticket: %1",
