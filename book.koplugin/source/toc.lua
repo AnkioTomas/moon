@@ -128,7 +128,7 @@ function Toc.peek(source_id, stable_id)
     return hit and hit.list
 end
 
---- 子进程只解析 / 写临时文件；主进程每次接收 16 章，成功后原子发布。
+--- 子进程只解析 / 写临时文件；主进程每次接收 TocDB.PAGE 章，成功后原子发布。
 --- 不把整份大目录塞进 Job 的 JSON 管道，也不在子进程访问业务库。
 ---@param source_id string
 ---@param stable_id string
@@ -175,7 +175,7 @@ function Toc.parseAsync(source_id, stable_id, parse, cb, fetched_at)
             file, err = io.open(path, "rb")
             if not file then finish(nil, err); return end
             step = require("ui.guard").wrap("toc receive", function()
-                for _idx = 1, 16 do
+                for _idx = 1, TocDB.PAGE do
                     local line, read_err = file:read("*l")
                     if read_err then finish(nil, read_err); return end
                     if not line then
@@ -249,7 +249,7 @@ function Toc.readAsync(source_id, stable_id, cb)
         local page = TocDB.readPage(source_id, stable_id, after)
         if not page then finish(nil, "toc read failed"); return end
         for _idx, chapter in ipairs(page) do list[#list + 1] = chapter end
-        if #page < 16 then
+        if #page < TocDB.PAGE then
             putCache(key, build(list, fetched_at))
             finish(list)
         else

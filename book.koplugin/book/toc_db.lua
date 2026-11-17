@@ -15,6 +15,8 @@ local DB = require("utils.db")
 local logger = require("utils.log")
 
 local TocDB = {}
+--- 冷读 / 接收每批章数：太小则几千章要上千个 tick，开书头几十秒里目录仍是空的。
+TocDB.PAGE = 256
 local COLUMNS = { idx = true, uid = true, title = true, origin = true,
     words = true, vip = true, paid = true }
 
@@ -105,8 +107,8 @@ end
 --- 有界冷读，避免一次把上万条相似长字符串带回 Lua。
 function TocDB.readPage(source_id, stable_id, after)
     local rows, count = DB.query([[SELECT idx, uid, title, origin, words, vip, paid, extra
-        FROM toc_entries WHERE source_id=? AND stable_id=? AND idx>? ORDER BY idx LIMIT 16;]],
-        source_id, stable_id, after)
+        FROM toc_entries WHERE source_id=? AND stable_id=? AND idx>? ORDER BY idx LIMIT ?;]],
+        source_id, stable_id, after, TocDB.PAGE)
     return decodeRows(source_id, stable_id, rows, count)
 end
 

@@ -54,7 +54,7 @@ local BookDB = require("book.books_db")
 local TocDB = require("book.toc_db")
 local Toc = require("source.toc")
 local list = {}
-for i = 1, 40 do list[i] = { idx = i, uid = "u" .. i, title = "章节" .. i, origin = "/" .. i } end
+for i = 1, 600 do list[i] = { idx = i, uid = "u" .. i, title = "章节" .. i, origin = "/" .. i } end
 Assert.is_true(Toc.put("18ta", "native", list))
 Toc.clear()
 local result, reason, calls = nil, nil, 0
@@ -68,8 +68,8 @@ Assert.len(queue, 0)
 Assert.eq(calls, 0, "取消不交付半目录")
 Toc.readAsync("18ta", "native", done)
 while #queue > 0 do tick() end
-Assert.len(result, 40)
-Assert.eq(result[40].origin, "/40")
+Assert.len(result, 600)
+Assert.eq(result[600].origin, "/600")
 Assert.eq(calls, 1)
 Toc.clear()
 calls, result = 0, nil
@@ -93,9 +93,9 @@ Assert.not_nil(BookDB.getToc("18ta", "legacy"))
 tick()
 Assert.is_nil(TocDB.read("18ta", "legacy"), "解析完但接收未结束时不能发布半目录")
 while #queue > 0 do tick() end
-Assert.len(result, 40)
+Assert.len(result, 600)
 Assert.is_nil(BookDB.getToc("18ta", "legacy"))
-Assert.eq(result[40].uid, "u40")
+Assert.eq(result[600].uid, "u600")
 Assert.is_nil(io.open(transfer, "rb"), "交接文件用完即删")
 Assert.is_true(TocDB.update("18ta", "legacy", 1, "words", 1234))
 operation = Toc.parseAsync("18ta", "legacy", function() return list end, done)
