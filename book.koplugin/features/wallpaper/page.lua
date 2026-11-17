@@ -299,12 +299,17 @@ function Page.preview(width)
     local ImageWidget = require("ui/widget/imagewidget")
     local inner_w = math.max(1, width - 2)
     local inner_h = math.max(1, preview_h - 2)
+    -- 先按原尺寸载入取宽高，再等比缩进预览框。
+    local probe = ImageWidget:new{ file = path, file_do_cache = false }
+    probe:getSize() -- 解码在这里才发生，之后才有原始宽高
+    local scale = math.min(inner_w / probe:getOriginalWidth(), inner_h / probe:getOriginalHeight())
+    probe:free()
     return Overlay.previewBox(width, CenterContainer:new{
         dimen = Geom:new{ w = inner_w, h = inner_h },
+        -- 不给 width/height：否则控件是整框，夜间模式整框反色，两侧留白变成白条。
         ImageWidget:new{
             file = path,
-            width = inner_w,
-            height = inner_h,
+            scale_factor = scale,
             -- 同一路径可能被换掉（自定义图被覆盖），按路径命中会一直显示旧图。
             file_do_cache = false,
         },
