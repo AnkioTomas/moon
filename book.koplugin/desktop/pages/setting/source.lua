@@ -98,10 +98,17 @@ function Source.pickEnabled(desktop)
             mandatory = meta.id == active and _("当前") or nil,
         }
     end
+    -- 已启用的排前面（稳定排序）；打开后点选不重排，免得勾选的行跳走。
+    for pos, item in ipairs(items) do item.pos = pos end
+    table.sort(items, function(a, b)
+        if a.checked ~= b.checked then return a.checked end
+        return a.pos < b.pos
+    end)
     List:new{
         title = _("启用的书源"),
         subtitle = _("点按切换；当前书源不能关闭"),
         multi = true,
+        columns = 2,
         items = items,
         on_toggle = function(id, checked)
             local ok, err = SourceRegistry.setEnabled(id, checked)
