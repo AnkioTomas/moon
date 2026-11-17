@@ -70,7 +70,7 @@ end
 ---@param raw string|nil
 ---@param err any
 ---@param cred IReadCredential 发请求时用的凭据
----@return any|nil data, string|nil err
+---@return any|nil data, string|nil err, table|nil wire 整包（分页接口的 total / hasMore 在 data 外面）
 function Client.decode(raw, err, cred)
     if err then return nil, tostring(err) end
     if not raw then return nil, _("请求失败") end
@@ -78,7 +78,7 @@ function Client.decode(raw, err, cred)
     if not ok or type(wire) ~= "table" then return nil, _("响应无效") end
     local code = tonumber(wire.code)
     if code == 200 then
-        return wire.data == nil and {} or wire.data
+        return wire.data == nil and {} or wire.data, nil, wire
     end
     if (code == 401 or code == 403) and (cred.token or cred.cookie) and isCurrent(cred) then
         return nil, require("source.auth").expire(SOURCE_ID, _("请按这个做：\n1. 点这个提示上的「重新登录」。没有按钮就打开「设置 → 书库 → 账号 → iRead → iRead 账号」。\n2. 用电脑浏览器打开 https://iread.ankio.net/#/system/token ，登录你的账号。\n3. 在页面上新建一个个人 Token，复制它。\n4. 回到月读的输入框，把 Token 贴进去，点「登录」。\n\n如果平时用的是浏览器扩展，不要新建 Token，改做下面这些：\n")
@@ -91,7 +91,7 @@ end
 ---@param form table<string, any>
 ---@param cred IReadCredential
 ---@param ratio number 超时倍率
----@param cb fun(data: any|nil, err: string|nil, res: table|nil)
+---@param cb fun(data: any|nil, err: string|nil, res: table|nil, wire: table|nil)
 ---@param session string|nil 服务端会话 Cookie（搜索结果存在会话里，轮询必须带回）
 ---@return { cancel: fun() }
 local function post(path, form, cred, ratio, cb, session)
@@ -104,8 +104,8 @@ local function post(path, form, cred, ratio, cb, session)
         content_type = "application/x-www-form-urlencoded",
         timeout = require("http.timeout").net(ratio),
     }, function(raw, err, res)
-        local data, decode_err = Client.decode(raw, err, cred)
-        cb(data, decode_err, res)
+        local data, decode_err, wire = Client.decode(raw, err, cred)
+        cb(data, decode_err, res, wire)
     end)
 end
 
@@ -118,9 +118,9 @@ end
 ---@return { cancel: fun() }
 local function call(path, form, ratio, cb, session)
     local cred = Client.credential() or {}
-    return post(path, form, cred, ratio, function(data, err, res)
+    return post(path, form, cred, ratio, function(data, err, res, wire)
         if not isCurrent(cred) then cb(nil, _("登录状态已变化，请重试")); return end
-        cb(data, err, res)
+        cb(data, err, res, wire)
     end, session)
 end
 
@@ -183,16 +183,27 @@ function Client.shelfAsync(cb)
     end }
 end
 
---- 目录：章节对象数组，顺序即阅读顺序。
+--- 目录：章节对象数组，顺序即阅读顺序。服务端分页（每页最多 200），翻到 hasMore 为假。
 ---@param row table 书架行（必须含 id 字段）
 ---@param cb fun(rows: table[]|nil, err: string|nil)
 ---@return { cancel: fun() }
 function Client.chaptersAsync(row, cb)
-    return call("/book/chapters", { id = row.id }, 1, function(data, err)
-        if not validRows(data, "title") then cb(nil, err or _("响应无效")); return end
-        if #data == 0 then cb(nil, _("iRead 目录为空")); return end
-        cb(data)
-    end)
+    local all, job, cancelled = {}, nil, false
+    local function page(n)
+        job = call("/book/chapters", { id = row.id, page = n, pageSize = 200 }, 1, function(data, err, _res, wire)
+            if cancelled then return end
+            if not validRows(data, "title") then cb(nil, err or _("响应无效")); return end
+            for _idx, chapter in ipairs(data) do all[#all + 1] = chapter end
+            if #data > 0 and wire and wire.hasMore then page(n + 1); return end
+            if #all == 0 then cb(nil, _("iRead 目录为空")); return end
+            cb(all)
+        end)
+    end
+    page(1)
+    return { cancel = function()
+        cancelled = true
+        if job then job.cancel() end
+    end }
 end
 
 --- 一章正文（纯文本）。index 是 0 基章序号。

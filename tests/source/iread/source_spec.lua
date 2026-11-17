@@ -18,7 +18,7 @@ package.loaded["utils.paths"] = setmetatable({ dbPath = function() return path e
 local BookDB = require("book.books_db")
 local Store = require("book.store")
 local Base = require("source.base")
-local row = { name = "测试书", bookUrl = "https://example.test/book", sourceId = 7, variable = { key = "value" } }
+local row = { id = 9, name = "测试书", bookUrl = "https://example.test/book", sourceId = 7, variable = { key = "value" } }
 local requests, shelf_replies = {}, {}
 local function pending(kind, cb, data)
     local request = { kind = kind, cb = cb, data = data }

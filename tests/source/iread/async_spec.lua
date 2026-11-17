@@ -225,3 +225,13 @@ Client.saveProgressAsync({ id = 1, name = "书" }, { index = 2, offset = 0 }, do
 Assert.is_nil(result)
 Assert.eq(reason, "iRead 阅读进度更新未生效")
 Assert.eq(calls, 1)
+
+reset()
+Client.chaptersAsync({ id = 7, name = "书" }, done)
+Assert.matches(requests[1].body, "page=1")
+requests[1].cb('{"code":200,"data":[{"title":"一","index":0}],"hasMore":true}')
+Assert.len(requests, 2, "hasMore 为真要继续翻页")
+Assert.matches(requests[2].body, "page=2")
+requests[2].cb('{"code":200,"data":[{"title":"二","index":1}],"hasMore":false}')
+Assert.len(result, 2, "目录要拼全所有页")
+Assert.eq(result[2].title, "二")

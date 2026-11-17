@@ -251,7 +251,8 @@ end
 ---@return { cancel: fun() }
 function Source:withRow(identity, fresh, cb, fn)
     local cached = not fresh and cachedRow(self, identity.stable_id)
-    if cached then return fn(cached) or SourceBase.defer(function() end) end
+    -- 搜索命中尚未入库时 id 为 0，服务端按「请传入书库id」拒绝，必须回书架取真实行
+    if cached and (tonumber(cached.id) or 0) > 0 then return fn(cached) or SourceBase.defer(function() end) end
     local cancelled, job, pending = false, nil, true
     local first = self:fetchShelf(function(rows, err)
         pending = false
