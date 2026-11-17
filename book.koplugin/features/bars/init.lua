@@ -102,6 +102,8 @@ function Bars.setSystemTop(ui, enabled)
     end
     local doc = ui.document
     local config = doc.configurable
+    -- 顶栏透明时不用 CRE 原生页眉（它画进页面位图，没法透明），占位改由顶部页边距预留。
+    enabled = enabled and not Layout.transparent("top")
     local next_val = enabled and 0 or 1
     local height_ok = not enabled
         or (type(doc.getHeaderHeight) == "function" and doc:getHeaderHeight() > 0)
@@ -201,7 +203,7 @@ function Bars.injectStatusLine(doc_settings, document)
     if not Device:isTouchDevice() or type(document.setStatusLineProp) ~= "function" then
         return
     end
-    doc_settings:saveSetting("copt_status_line", Bars.topBarPreference() and 0 or 1)
+    doc_settings:saveSetting("copt_status_line", Bars.topBarPreference() and not Layout.transparent("top") and 0 or 1)
     Bars.hookTopMargin(document)
     document._book_bars_top_reserve = Bars.topReserve()
 end
@@ -224,7 +226,8 @@ end
 ---@return number
 function Bars.topReserve()
     if Bars.topBarPreference() and Layout.replace("top") then
-        return Screen:scaleBySize(Layout.topMargin())
+        local native = Layout.transparent("top") and Layout.TRANSPARENT_TOP_HEIGHT or 0
+        return Screen:scaleBySize(Layout.topMargin() + native)
     end
     return 0
 end
@@ -290,6 +293,9 @@ function Bars.topVisible(ui)
     if not ui.document or not ui.rolling then
         return false
     end
+    if Layout.transparent("top") then
+        return Bars.topBarPreference()
+    end
     return ui.document:getHeaderHeight() > 0
 end
 
@@ -321,7 +327,8 @@ end
 ---@return number header_h
 ---@return table rect
 local function topRect(ui, x, y)
-    local header_h = ui.document:getHeaderHeight()
+    local header_h = Layout.transparent("top") and Screen:scaleBySize(Layout.TRANSPARENT_TOP_HEIGHT)
+        or ui.document:getHeaderHeight()
     -- ReaderView.state.offset 属于文档可视区，不是状态栏几何，不能混进来。
     return header_h, Geom:new{
         x = x,
@@ -438,6 +445,14 @@ local function hijackFooter(ui)
     -- 原生方法照常调用，只把月读自己的判断经 guard：出错时按「月读没画底栏」退回原生行为。
     local function ours(self)
         return Guard.call("bars footer", drawn, self.ui, "bottom")
+    end
+    -- 底栏透明：原生栏仍占高度，但不画，免得字透出来叠在月读栏下面。
+    local orig_paint = footer.paintTo
+    footer.paintTo = function(self, bb, x, y)
+        if Layout.transparent("bottom") and ours(self) then
+            return
+        end
+        return orig_paint(self, bb, x, y)
     end
     local orig_tap = footer.TapFooter
     footer.TapFooter = function(self, ges)
@@ -595,7 +610,7 @@ local function paint(self, bb, x, y)
 
     if top then
         local header_h, rect = topRect(ui, x, y)
-        bb:paintRect(rect.x, rect.y, rect.w, rect.h, bg)
+        if not Layout.transparent("top") then bb:paintRect(rect.x, rect.y, rect.w, rect.h, bg) end
         if Layout.divider("top") then
             bb:paintRect(rect.x, rect.y + rect.h - 1, rect.w, 1, Blitbuffer.COLOR_BLACK)
         end
@@ -619,7 +634,7 @@ local function paint(self, bb, x, y)
     local rect = bottom and bottomRect(ui, x, y)
     if rect then
         local footer = ui.view.footer
-        bb:paintRect(rect.x, rect.y, rect.w, rect.h, bg)
+        if not Layout.transparent("bottom") then bb:paintRect(rect.x, rect.y, rect.w, rect.h, bg) end
         if Layout.divider("bottom") then
             bb:paintRect(rect.x, rect.y, rect.w, 1, Blitbuffer.COLOR_BLACK)
         end
@@ -673,7 +688,9 @@ Bars.events = {
     NetworkConnected = onDeviceStateChanged,
     NetworkDisconnected = onDeviceStateChanged,
     --- 用户经原生入口（Aa 菜单）开关顶栏时回写偏好；0 = 显示。
+    -- 替代系统顶栏时原生页眉恒关（status_line=1 是月读自己设的），不能当成用户关了顶栏。
     SetStatusLine = function(_plugin, status_line)
+        if Layout.transparent("top") then return end
         savePreference("book_reader_top_bar", status_line == 0)
     end,
     CloseDocument = function(_plugin)

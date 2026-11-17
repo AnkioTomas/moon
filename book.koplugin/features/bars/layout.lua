@@ -252,6 +252,16 @@ Layout.FONT_MIN, Layout.FONT_MAX, Layout.FONT_DEFAULT = 8, 36, 14
 Layout.TOP_HEIGHT_MIN, Layout.TOP_HEIGHT_MAX, Layout.TOP_HEIGHT_DEFAULT = 0, 60, 12
 --- 顶栏 / 底栏 / 预览共用的水平留白（未缩放），不跟书籍页边距或 ReaderFooter 进度条边距变化。
 Layout.BAR_HORIZONTAL_PADDING = 12
+
+--- 月读栏替代系统栏时背景一律透明（不铺底色，露出页面背景 / 纹理）。
+---@param which string "top"|"bottom"
+---@return boolean
+function Layout.transparent(which)
+    return Layout.replace(which) == true
+end
+
+--- 顶栏透明时不再用 CRE 原生页眉，占位高度由月读自己留（未缩放像素）。
+Layout.TRANSPARENT_TOP_HEIGHT = 20
 --- 进度条粗细（未缩放像素）。未设置时绘制走主题高度；设置页用 Spin，与字号 / 高度同一套缩放。
 Layout.BAR_THICKNESS_MIN, Layout.BAR_THICKNESS_MAX = 1, 24
 --- 双栏时信息行与进度条之间的间隙（未缩放）。

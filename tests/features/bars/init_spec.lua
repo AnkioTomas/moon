@@ -44,10 +44,13 @@ end
 
 local layouts = { top = {}, bottom = {} }
 local replace = { top = true, bottom = true }
+local transparent = { top = false, bottom = false }
 local bottom_content_h = 14
 package.preload["features.bars.layout"] = function()
     return {
         replace = function(which) return replace[which] end,
+        transparent = function(which) return transparent[which] end,
+        TRANSPARENT_TOP_HEIGHT = 20,
         get = function(which) return layouts[which] end,
         setReplace = function() end,
         percentDecimals = function() return false end,
@@ -143,6 +146,9 @@ Assert.is_true(Bars.bottomVisible(ui_top))
 
 ui_top.document.getHeaderHeight = function() return 0 end
 Assert.is_false(Bars.topVisible(ui_top))
+transparent.top = true
+Assert.is_true(Bars.topVisible(ui_top), "顶栏透明时不依赖 CRE 页眉高度")
+transparent.top = false
 
 ui_top.document.getHeaderHeight = function() return 28 end
 ui_top.view.view_mode = "scroll"
@@ -332,6 +338,10 @@ Assert.is_nil(Bars.events.SetStatusLine(nil, 1))
 Assert.is_false(Bars.topBarPreference())
 Bars.events.SetStatusLine(nil, 0)
 Assert.is_true(Bars.topBarPreference())
+transparent.top = true
+Bars.events.SetStatusLine(nil, 1)
+Assert.is_true(Bars.topBarPreference(), "替代顶栏时自发的 status_line=1 不算用户关顶栏")
+transparent.top = false
 
 -- 设备状态事件：只刷含动态组件、且由月读画的栏
 local plugin = { ui = ui_top }
