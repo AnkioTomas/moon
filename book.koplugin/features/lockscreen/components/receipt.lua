@@ -14,6 +14,7 @@ local _ = require("gettext")
 
 local M = {
     id = "receipt",
+    realtime = true, -- 内容随阅读状态变，锁屏瞬间现生成
     label = _("阅读票根"),
     supports_narrow = false,
     supports_position = false,

@@ -14,6 +14,7 @@ local _ = require("gettext")
 
 local M = {
     id = "current",
+    realtime = true, -- 内容随阅读状态变，锁屏瞬间现生成
     label = _("当前阅读"),
     -- 面板高度以书卡内容为准；这里只给布局层一个偏紧的上限，避免白卡上下留白。
     preferred_height = 0.20,

@@ -1,9 +1,9 @@
 --[[--
 锁屏组合图生命周期：生成、接管和宿主事件。
 
-KOReader 先 Screensaver:setup/show 再广播 Suspend。电源键路径上绝不同步解码/写 PNG：
-缓存命中或已有旧 compose.png 只接管路径；重建留给唤醒 / 桌面回到前台 / 设置变更 / 联网后的异步刷新。
-低端 Kindle 上同步整屏合成会卡死数秒。
+KOReader 先 Screensaver:setup/show 再广播 Suspend。电源键路径上默认不同步合成（低端 Kindle 会卡数秒）：
+缓存命中或已有旧 compose.png 只接管路径，重建留给唤醒 / 桌面回到前台 / 设置变更 / 联网后的异步刷新。
+例外：主体标了 `realtime`（内容随阅读状态变，如阅读小票）或从未生成过时，锁屏那一刻同步生成。
 
 @module koplugin.book.features.lockscreen
 --]]
@@ -87,22 +87,37 @@ function M.running()
     return job ~= nil
 end
 
---- 休眠前只接管路径，绝不 Compose.build。命中缓存用新键；miss 时有旧图就顶上（过期也行）。
---- 连旧图都没有：撤下半接管，还原用户原 screensaver，避免 document_cover 指向空文件冻住阅读页。
+--- 休眠前接管路径。命中缓存用新键；实时主体（阅读小票等）和从未生成过的锁屏在这一刻同步生成，
+--- 背景没就绪（要等下载）时退回旧图；连旧图都没有：撤下半接管，还原用户原 screensaver，
+--- 避免 document_cover 指向空文件冻住阅读页。其余主体 miss 时旧图顶上，重建留给唤醒后的异步刷新。
 local function prepareSuspend()
     if not Settings.isCompose() then
         logger.dbg("book.lockscreen suspend skipped", "mode_disabled")
         return
     end
     local plan = Compose.plan()
-    local transparent = MoonSettings.get("features.lockscreen").lock_screen_transparent
+    local c = MoonSettings.get("features.lockscreen")
     if Compose.cacheValid(plan) then
-        Settings.applyCover(plan.output_path, transparent)
+        Settings.applyCover(plan.output_path, c.lock_screen_transparent)
         logger.dbg("book.lockscreen suspend", "cache_hit", plan.output_path)
         return
     end
-    if (lfs.attributes(plan.output_path, "size") or 0) > 0 then
-        Settings.applyCover(plan.output_path, transparent)
+    local has_cover = (lfs.attributes(plan.output_path, "size") or 0) > 0
+    if plan.component.realtime or not has_cover then
+        local started_at = Perf.now()
+        local ok, transparent = Compose.buildNow(plan)
+        if ok then
+            c.lock_screen_day = Compose.dayKey(plan)
+            c.lock_screen_transparent = transparent or nil
+            MoonSettings.save("features.lockscreen")
+            Settings.applyCover(plan.output_path, transparent)
+            logger.dbg("book.lockscreen suspend", "built_now", Perf.elapsedMs(started_at), "ms")
+            return
+        end
+        has_cover = (lfs.attributes(plan.output_path, "size") or 0) > 0
+    end
+    if has_cover then
+        Settings.applyCover(plan.output_path, c.lock_screen_transparent)
         logger.dbg("book.lockscreen suspend", "stale_cover", plan.output_path)
         return
     end

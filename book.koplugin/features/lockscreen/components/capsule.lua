@@ -10,6 +10,7 @@ local _ = require("gettext")
 
 local M = {
     id = "capsule",
+    realtime = true, -- 内容随阅读状态变，锁屏瞬间现生成
     label = _("胶囊卡片"),
     supports_position = false,
     full_screen = true,

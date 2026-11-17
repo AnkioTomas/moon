@@ -135,6 +135,36 @@ local function buildBlocks(component, position, wide)
     return component.blocks(rect)
 end
 
+--- 背景图路径 + 主体块；要碰 UI 控件，只能在主进程调。
+---@param plan table
+---@param path string|nil
+---@return table bg, table[] blocks
+local function layers(plan, path)
+    local sw, sh = Layout.portraitSize()
+    local backdrop = plan.asset.blocks and plan.asset.blocks({ x = 0, y = 0, w = sw, h = sh, pad = 0 })
+    local blocks = buildBlocks(plan.component, plan.position, plan.wide)
+    return { path = path, contain = plan.asset.contain, blocks = backdrop }, blocks
+end
+
+--- 锁屏瞬间同步合成：只在背景已就绪（本地 / 在线图已落盘）时做，不等下载。
+--- 会阻塞主线程数秒，只给实时主体和从未生成过的锁屏用。
+---@param plan table
+---@return boolean ok, boolean|nil transparent
+function M.buildNow(plan)
+    local path, failed
+    local pending = Background.ensure(plan.asset, function(p, err)
+        path, failed = p, err
+    end)
+    if pending then
+        pending:cancel()
+        return false
+    end
+    if failed or (path == nil and plan.asset.endpoint) then return false end
+    local bg, blocks = layers(plan, path)
+    local ok, _err, transparent = require("features.lockscreen.render").write(COMPOSE_PATH, bg, blocks)
+    return ok == true, transparent
+end
+
 --- 背景就绪后合成。
 --- 建块仍在主进程下一拍（要碰 UI 控件）；写 PNG 走 workers.job（heavy）：
 --- 低端 Kindle 整屏解码 + 画块 + 编码数秒，不能堵 UI 循环。
@@ -151,10 +181,7 @@ function M.build(plan, cb)
         if err then return cb(false, err) end
         UIManager:nextTick(function()
             if cancelled then return end
-            local sw, sh = Layout.portraitSize()
-            local backdrop = plan.asset.blocks and plan.asset.blocks({ x = 0, y = 0, w = sw, h = sh, pad = 0 })
-            local blocks = buildBlocks(plan.component, plan.position, plan.wide)
-            local bg = { path = path, contain = plan.asset.contain, blocks = backdrop }
+            local bg, blocks = layers(plan, path)
             write_job = require("workers.job").run(function()
                 local ok, render_err, transparent = require("features.lockscreen.render").write(
                     COMPOSE_PATH, bg, blocks)

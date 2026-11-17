@@ -16,6 +16,7 @@ local T = require("ffi/util").template
 
 local M = {
     id = "stats",
+    realtime = true, -- 内容随阅读状态变，锁屏瞬间现生成
     label = _("阅读统计"),
     supports_narrow = false,
     preferred_height = 0.88,

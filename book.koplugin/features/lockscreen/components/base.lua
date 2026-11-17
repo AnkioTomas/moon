@@ -74,6 +74,7 @@ local function externalComponents()
                         min_height = raw.min_height,
                         layout = raw.layout,
                         full_screen = raw.full_screen,
+                        realtime = raw.realtime,
                         needs_network = raw.needs_network,
                         cache_key = type(raw.cache_key) == "function" and function()
                             return External.try(id .. " cache_key", raw.cache_key)

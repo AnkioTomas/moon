@@ -58,6 +58,7 @@ end
 local PNG8 = "\137PNG\r\n\26\n" .. string.rep("\0", 24)
 local last_download = {}
 local render_writes = 0
+local render_ok = true
 local cover_a = "/tmp/moon-lockscreen-cover-a.png"
 local cover_b = "/tmp/moon-lockscreen-cover-b.png"
 local current_cover = cover_a
@@ -155,6 +156,7 @@ package.preload["features.lockscreen.render"] = function()
         measureText = function() return 40 end,
         write = function(path)
             render_writes = render_writes + 1
+            if not render_ok then return false, "boom" end
             local f = assert(io.open(path, "wb"))
             f:write(PNG8)
             f:close()
@@ -352,8 +354,8 @@ local ok_run, err_run = pcall(function()
     Assert.is_true(refreshed)
     Assert.is_true(render_writes > 0)
 
-    -- 电源键路径绝不同步合成：有图就接管路径；内容变了也不在 setup 里重画（留给 desktop.activated）。
-    -- 关机 / 重启画面不碰锁屏图。
+    -- 电源键路径默认不同步合成：有图就接管路径；内容变了也不在 setup 里重画（留给 desktop.activated）。
+    -- 例外：实时主体在锁屏瞬间现生成、从未生成过也现生成。关机 / 重启画面不碰锁屏图。
     render_writes = 0
     current_cover = cover_a
     LockScreen.onCreate()
@@ -375,11 +377,32 @@ local ok_run, err_run = pcall(function()
     Assert.eq(setup_seen[4].event, "poweroff")
     Assert.eq(setup_seen[4].writes, 0, "关机画面不生成锁屏图")
 
+    -- 实时主体：缓存过期时锁屏瞬间同步重画，结果立即接管。
+    local none = require("features.lockscreen.components.base").find("none")
+    none.realtime = true
+    local before = render_writes
+    MoonSettings.get("features.lockscreen").lock_screen_day = nil
+    Screensaver:setup()
+    Assert.eq(setup_seen[#setup_seen].writes, before + 1, "实时主体锁屏瞬间生成")
+    Assert.eq(saved.screensaver_document_cover, compose_path)
+    Screensaver:setup()
+    Assert.eq(setup_seen[#setup_seen].writes, before + 1, "刚生成的缓存命中，不重复画")
+    none.realtime = nil
+
+    -- 从未生成过（没图）：锁屏瞬间生成并接管。
+    pcall(os.remove, compose_path)
+    MoonSettings.get("features.lockscreen").lock_screen_day = nil
+    before = render_writes
+    Screensaver:setup()
+    Assert.eq(setup_seen[#setup_seen].writes, before + 1, "没图时锁屏瞬间生成")
+    Assert.eq(saved.screensaver_document_cover, compose_path)
+
     -- 没图：电源键路径撤下半接管，还原用户原 screensaver，避免冻住阅读页。
     pcall(os.remove, compose_path)
     saved.screensaver_type = "document_cover"
     saved.screensaver_document_cover = compose_path
     saved.screensaver_show_message = false
+    render_ok = false
     -- 先有一次成功接管留下的快照；clearCover 靠它还原。
     saved.book_lockscreen_previous_screensaver = {
         screensaver_type = { present = true, value = "cover" },
@@ -393,6 +416,7 @@ local ok_run, err_run = pcall(function()
     Assert.eq(saved.screensaver_document_cover, "/old/cover.png")
     Assert.is_true(saved.screensaver_show_message)
     Assert.matches(table.concat(logs, "\n"), "book%.lockscreen suspend no_cover")
+    render_ok = true
 
     -- 在飞生成期间改配置：旧任务作废，新请求必须重开，不能被 already_running 吞掉。
     local Background = require("features.lockscreen.background")

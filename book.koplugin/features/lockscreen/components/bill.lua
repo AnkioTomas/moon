@@ -14,6 +14,7 @@ local T = require("ffi/util").template
 
 local M = {
     id = "bill",
+    realtime = true, -- 内容随阅读状态变，锁屏瞬间现生成
     label = _("阅读账单"),
     supports_narrow = false,
     supports_position = false,
