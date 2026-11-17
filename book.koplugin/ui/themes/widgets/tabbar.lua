@@ -15,6 +15,7 @@ opts.plain：壁纸透底时用，未选中格的图标文字用主文字色而�
 opts.show_labels：false 时只显示图标；高度与触摸区不变。
 
 未选中格：页面底色 + faint 文字；点当前格不回调，但照样吞掉点按（不漏给下层手势）。
+on_hold(id)：长按格子。
 on_tab(id, rect) 的 rect 是被点格子的屏幕矩形，可作弹层锚点。
 
 @module koplugin.book.ui.themes.widgets.tabbar
@@ -59,10 +60,12 @@ function Tabbar.widget(opts)
         local ink = active and sel.ink or inactive_ink
         local label = opts.show_labels == false and Icon.widget{
             name = tab.icon,
+            file = tab.icon_file,
             size = t.control.icon,
             color = Theme.color(ink),
         } or Icon.label{
             name = tab.icon,
+            file = tab.icon_file,
             text = tab.text,
             direction = "column",
             size = t.control.icon,
@@ -95,6 +98,8 @@ function Tabbar.widget(opts)
         local tap
         tap = Tap.wrap(cell, opts.on_tab and function()
             if not active then opts.on_tab(tab.id, tap.dimen) end
+        end or nil, opts.on_hold and function()
+            opts.on_hold(tab.id)
         end or nil)
         row[#row + 1] = tap
     end

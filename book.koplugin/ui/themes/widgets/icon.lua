@@ -7,7 +7,7 @@
   +----+                 +----------+           |文案|
                                                 +----+
 
-  Icon.widget{ name = "home", size = 24, color = c }
+  Icon.widget{ name = "home", size = 24, color = c }   -- file = 图片路径时画图片代替字形（保比例缩进方盒）
   Icon.label{ name = "home", text = "首页", direction = "row"|"column",
               size = 24, color = c, text_color = c, face = "cfont", font_size = 14, gap = px, max_width = px,
               trailing = bool }  -- trailing：图标在文案后（下拉箭头）
@@ -72,6 +72,16 @@ end
 ---@return table|nil
 function Icon.widget(opts)
     opts = opts or {}
+    if opts.file then
+        local box = Theme.px(opts.size)
+        return CenterContainer:new{
+            dimen = Geom:new{ w = box, h = box },
+            require("ui/widget/imagewidget"):new{
+                file = opts.file, width = box, height = box, scale_factor = 0, alpha = true,
+                original_in_nightmode = true,
+            },
+        }
+    end
     if type(opts.name) ~= "string" or opts.name == "" then return nil end
     local face = Icon.face(Theme.fontSize(opts.size))
     local glyph = Text.tint(TextWidget:new{
@@ -94,7 +104,7 @@ function Icon.label(opts)
     local color = opts.color or Theme.color(Theme.current().color.accent)
     local column = opts.direction == "column"
     local group = (column and VerticalGroup or HorizontalGroup):new{ align = "center" }
-    local icon = Icon.widget{ name = opts.name, size = opts.size, color = color }
+    local icon = Icon.widget{ name = opts.name, file = opts.file, size = opts.size, color = color }
     local text = Text.tint(TextWidget:new{
         text = opts.text,
         face = Theme.face(opts.face or "xx_smallinfofont", opts.font_size or 12),
