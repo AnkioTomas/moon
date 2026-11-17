@@ -493,6 +493,35 @@ local function resetMenuItems(menu)
     menu.menu_items = fresh
 end
 
+--- MenuSorter 给没有 sorting_hint 的游离项拼 "NEW: " .. text，text 是函数的第三方菜单项会让整个
+--- 菜单（连带下拉面板）崩掉。KOReader 约定动态文字走 text_func，这里在排序前纠正。
+---@param items table menu_items
+local function fixFunctionText(items)
+    for _key, item in pairs(items) do
+        if type(item) == "table" and type(item.text) == "function" then
+            item.text_func = item.text_func or item.text
+            item.text = ""
+        end
+    end
+end
+
+--- 排序前最后一刻（所有插件的 addToMainMenu 之后）跑一次 fixFunctionText。
+---@param menu table FileManagerMenu | ReaderMenu
+---@param original function 原 setUpdateItemTable
+local function rebuild(menu, original, ...)
+    resetMenuItems(menu)
+    local widgets = menu.registered_widgets
+    local sentinel = { addToMainMenu = function(_self, items) fixFunctionText(items) end }
+    if widgets then table.insert(widgets, sentinel) end
+    local ok, err = pcall(original, menu, ...)
+    if widgets then
+        for i = #widgets, 1, -1 do
+            if widgets[i] == sentinel then table.remove(widgets, i) break end
+        end
+    end
+    if not ok then error(err, 0) end
+end
+
 --- 一次性 patch 文件管理器菜单，注入桌面面板 Tab。
 local function installFileManagerMenu()
     local FMMenu = require("apps/filemanager/filemanagermenu")
@@ -500,8 +529,7 @@ local function installFileManagerMenu()
     FMMenu._book_desktop_panel_patched = true
     local original = FMMenu.setUpdateItemTable
     FMMenu.setUpdateItemTable = function(self, ...)
-        resetMenuItems(self)
-        original(self, ...)
+        rebuild(self, original, ...)
         injectDesktopTab(self)
         patchDrawerTab(self)
     end
@@ -532,8 +560,7 @@ local function installReaderMenu()
     end
     local original = ReaderMenu.setUpdateItemTable
     ReaderMenu.setUpdateItemTable = function(self, ...)
-        resetMenuItems(self)
-        original(self, ...)
+        rebuild(self, original, ...)
         NativeSettings.inject(self)
         injectDesktopTab(self)
         injectReaderTab(self)

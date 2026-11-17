@@ -61,6 +61,7 @@ function ReaderMenu:setUpdateItemTable()
         -- 模拟 MenuSorter：排序会摘走 KOMenu:menu_buttons，二次排序必崩
         assert(self.menu_items["KOMenu:menu_buttons"], "menu_items 已被排序过")
         self.menu_items["KOMenu:menu_buttons"] = nil
+        for _idx, widget in ipairs(self.registered_widgets or {}) do widget:addToMainMenu(self.menu_items) end
     end
     self.tab_item_table = {
         { id = "navi", icon = "appbar.navigation" },
@@ -124,7 +125,13 @@ local kb_menu = setmetatable({
     ui = ui,
     menu_items = { ["KOMenu:menu_buttons"] = {}, setting = { icon = "appbar.settings" } },
 }, { __index = ReaderMenu })
+kb_menu.registered_widgets = {
+    { addToMainMenu = function(_w, items) items.third_party = { text = function() return "动态" end } end },
+}
 kb_menu:setUpdateItemTable()
+Assert.eq(type(kb_menu.menu_items.third_party.text), "string", "函数型 text 改走 text_func")
+Assert.eq(kb_menu.menu_items.third_party.text_func(), "动态")
+Assert.len(kb_menu.registered_widgets, 1, "哨兵用完即撤")
 kb_menu.tab_item_table = nil
 kb_menu:setUpdateItemTable()
 Assert.len(kb_menu.tab_item_table, 4)
