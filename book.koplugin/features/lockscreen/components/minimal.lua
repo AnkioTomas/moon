@@ -52,8 +52,7 @@ function M.blocks(rect)
         },
     }
 
-    local quote, source = Highlight.next()
-    if not quote then quote, source = U.FALLBACK_MESSAGE, _("默认句子") end
+    local quote, source = Highlight.quote()
     local quote_y = math.floor(h * 0.36)
     local quote_text, quote_size, quote_h = QuotePanel.fit(quote, inner_w, 24, 18, math.floor(h * 0.3))
     blocks[#blocks + 1] = {

@@ -14,7 +14,10 @@ package.preload["features.lockscreen.components.current"] = function()
 end
 
 package.preload["features.lockscreen.components.highlight"] = function()
-    return { next = function() return quote and quote[1], quote and quote[2] end }
+    return { quote = function()
+        if quote then return quote[1], quote[2] end
+        return "默认", "默认句子"
+    end }
 end
 
 package.preload["features.lockscreen.components.quote_panel"] = function()

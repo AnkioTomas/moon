@@ -7,6 +7,7 @@
 local Current = require("features.lockscreen.components.current")
 local MoonSettings = require("utils.settings")
 local Highlights = require("book.highlights")
+local Hitokoto = require("online.hitokoto")
 local QuotePanel = require("features.lockscreen.components.quote_panel")
 local U = require("features.lockscreen.components.util")
 local _ = require("gettext")
@@ -39,17 +40,23 @@ function M.next()
     return Highlights.pick(source_id, stable_id, chapter_idx, index)
 end
 
--- quote 布局由 compose 传入位置和宽窄，组件只负责取得下一条高亮。
---- 没有高亮时使用公共默认句子，保证锁屏仍有可读内容。
+--- 锁屏要展示的一句：当前书高亮；没有高亮就从一言缓存（没缓存用内置句子）随机抽，不联网。
+---@return string, string
+function M.quote()
+    local text, source = M.next()
+    if text then return text, source or _("来自当前书籍高亮") end
+    local pick = Hitokoto.random()
+    local from = pick.title ~= "" and pick.author .. " · " .. pick.title or pick.author
+    return pick.text, from ~= "" and from or _("一言")
+end
+
+-- quote 布局由 compose 传入位置和宽窄，组件只负责取得下一句。
 ---@param position string
 ---@param wide boolean
 ---@return table[]
 function M.blocks(position, wide)
-    local text, source = M.next()
-    if not text then
-        return QuotePanel.blocks(U.FALLBACK_MESSAGE, _("默认句子"), position, wide)
-    end
-    return QuotePanel.blocks(text, source or _("来自当前书籍高亮"), position, wide)
+    local text, source = M.quote()
+    return QuotePanel.blocks(text, source, position, wide)
 end
 
 return M
