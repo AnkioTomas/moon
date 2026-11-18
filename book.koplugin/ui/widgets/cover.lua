@@ -83,7 +83,7 @@ end
 ---@param show_status boolean|nil 是否显示书籍状态信息，缺省显示
 ---@param show_title boolean|nil 是否在封面下显示书名，缺省显示
 ---@param show_author boolean|nil 是否在书名下显示作者，缺省不显示
----@param lib table|nil CoverCell.libraryConf() 的结果；缺省为首页 / 书城的固定样式
+---@param lib table|nil CoverCell.libraryConf() 的结果；缺省为首页 / 书城的固定样式。首页组件传 home=true。
 ---@return table, number
 function CoverCell.build(ctx, book, slot_w, cw, ch, on_open, show_status, show_title, show_author, lib)
     local status = show_status ~= false
@@ -95,6 +95,7 @@ function CoverCell.build(ctx, book, slot_w, cw, ch, on_open, show_status, show_t
         ribbon = status,
         download = status,
         cached = status,
+        home = lib and lib.home == true,
         -- 图书馆右下角「更多」进详情（角标自带点击区，先于整卡收到点按）；书城整卡即详情，不画「更多」。
         more = status and CoverCell.moreAction(ctx, book, lib and lib.more),
         show_parent = ctx.desktop,

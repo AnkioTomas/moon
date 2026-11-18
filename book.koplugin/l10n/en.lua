@@ -1828,6 +1828,8 @@ return {
     ["标题过长时自动截断为四字；关闭则自动转到下一列显示"] = "Truncate long titles to four characters; off wraps into the next column",
     ["白底黑字"] = "Black on white",
     ["选「仅文字封面」则不加载封面图，全部用书名生成封面"] = "“Text covers only” skips loading cover images and generates covers from titles",
+    ["首页也使用文字封面"] = "Use text covers on Home too",
+    ["默认首页显示真实封面；仅在书库选择「仅文字封面」时可用"] = "Home shows real covers by default; available only when the library uses “Text covers only”",
     ["只改书封四角；跟随主题时与界面风格一致"] = "Only changes book-cover corners; Follow theme matches the UI style",
     ["跟随主题"] = "Follow theme",
     ["圆角"] = "Rounded",

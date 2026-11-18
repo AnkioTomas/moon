@@ -38,6 +38,7 @@ function M:createWidget()
         pad = Theme.px(10),
         cover_width = math.floor(math.max(1, h - Theme.px(12)) * 2 / 3),
         show_parent = ctx.desktop,
+        home = true,
         on_tap = function() M.openBook(ctx, recent) end,
     })
     return CenterContainer:new{

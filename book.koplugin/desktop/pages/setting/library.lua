@@ -88,6 +88,27 @@ local function choiceRow(desktop, key, icon, title, subtitle, items)
     end
 end
 
+--- 首页文字封面：仅在书库已选「仅文字封面」时可开；关闭时首页仍显示真实封面。
+---@param desktop table
+---@return fun(iw: number): table
+local function homeTextCoverRow(desktop)
+    return function(iw)
+        local conf = MoonSettings.get("ui")
+        local enabled = conf.library_cover_mode == "text"
+        return Row.widget({
+            width = iw, icon = "home", title = _("首页也使用文字封面"),
+            subtitle = _("默认首页显示真实封面；仅在书库选择「仅文字封面」时可用"),
+            toggle = enabled and conf.home_text_cover == true,
+            enabled = enabled,
+            callback = function()
+                conf.home_text_cover = not conf.home_text_cover
+                MoonSettings.save("ui", conf)
+                desktop:updateView()
+            end,
+        })
+    end
+end
+
 --- 书库显示哪些分组页签：多选弹窗，勾选即存，书籍页签恒显示。
 ---@param desktop table
 ---@return fun(iw: number): table
@@ -155,6 +176,7 @@ function Library:sections(desktop)
                 _("选「仅文字封面」则不加载封面图，全部用书名生成封面"), COVER_MODES),
             choiceRow(desktop, "library_text_cover_style", "palette", _("文字封面风格"),
                 _("彩色底：按书名取色；白底黑字：简洁朴素"), TEXT_COVER_STYLES),
+            homeTextCoverRow(desktop),
             toggleRow(desktop, "library_text_cover_truncate", "content_cut", _("文字封面截断标题"),
                 _("标题过长时自动截断为四字；关闭则自动转到下一列显示")),
             toggleRow(desktop, "library_title", "title", _("显示名称"), _("封面下方显示书名")),

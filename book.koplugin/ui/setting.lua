@@ -26,6 +26,8 @@ return {
         library_cover_radius = "theme",
         -- 封面来源：image 加载封面图（无图用文字封面）；text 一律不加载、只用文字封面。
         library_cover_mode = "image",
+        -- 首页是否也用文字封面：默认 false（首页仍加载真实封面）；仅在 library_cover_mode=text 时生效。
+        home_text_cover = false,
         -- 文字封面风格：color 按书名取色；plain 白底黑字。truncate：书名过长自动截断（否则缩小字号排满）。
         library_text_cover_style = "color",
         library_text_cover_truncate = true,

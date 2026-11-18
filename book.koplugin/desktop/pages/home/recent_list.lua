@@ -194,7 +194,7 @@ end
 ---@return number cell_h
 local function gridMetrics(width, area_h)
     local cols = M.cols()
-    local lib = CoverCell.libraryConf()
+    local lib = CoverCell.libraryConf(); lib.home = true
     local extra = Book.captionExtra(M.showTitle(), M.showAuthor(), lib.kobo)
     -- 单行时宽度决定封面尺寸；用剩余高度压缩会留下无意义的横向空隙。
     -- 多行才需要受区域高度约束，避免整组网格溢出。
@@ -257,7 +257,7 @@ end
 ---@return number
 local function buildGrid(ctx, books, width, grid_h, page, on_open)
     local slot_w, cw, ch, cols, gap, row_gap, cell_h = gridMetrics(width, grid_h)
-    local lib = CoverCell.libraryConf()
+    local lib = CoverCell.libraryConf(); lib.home = true
     local rows = M.rows()
     local page_size = math.max(1, cols * rows)
     local pages = math.max(1, math.ceil(#books / page_size))

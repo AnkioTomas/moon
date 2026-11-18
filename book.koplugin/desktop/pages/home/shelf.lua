@@ -110,7 +110,7 @@ end
 ---@return number slot_w, number cw, number ch, number gap, number row_gap, number cell_h
 local function metrics(width)
     local cols = M.cols()
-    local lib = CoverCell.libraryConf()
+    local lib = CoverCell.libraryConf(); lib.home = true
     local extra = Book.captionExtra(M.showTitle(), M.showAuthor(), lib.kobo)
     local max_h = CoverCell.gridCoverMaxH()
     local slot_w, cw, ch, _cols, gap, row_gap, cell_h = CoverCell.denseCoverMetrics(math.max(1, width), 0, {
@@ -167,7 +167,7 @@ function M:createWidget()
         ctx.on_detail = function(book) require("desktop.detail").open(ctx.desktop, "library", book) end
         local on_open = CoverCell.opener(self, ctx, require("desktop.open").book)
         body = VerticalGroup:new{ align = "left" }
-        local lib = CoverCell.libraryConf()
+        local lib = CoverCell.libraryConf(); lib.home = true
         for r = 1, math.ceil(#books / cols) do
             if r > 1 then body[#body + 1] = VerticalSpan:new{ width = row_gap } end
             local row = HorizontalGroup:new{}

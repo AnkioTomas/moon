@@ -165,6 +165,7 @@ function M:createWidget()
             ribbon = false,
             download = false,
             show_parent = ctx.desktop,
+            home = true,
         })
         row[#row + 1] = Tap.wrap(cell, function() Base.openBook(ctx, book) end)
     end

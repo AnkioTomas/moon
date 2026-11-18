@@ -15,7 +15,7 @@ local covers = {}
 package.preload["ui.widgets.book"] = function()
     return {
         cover = function(_, _, book, cw, ch, opts)
-            local w = Widget:new{ dimen = { w = cw, h = ch }, book = book, shadow = opts.shadow }
+            local w = Widget:new{ dimen = { w = cw, h = ch }, book = book, shadow = opts.shadow, home = opts.home }
             function w:onHomePause() self.paused = true end
             covers[#covers + 1] = w
             return w
@@ -45,6 +45,7 @@ do -- 单本：一张正面封面，无箭头
     Assert.eq(slot:getSize().h, 220)
     Assert.len(covers, 1)
     Assert.is_true(covers[1].shadow)
+    Assert.is_true(covers[1].home, "堆叠封面走首页封面策略")
     local texts = Kit.texts(slot)
     Assert.contains(texts, "心挣")
     Assert.contains(texts, "初禾")

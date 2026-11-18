@@ -45,7 +45,7 @@ local function progressRow(width, pct)
     return row, math.max(label:getSize().h, bar:getSize().h)
 end
 
---- opts: width, pad, cover_width, title_lines, on_tap, on_info_tap, show_progress, show_desc, subtitle, src, headers。
+--- opts: width, pad, cover_width, title_lines, on_tap, on_info_tap, show_progress, show_desc, subtitle, src, headers, home。
 --- show_progress / show_desc 缺省显示。show_desc=false 时全文留给下方简介区。
 --- title_lines 缺省 1（单行截断）；on_info_tap 缺省同 on_tap（点封面与右栏同一动作）。
 ---@param plugin table|nil
@@ -74,6 +74,7 @@ function Hero.widget(plugin, source, book, opts)
 
     local cover = select(1, Book.cover(plugin, source, book, cw, ch, {
         badge = false,
+        home = opts.home,
         show_parent = opts.show_parent,
         on_ready = opts.on_ready,
         src = opts.src,

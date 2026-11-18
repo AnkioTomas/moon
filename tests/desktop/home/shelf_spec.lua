@@ -21,9 +21,9 @@ package.preload["ui.widgets.cover"] = function()
         libraryConf = function() return { kobo = false, author = true, title = false } end,
         denseCoverMetrics = function() return 100, 60, 90, 4, 10, 10, 110 end,
         opener = function(_, _, open) return function(book) open(nil, book) end end,
-        build = function(_, book, w, _, _, on_open, _show_status, show_title, show_author)
+        build = function(_, book, w, _, _, on_open, _show_status, show_title, show_author, lib)
             built = built + 1
-            captions[#captions + 1] = { title = show_title, author = show_author }
+            captions[#captions + 1] = { title = show_title, author = show_author, home = lib and lib.home }
             local cell = Container:new{ dimen = Geom:new{ w = w, h = 110 } }
             cell.book, cell.on_open = book, on_open
             return cell, 110
@@ -69,6 +69,7 @@ Assert.eq(asked.sort, "title")
 Assert.eq(built, 4)
 Assert.is_true(captions[1].title, "书名缺省显示，不跟图书馆 library_title")
 Assert.is_false(captions[1].author, "作者缺省关，不跟图书馆 library_author")
+Assert.is_true(captions[1].home, "书架组件走首页封面策略")
 
 -- 书名 / 作者独立开关：改完只影响书架组件自身。
 home.home_shelf_show_title, home.home_shelf_show_author = false, true

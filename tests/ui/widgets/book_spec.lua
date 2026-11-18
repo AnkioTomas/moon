@@ -443,4 +443,63 @@ do
     Paths.coverPath = old
 end
 
+
+-- #140：书库「仅文字封面」默认不影响首页；home_text_cover 才让首页也跳过封面图。
+do
+    local mode, home_flag, style = ui_conf.library_cover_mode, ui_conf.home_text_cover, ui_conf.library_text_cover_style
+    local book = {
+        title = "测试书", authors = "作者",
+        cover_url = "https://cdn/cover.jpg",
+        source_id = "local", stable_id = "home-cover",
+    }
+    local function image(opts)
+        return coverImage(select(1, Book.cover(nil, nil, book, 80, 120, opts or {})))
+    end
+
+    ui_conf.library_cover_mode = "text"
+    ui_conf.home_text_cover = false
+    ui_conf.library_text_cover_style = "plain"
+    Assert.is_nil(image({}).src, "书库：仅文字封面不加载图")
+    Assert.eq(image({}).fallback.style, "plain")
+    Assert.eq(image({ home = true }).src, "https://cdn/cover.jpg", "默认首页仍加载真实封面")
+    Assert.eq(image({ home = true }).fallback.style, "plain", "首页缺图回退仍用书库文字封面风格")
+
+    ui_conf.home_text_cover = true
+    Assert.is_nil(image({ home = true }).src, "开启后首页也用文字封面")
+    Assert.eq(image({ home = true }).fallback.style, "plain")
+    Assert.is_nil(image({}).src, "书库不受首页开关影响，仍是文字封面")
+
+    ui_conf.library_cover_mode = "image"
+    Assert.eq(image({}).src, "https://cdn/cover.jpg", "书库恢复加载封面")
+    Assert.eq(image({ home = true }).src, "https://cdn/cover.jpg", "书库未开文字封面时首页开关不生效")
+
+    ui_conf.library_cover_mode = "text"
+    ui_conf.home_text_cover = true
+    Assert.is_false(Book.skipCoverImage(ui_conf, { src = "https://scrape/x.jpg", home = true }), "显式 src 仍加载")
+    Assert.is_false(Book.skipCoverImage(ui_conf, { src = "https://scrape/x.jpg" }))
+    Assert.eq(image({ src = "https://scrape/x.jpg", home = true }).src, "https://scrape/x.jpg")
+    Assert.is_true(Book.skipCoverImage(ui_conf, { home = true }))
+    ui_conf.home_text_cover = false
+    Assert.is_false(Book.skipCoverImage(ui_conf, { home = true }))
+    Assert.is_true(Book.skipCoverImage(ui_conf, {}))
+    ui_conf.library_cover_mode = "image"
+    Assert.is_false(Book.skipCoverImage(ui_conf, {}))
+    Assert.is_false(Book.skipCoverImage(ui_conf, { home = true }))
+    Assert.is_false(Book.skipCoverImage(nil, {}))
+    Assert.is_false(Book.skipCoverImage(ui_conf, nil))
+
+    -- 本地封面缓存：书库文字封面丢弃；首页默认仍用缓存图，互不串用。
+    local cached = "/covers/local/home-cover"
+    existing_files[cached] = true
+    ui_conf.library_cover_mode = "text"
+    ui_conf.home_text_cover = false
+    Assert.is_nil(image({}).src, "书库文字封面不用本地封面缓存")
+    Assert.eq(image({ home = true }).src, cached, "首页默认继续用本地真实封面缓存")
+    ui_conf.home_text_cover = true
+    Assert.is_nil(image({ home = true }).src, "首页开启文字封面后也不再用缓存图")
+    existing_files[cached] = nil
+
+    ui_conf.library_cover_mode, ui_conf.home_text_cover, ui_conf.library_text_cover_style = mode, home_flag, style
+end
+
 package.loaded["ui.widgets.book"] = nil

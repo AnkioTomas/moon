@@ -22,7 +22,7 @@ package.preload["ui.widgets.book"] = function()
         captionExtra = function(show_title) return show_title ~= false and TITLE_EXTRA or 0 end,
         widget = function(_plugin, _source, book, cw, ch, opts)
             local slot_w = (opts and opts.slot_w) or cw
-            covers[#covers + 1] = { book = book, w = cw, h = ch, slot_w = slot_w }
+            covers[#covers + 1] = { book = book, w = cw, h = ch, slot_w = slot_w, home = opts and opts.home }
             return Widget:new{ dimen = { w = slot_w, h = ch + TITLE_EXTRA } }
         end,
     }
@@ -83,6 +83,7 @@ Assert.eq(deck.data[3].source_id, "kavita")
 Assert.eq(deck.data[3].percent, 30)
 -- 一页 4 本（跟首页最近阅读一样），12 本分 3 页。
 Assert.eq(#covers, 4, "一页 4 本")
+Assert.is_true(covers[1].home, "On Deck 走首页封面策略")
 Assert.eq(covers[1].book.title, "S1")
 Assert.contains(Kit.texts(deck.slot), "1 / 3")
 

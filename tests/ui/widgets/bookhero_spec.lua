@@ -10,14 +10,17 @@ local Kit = require("support.widget_stubs")
 Kit.install("paper")
 local Widget = require("ui/widget/widget")
 
-local desc_text = ""
+local desc_text, last_cover_opts = "", nil
 package.preload["ui.widgets.book"] = function()
     return {
         title = function(book) return book.title end,
         author = function() return "作者" end,
         desc = function() return desc_text end,
         pct = function() return 0 end,
-        cover = function(_, _, _, w, h) return Widget:new{ dimen = { w = w, h = h } } end,
+        cover = function(_, _, _, w, h, opts)
+            last_cover_opts = opts
+            return Widget:new{ dimen = { w = w, h = h } }
+        end,
     }
 end
 
@@ -63,3 +66,8 @@ desc_box:paintTo({
 Assert.eq(rects, 0, "简介不铺底色")
 Assert.eq(blits, 1, "简介只画字形")
 desc_text = ""
+
+Hero.widget(nil, nil, { title = "x" }, { width = 400, pad = 0, home = true })
+Assert.is_true(last_cover_opts.home, "home 选项转交给 Book.cover")
+Hero.widget(nil, nil, { title = "x" }, { width = 400, pad = 0 })
+Assert.is_nil(last_cover_opts.home, "未声明时不把详情/侧栏当成首页")

@@ -465,6 +465,26 @@ function Book.openingBar(cw, ch)
     return bar
 end
 
+--- 是否跳过封面图、只用文字封面。
+--- 显式 src（刮削候选）仍加载图。书库和其他页面跟随 library_cover_mode；
+--- 首页（opts.home）还需打开 home_text_cover，且仅在书库已选「仅文字封面」时生效。
+---@param ui_conf table|nil settings/ui.lua
+---@param opts table|nil Book.cover 的选项
+---@return boolean
+function Book.skipCoverImage(ui_conf, opts)
+    opts = opts or {}
+    if type(opts.src) == "string" and opts.src ~= "" then
+        return false
+    end
+    if not ui_conf or ui_conf.library_cover_mode ~= "text" then
+        return false
+    end
+    if opts.home then
+        return ui_conf.home_text_cover == true
+    end
+    return true
+end
+
 --- 封面 widget。
 --- opts.badge: 未读且有进度时叠右上角百分比
 --- opts.ribbon: 已读时叠右上角「已读」绑带
@@ -474,6 +494,7 @@ end
 --- opts.show_parent: 窗口级父（Desktop / Detail）
 --- opts.on_ready: 图片就绪回调
 --- opts.src / opts.headers: 直接指定封面（刮削结果没有 source.coverRequest）
+--- opts.home: 首页组件为 true，封面策略受 home_text_cover 控制
 --- 有 book.source_id 时按属主源 coverRequest，禁止用活跃源冒充。
 ---@param plugin table|nil 插件实例，用于打开书籍和调用插件功能
 ---@param source table|nil 书无 source_id 时的数据源（书城未入库项）
@@ -527,7 +548,8 @@ function Book.cover(plugin, source, book, cw, ch, opts)
         req = source_req
     end
     local ui_conf = MoonSettings.get("ui")
-    local text_only = ui_conf.library_cover_mode == "text" and not (type(opts.src) == "string" and opts.src ~= "")
+    -- 书库（及详情等其他页）跟 library_cover_mode；首页另受 home_text_cover 控制，默认仍加载真实封面。
+    local text_only = Book.skipCoverImage(ui_conf, opts)
     if text_only then
         req, cached_cover = nil, nil
     end

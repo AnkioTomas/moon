@@ -511,6 +511,7 @@ local function coverCard(ctx, item, on_tap, stereo)
         badge = false,
         shadow = item.dist == 0,
         show_parent = ctx.desktop,
+        home = true,
     }))
     if item.dist > 0 then
         if stereo then

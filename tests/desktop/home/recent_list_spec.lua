@@ -30,9 +30,9 @@ package.preload["ui.widgets.cover"] = function()
             return 100, 100, 150, opts.min_cols, 8, 10, 150 + opts.title_extra
         end,
         opener = function(owner) return function(book) opened[#opened + 1] = { owner = owner, book = book } end end,
-        build = function(_, book, slot_w, cw, ch, on_open, show_status, show_title, show_author)
+        build = function(_, book, slot_w, cw, ch, on_open, show_status, show_title, show_author, lib)
             local cell = Widget:new{ dimen = { w = slot_w, h = ch + (show_title and 26 or 0) + (show_author and 14 or 0) } }
-            covers[#covers + 1] = { book = book, w = cw, h = ch, cell = cell, more = show_status, author = show_author, on_open = on_open }
+            covers[#covers + 1] = { book = book, w = cw, h = ch, cell = cell, more = show_status, author = show_author, on_open = on_open, home = lib and lib.home }
             function cell:onHomePause() self.paused = true end
             return cell
         end,
@@ -98,6 +98,7 @@ do -- 一页装下也画分页条，底部不是空条；开书状态挂在组�
     Assert.len(covers, 5)
     Assert.eq(covers[1].w, 100)
     Assert.is_false(covers[1].author, "图书馆开作者时最近阅读仍按自己开关（缺省关）")
+    Assert.is_true(covers[1].home, "最近阅读列表走首页封面策略")
     Assert.is_true(covers[1].more)
     Assert.eq(Kit.texts(slot)[1], "最近阅读 · 5")
     covers[1].on_open(shelf[1])

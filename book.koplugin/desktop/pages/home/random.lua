@@ -82,6 +82,7 @@ function M:createWidget()
         cover_width = math.floor(math.max(1, h - Theme.px(12)) * 2 / 3),
         show_progress = false,
         show_parent = ctx.desktop,
+        home = true,
         on_tap = function() M.openBook(ctx, book) end,
     })
     return HorizontalGroup:new{ align = "top", card, dice }
