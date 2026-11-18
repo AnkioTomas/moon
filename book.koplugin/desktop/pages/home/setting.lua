@@ -38,6 +38,6 @@ return {
         home_shelf_show_title = true,
         home_shelf_show_author = false,
     },
-    -- home_widgets 为 nil = 用默认布局，见 registry.lua。
+    -- home_widgets 为 nil = 尚未初始化，用默认布局；空表 = 用户清空后的空白首页。
     keys = { "home_widgets" },
 }

@@ -134,7 +134,6 @@ end
 ---@param id string 组件、分页或数据源的标识
 local function deleteWidget(self, id)
     local list = Components.widgets()
-    if #list <= 1 then return end
     local out = {}
     for _i, item in ipairs(list) do
         if item.id ~= id then out[#out + 1] = item end

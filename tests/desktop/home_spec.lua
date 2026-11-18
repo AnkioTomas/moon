@@ -183,6 +183,46 @@ do -- 编辑工具：删除 / 移动 / 高度；设置按钮只给有 showSettin
     Assert.matches(drain(), "recent_hero%.pause,recent_hero%.destroy", "删除走完暂停 + 销毁")
 end
 
+do -- 允许删光：空首页保持空白、可再添加，重载不回填默认
+    local bars = Kit.find(desktop.root, function(w) return w.onHomeEditBarTap ~= nil end)
+    while #bars > 0 do
+        Kit.buttons(bars[1])[1].callback()
+        bars = Kit.find(desktop.root, function(w) return w.onHomeEditBarTap ~= nil end)
+    end
+    Assert.len(Registry.widgets(), 0, "最后一个组件也可以删掉")
+    Assert.len(Kit.sections.home.home_widgets, 0, "空数组落盘")
+    Assert.is_nil(Themed.last("toast"), "删空不弹提示")
+    Assert.eq(home.pages, 1)
+    Assert.eq(desktop.root:getSize().h, 800)
+    local texts = {}
+    for _, b in ipairs(Kit.buttons(desktop.root)) do texts[#texts + 1] = b.text or b.icon end
+    Assert.contains(texts, "添加", "空状态仍可添加")
+    Assert.contains(texts, "完成", "空状态仍可退出编辑")
+
+    home:exitEdit()
+    Assert.is_false(home.editing)
+    Assert.is_nil(next(home.visible), "浏览态空首页没有组件")
+    Assert.not_nil(desktop.root.onHoldHomeEdit, "空白区域长按仍可进编辑")
+    -- 模拟重新打开：再读一次已落盘的空配置。
+    Assert.len(Registry.widgets(), 0)
+    Assert.is_false(Registry.needsLayout(), "空表不是未初始化")
+    desktop:updateView()
+    Assert.len(Registry.widgets(), 0, "重载空配置不回填默认")
+    Assert.len(Kit.sections.home.home_widgets, 0)
+
+    desktop.root:onHoldHomeEdit()
+    Assert.is_true(home.editing)
+    for _, b in ipairs(Kit.buttons(desktop.root)) do if b.text == "添加" then b.callback() end end
+    local add = Themed.last("list")
+    Assert.eq(add.title, "添加组件")
+    Assert.len(add.items, #IDS, "空首页可把全部组件加回来")
+    heights.clock = 80
+    Themed.choose(add, 1)
+    Assert.eq(Registry.widgets()[1].id, add.items[1].value)
+    Assert.len(Registry.widgets(), 1)
+    Assert.not_nil(home.components[Registry.widgets()[1].id])
+end
+
 do -- 暂停退出编辑并保存；销毁全部组件
     Assert.is_true(home.editing)
     home:deactivate()

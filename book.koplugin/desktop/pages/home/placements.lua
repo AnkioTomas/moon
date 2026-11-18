@@ -79,7 +79,8 @@ local function copyPlace(item, page, order)
     }
 end
 
---- 净化放置表：合法 id、去重、页/序规范化；没有可用记录时回到默认放置。
+--- 净化放置表：合法 id、去重、页/序规范化。
+--- 非表（含 nil）视为尚未初始化，回到默认放置；空表或没有合法记录表示用户清空，保持空，不回填。
 ---@param components { id: string }[] 已注册组件，按注册顺序
 ---@return BookHomeWidgetPlacement[]
 function M.sanitize(raw, components)
@@ -102,7 +103,7 @@ function M.sanitize(raw, components)
             end
         end
     end
-    if #out == 0 then return defaults(components) end
+    if #out == 0 then return out end
     table.sort(out, function(a, b)
         if a.page ~= b.page then return a.page < b.page end
         if a.order ~= b.order then return a.order < b.order end

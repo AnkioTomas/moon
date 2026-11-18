@@ -2,10 +2,13 @@
 
 local Assert = require("support.assert")
 
+local store = { home_widgets = {} }
 package.preload["utils.settings"] = function()
     return {
-        get = function() return { home_widgets = {} } end,
-        save = function() end,
+        get = function() return store end,
+        save = function(_, values)
+            if values then store = values end
+        end,
     }
 end
 
@@ -24,15 +27,27 @@ Assert.eq(list[1].order, 1)
 Assert.eq(list[2].id, "stats")
 Assert.eq(list[2].page, 2)
 
--- 没有可用记录：按注册顺序全部放第 1 页。
-for _, raw in ipairs({ "broken", {}, { { id = "nope" } } }) do
-    local fallback = Widgets.sanitize(raw, components)
-    Assert.len(fallback, 3)
-    Assert.eq(fallback[1].id, "clock")
-    Assert.eq(fallback[3].id, "weather")
-    Assert.eq(fallback[3].page, 1)
-    Assert.eq(fallback[3].order, 3)
-end
+-- 尚未初始化（非表）才回默认布局。
+local fallback = Widgets.sanitize("broken", components)
+Assert.len(fallback, 3)
+Assert.eq(fallback[1].id, "clock")
+Assert.eq(fallback[3].id, "weather")
+Assert.eq(fallback[3].page, 1)
+Assert.eq(fallback[3].order, 3)
+Assert.len(Widgets.sanitize(nil, components), 3, "nil 视为未初始化")
+
+-- 空表或没有合法记录：保持空，不回填默认组件。
+Assert.len(Widgets.sanitize({}, components), 0)
+Assert.len(Widgets.sanitize({ { id = "nope" } }, components), 0)
+
+store.home_widgets = {}
+Assert.len(Widgets.load(components), 0, "空配置读回来仍是空")
+store.home_widgets = nil
+Assert.len(Widgets.load(components), 3, "缺键仍走首次默认")
+Widgets.save({})
+Assert.len(store.home_widgets, 0, "空数组能落盘")
+Assert.len(Widgets.load(components), 0, "保存后再读不会回填")
+
 Assert.len(Widgets.compactPages({}), 0)
 
 local compacted = Widgets.compactPages({

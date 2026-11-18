@@ -206,4 +206,15 @@ local kept = Widgets.sanitize({
 Assert.eq(kept[1].margin.top, 2)
 Assert.is_nil(kept[2].margin)
 
+-- 空放置表：一页空白，不回填默认、不崩溃。
+home_settings.home_widgets = {}
+build_log = {}
+local body, page, pages, visible = Layout.build({ width = 320, height = 140 }, components, 1, { body_height = 140 })
+Assert.not_nil(body)
+Assert.eq(page, 1)
+Assert.eq(pages, 1)
+Assert.eq(next(visible), nil)
+Assert.len(build_log, 0)
+Assert.len(Base.enabledLayout(), 0)
+
 return true
