@@ -10,6 +10,7 @@ local Config = require("support.config")
 local store = {}
 _G.G_reader_settings = {
     isTrue = function(_, key) return store[key] == true end,
+    readSetting = function(_, key) return store[key] end,
 }
 
 local calls
@@ -53,5 +54,16 @@ Assert.len(calls, 0, "恢复阅读位置不播翻页动画")
 view.ui._restoring_position = nil
 view:onPageChangeAnimation(true)
 Assert.len(calls, 2, "标志清掉后恢复动画")
+
+calls = {}
+store.swipe_animation_style = "none"
+view:onPageChangeAnimation(true)
+Assert.len(calls, 0, "风格不显示时保留总开关但不播动画")
+Assert.is_true(store.moon_page_turn_animation, "不显示不关总开关")
+
+calls = {}
+store.swipe_animation_style = "wipe"
+view:onPageChangeAnimation(true)
+Assert.len(calls, 2, "改回具体风格后恢复动画")
 
 return true
