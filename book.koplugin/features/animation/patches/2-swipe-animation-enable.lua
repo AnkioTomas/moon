@@ -26,6 +26,8 @@ local ok, err = pcall(function()
     ---@param forward boolean 是否向前翻
     function ReaderView:onPageChangeAnimation(forward)
         if not G_reader_settings:isTrue("moon_page_turn_animation") then return end
+        -- 风格「不显示」：保留总开关，只是不播动画，方便临时关闭。
+        if G_reader_settings:readSetting("swipe_animation_style") == "none" then return end
         -- 开书恢复进度（reader.session.progress.applyPosition）会从开头跳到上次位置，
         -- rolling/paging 都会发 PageChangeAnimation；此时不播翻页动画。
         if self.ui and self.ui._restoring_position then return end

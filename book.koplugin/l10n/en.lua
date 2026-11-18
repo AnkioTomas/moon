@@ -1040,6 +1040,7 @@ return {
     ["翻译"] = "Translate",
     ["翻译失败：%1"] = "Translation failed: %1",
     ["翻页动画"] = "Page turn animations",
+    ["不显示"] = "None",
     ["翻页动画补丁已失效（可能因 KOReader 升级）。是否重新安装？"] = "Page turn animation patch is no longer applied (possibly after a KOReader update). Reinstall?",
     ["翻页动画补丁已更新，需重启 KOReader 生效。"] = "Page turn animation patch updated; restart KOReader to take effect.",
     ["翻页动画补丁操作失败：%1"] = "Page turn animation patch failed: %1",

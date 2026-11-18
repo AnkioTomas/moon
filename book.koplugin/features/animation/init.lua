@@ -31,7 +31,7 @@ PageTurnAnimation.SPEEDS = {
     { text = _("快"), value = "fast" },
 }
 
---- 可选风格；value 必须与 2-swipe-animation-core.lua 的 SwipeAnimation.STYLES 键一致。
+--- 可选风格；value 必须与 2-swipe-animation-core.lua 的 SwipeAnimation.STYLES 键一致（none 除外：补丁入口直接不播动画）。
 PageTurnAnimation.STYLES = {
     { text = _("擦除"), value = "wipe" },
     { text = _("翻页阴影"), value = "shadow" },
@@ -47,6 +47,7 @@ PageTurnAnimation.STYLES = {
     { text = _("逐行"), value = "typewriter" },
     { text = _("棋盘"), value = "checkerboard" },
     { text = _("随机方块"), value = "random_blocks" },
+    { text = _("不显示"), value = "none" },
 }
 
 --- 当前风格；未设置或已下线的值与运行时补丁一致，回退为第一项（擦除）。
