@@ -230,6 +230,7 @@ end
 ---@param ui table
 ---@return integer|nil due
 ---@return integer|nil queued
+---@return string|nil what 到期任务的回调位置（逗号分隔），用来认出是谁在阻塞
 local function peekTasks(ui)
     local queue = ui and ui._task_queue
     if type(queue) ~= "table" then return nil, nil end
@@ -241,14 +242,20 @@ local function peekTasks(ui)
     local clock = time.now()
     if clock == nil then return nil, queued end
     local due = 0
+    local where = {}
     for i = 1, queued do
         local task = queue[i]
         if type(task) ~= "table" or task.time == nil then
             return nil, queued
         end
-        if task.time <= clock then due = due + 1 end
+        if task.time <= clock then
+            due = due + 1
+            if type(task.action) == "function" then
+                where[#where + 1] = sourceLocation(debug.getinfo(task.action, "Sl"))
+            end
+        end
     end
-    return due, queued
+    return due, queued, #where > 0 and table.concat(where, ",") or nil
 end
 
 ---@param obj table
@@ -279,7 +286,7 @@ local function hookUIManager()
     if not ok or type(UIManager) ~= "table" then return end
     hook(UIManager, "_checkTasks", function(orig)
         return function(self, ...)
-            local due, queued = peekTasks(self)
+            local due, queued, what = peekTasks(self)
             local started = Perf.now()
             local packed = pack(orig(self, ...))
             local ms = Perf.elapsedMs(started)
@@ -288,6 +295,7 @@ local function hookUIManager()
                 local parts = { "slow", "uimanager.tasks", ms, "ms" }
                 if queued ~= nil then parts[#parts + 1] = "queued=" .. queued end
                 if due ~= nil then parts[#parts + 1] = "due=" .. due end
+                if what ~= nil then parts[#parts + 1] = "what=" .. what end
                 log(unpack(parts))
             end
             return unpack(packed, 1, packed.n)
