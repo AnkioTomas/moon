@@ -77,7 +77,7 @@ function Rows.book(ctx, book, w, h, on_open, on_more)
     -- 打开中的状态条要追加到封面子件里，Book.cover 无角标时只返回 Box，统一包一层。
     local cover = OverlapGroup:new{
         dimen = Geom:new{ w = cw, h = ch },
-        (Book.cover(ctx.plugin, ctx.source, book, cw, ch, { show_parent = ctx.desktop })),
+        (Book.cover(ctx.plugin, ctx.source, book, cw, ch, { source_tag = true, show_parent = ctx.desktop })),
     }
 
     local more

@@ -181,6 +181,7 @@ function Library:sections(desktop)
                 _("标题过长时自动截断为四字；关闭则自动转到下一列显示")),
             toggleRow(desktop, "library_title", "title", _("显示名称"), _("封面下方显示书名")),
             toggleRow(desktop, "library_author", "person", _("显示作者"), _("书名下方显示作者")),
+            toggleRow(desktop, "library_source_tag", "dns", _("混合模式显示书源"), _("混合模式下封面左上角显示书从哪个书源来")),
         } },
         { title = _("书库"), rows = {
             tabsRow(desktop),

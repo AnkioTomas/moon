@@ -273,6 +273,26 @@ function Book.progressBadge(cw, pct)
     return badge
 end
 
+--- 封面左上角书源标签（混合模式）；样式同进度角标，名字超出封面宽度的 0.7 时截断。
+---@param cw number 封面宽度，单位像素
+---@param name string 书源名
+---@return table
+function Book.sourceTag(cw, name)
+    local t = Theme.current()
+    local inset = Theme.px(t.space.xs)
+    local tag = Box:new{
+        style = {
+            bg = t.color.ink, radius = 999, border = 0, shadow = 0,
+            border_color = 0, shadow_color = 0,
+        },
+        height = Theme.px(16),
+        padding = Theme.px(t.space.xs),
+        Text.line("caption", name, { color = t.color.page, width = math.floor(cw * 0.7) }),
+    }
+    tag.overlap_offset = { inset, inset }
+    return tag
+end
+
 --- 右上角「已读」斜条；文字沿 45° 走，贴齐封面角。
 ---@param cw number 封面宽度，单位像素
 ---@return table
@@ -488,6 +508,7 @@ end
 --- 封面 widget。
 --- opts.badge: 未读且有进度时叠右上角百分比
 --- opts.ribbon: 已读时叠右上角「已读」绑带
+--- opts.source_tag: 混合模式下左上角叠书源名（只认已注册的书源，书城项不画）
 --- opts.download: 已本地下载时叠左下角勾（口径见 BookDB.downloadedClause）
 --- opts.cached: 属主源书架缓存命中时叠左下角「已缓存」（与下载同槽，缓存优先）
 --- opts.more: 叠右下角「更多」；true 只画，function 同时可点
@@ -619,12 +640,21 @@ function Book.cover(plugin, source, book, cw, ch, opts)
     local show_cached = opts.cached and book.cache_mark
     local show_dl = opts.download and book.downloaded and not show_cached
     local show_more = opts.more
-    if show_read or show_pct or show_dl or show_cached or show_more then
+    local source_name
+    if opts.source_tag and MoonSettings.get("ui").library_source_tag ~= false
+        and MoonSettings.get("source").library_mixed == true and type(book.source_id) == "string" then
+        local meta = require("source.registry").meta(book.source_id)
+        source_name = meta and meta.name
+    end
+    if show_read or show_pct or show_dl or show_cached or show_more or source_name then
         local overlays = {
             dimen = Geom:new{ w = cw, h = ch },
             show_parent = opts.show_parent,
             cover,
         }
+        if source_name then
+            overlays[#overlays + 1] = Book.sourceTag(cw, source_name)
+        end
         if show_read then
             overlays[#overlays + 1] = Book.readRibbon(cw)
         elseif show_pct then

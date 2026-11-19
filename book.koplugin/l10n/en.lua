@@ -1803,6 +1803,8 @@ return {
     ["封面下方显示书名"] = "Show the title under each cover",
     ["显示作者"] = "Show author",
     ["书名下方显示作者"] = "Show the author under the title",
+    ["混合模式显示书源"] = "Show source in mixed mode",
+    ["混合模式下封面左上角显示书从哪个书源来"] = "In mixed mode, show which source a book comes from at the cover's top-left",
     ["点击书籍"] = "Tap on a book",
     ["点封面时的动作"] = "What tapping a cover does",
     ["双击书籍"] = "Double-tap a book",

@@ -21,6 +21,8 @@ return {
         pager_cycle = false,
         library_title = true,
         library_author = false,
+        -- 混合模式下封面左上角显示书源名（仅混合模式生效）。
+        library_source_tag = true,
         library_style = "kindle",
         -- 封面四角：theme 跟界面风格；round / square 只改封面，不动按钮和对话框。
         library_cover_radius = "theme",

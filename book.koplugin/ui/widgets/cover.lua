@@ -92,6 +92,7 @@ function CoverCell.build(ctx, book, slot_w, cw, ch, on_open, show_status, show_t
         show_title = show_title,
         show_author = show_author == true,
         badge = true,
+        source_tag = true,
         ribbon = status,
         download = status,
         cached = status,
@@ -102,7 +103,7 @@ function CoverCell.build(ctx, book, slot_w, cw, ch, on_open, show_status, show_t
     }
     if lib and lib.kobo then
         -- Kobo：封面上不留东西，下载 / 缓存状态、进度、更多都收到封面下一行。
-        opts.badge, opts.ribbon, opts.download, opts.cached, opts.more = false, false, false, false, false
+        opts.badge, opts.ribbon, opts.download, opts.cached, opts.more, opts.source_tag = false, false, false, false, false, false
         opts.status_row = status
         if status then
             -- 缓存优先（同槽位），其次未下载，已下载显示阅读进度条。

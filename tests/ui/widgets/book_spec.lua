@@ -80,6 +80,7 @@ local resolved = {}
 local authoritative = {}
 package.preload["source.registry"] = function()
     return {
+        meta = function(id) return id == "known" and { name = "已知源" } or nil end,
         resolve = function(id)
             resolved[#resolved + 1] = id
             return {
@@ -195,6 +196,18 @@ Assert.eq(Book.desc(nil), "")
 local status_opts = { badge = true, ribbon = true, download = true }
 local unread = select(1, Book.cover(nil, nil, { read_state = 0, percent = 12, downloaded = true }, 80, 120, status_opts))
 Assert.len(unread, 3)
+
+-- 混合模式左上角书源标签：只认已注册书源，书城项（meta 为空）不画。
+ui_conf.library_mixed = true
+local tag_opts = { source_tag = true }
+local tagged = select(1, Book.cover(nil, nil, { source_id = "known", stable_id = "a" }, 80, 120, tag_opts))
+Assert.eq(tagged[2].overlap_offset[1], 4, "混合模式：左上书源标签")
+Assert.len(select(1, Book.cover(nil, nil, { source_id = "store", stable_id = "a" }, 80, 120, tag_opts)), 1)
+ui_conf.library_source_tag = false
+Assert.len(select(1, Book.cover(nil, nil, { source_id = "known", stable_id = "a" }, 80, 120, tag_opts)), 1, "设置里关掉不画")
+ui_conf.library_source_tag = nil
+ui_conf.library_mixed = false
+Assert.len(select(1, Book.cover(nil, nil, { source_id = "known", stable_id = "a" }, 80, 120, tag_opts)), 1)
 Assert.eq(unread[2].overlap_offset[2], 4, "未读有进度：右上进度角标")
 Assert.eq(unread[3].overlap_offset[1], 4, "已下载：左下勾")
 
