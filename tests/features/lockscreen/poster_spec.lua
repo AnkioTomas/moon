@@ -116,7 +116,7 @@ Assert.is_true(not Poster.validStyle("bogus"))
 -- 标准布局：4 列 2:3 对齐铺满，行数向上取整、上下均分溢出，书不够循环补位。
 conf.lock_screen_poster_style = "standard"
 local poster_key = Poster.cache_key()
-Assert.matches(poster_key, "^standard:recent_read:%x+$")
+Assert.matches(poster_key, "^standard:recent_read::%x+$")
 Assert.eq(Poster.cache_key(), poster_key, "书单不变键就稳定")
 local saved_rows = db_rows
 db_rows = { saved_rows[2], saved_rows[1] }
@@ -132,12 +132,29 @@ conf.lock_screen_poster_sort = "recent_added"
 Assert.eq(Poster.sort(), "recent_added")
 Assert.eq(Poster.sortLabel("recent_added"), "最近添加")
 Assert.is_true(Poster.cache_key() ~= poster_key, "换排序要重画")
-Assert.matches(Poster.cache_key(), "^standard:recent_added:%x+$")
+Assert.matches(Poster.cache_key(), "^standard:recent_added::%x+$")
 db_sorts = {}
 Poster.blocks({ x = 0, y = 0, w = 540, h = 720 })
 Assert.eq(db_sorts[1], "recent_added")
 conf.lock_screen_poster_sort = nil
 Assert.eq(Poster.sort(), "recent_read", "非法/空回退最近阅读")
+
+-- 只用指定书源：查询范围换成该源，键变化；源停用后回退图书馆范围。
+package.loaded["source.registry"] = {
+    isEnabled = function(id) return id ~= "gone" end,
+    meta = function(id) return { id = id, name = id } end,
+    listEnabled = function() return { { id = "wechat", name = "wechat" } } end,
+}
+conf.lock_screen_poster_source = "wechat"
+db_sources = {}
+local before_source = Poster.cache_key()
+Assert.eq(db_sources[1], "wechat")
+Assert.matches(before_source, ":wechat:")
+Assert.eq(#Poster.sourceOptions(), 2)
+conf.lock_screen_poster_source = "gone"
+Assert.is_nil(Poster.source())
+conf.lock_screen_poster_source = ""
+Assert.is_nil(Poster.source())
 
 -- 缺封面且有远程地址：键带 retry 桶（每 5 次锁屏）；同桶稳定；跨桶才变。
 -- 纯本地缺封面不绑；齐了也不绑。
@@ -158,12 +175,12 @@ do
         }
     end
     local incomplete = Poster.cache_key()
-    Assert.matches(incomplete, "^standard:recent_read:%x+:0$")
+    Assert.matches(incomplete, "^standard:recent_read::%x+:0$")
     Cycle.lock_cycles = 4
     Assert.eq(Poster.cache_key(), incomplete, "同桶不因唤醒重画")
     Cycle.lock_cycles = 5
     Assert.is_true(Poster.cache_key() ~= incomplete, "跨桶才重画")
-    Assert.matches(Poster.cache_key(), "^standard:recent_read:%x+:1$")
+    Assert.matches(Poster.cache_key(), "^standard:recent_read::%x+:1$")
     Library.shelfBook = function(row, source_id)
         return {
             source_id = source_id,
@@ -173,10 +190,10 @@ do
             cover = nil,
         }
     end
-    Assert.matches(Poster.cache_key(), "^standard:recent_read:%x+$", "纯本地缺封面不绑次数")
+    Assert.matches(Poster.cache_key(), "^standard:recent_read::%x+$", "纯本地缺封面不绑次数")
     Library.shelfBook = prev
     Cycle.lock_cycles = prev_cycles
-    Assert.matches(Poster.cache_key(), "^standard:recent_read:%x+$", "封面齐了不带次数")
+    Assert.matches(Poster.cache_key(), "^standard:recent_read::%x+$", "封面齐了不带次数")
 end
 
 local std = placed(Poster.blocks({ x = 0, y = 0, w = 540, h = 720 }), "image")

@@ -245,6 +245,12 @@ function M.setPosterSort(sort)
     if require("features.lockscreen.poster").validSort(sort) then save("lock_screen_poster_sort", sort) end
 end
 
+--- 设置海报墙只用哪个书源；"" = 全部。
+---@param id string
+function M.setPosterSource(id)
+    save("lock_screen_poster_source", id)
+end
+
 --- 设置统计页面背景的页面；非法值忽略。
 ---@param page string
 function M.setInsightPage(page)

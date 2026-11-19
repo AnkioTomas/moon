@@ -32,11 +32,20 @@ for _idx, sort in ipairs(SORTS) do SORT_BY_ID[sort.id] = sort end
 
 local M = {}
 
+--- 只用某个书源的书；未设置或该源已停用时返回 nil（用图书馆当前范围）。
+---@return string|nil
+function M.source()
+    local id = MoonSettings.get("features.lockscreen").lock_screen_poster_source
+    if type(id) == "string" and id ~= "" and require("source.registry").isEnabled(id) then
+        return id
+    end
+end
+
 --- 取当前源的书并按 stable_id 去重；排序看设置（最近阅读 / 最近添加）。
 ---@param limit number
 ---@return table[]
 local function books(limit)
-    local source_id = Library.activeSourceId()
+    local source_id = M.source() or Library.activeSourceId()
     local result = {}
     local append = Library.shelfCollector(source_id)
     append(result, (Catalog.listBooks(source_id, {
@@ -248,7 +257,7 @@ function M.cache_key()
             end
         end
     end
-    local key = M.style() .. ":" .. M.sort() .. ":" .. require("ffi/sha2").md5(table.concat(parts, "\n"))
+    local key = M.style() .. ":" .. M.sort() .. ":" .. (M.source() or "") .. ":" .. require("ffi/sha2").md5(table.concat(parts, "\n"))
     return key .. require("features.lockscreen.cycle").retry(retryable > 0)
 end
 
@@ -284,6 +293,24 @@ end
 ---@return string
 function M.sortLabel(sort)
     return (SORT_BY_ID[sort] or SORT_BY_ID[DEFAULT_SORT]).label
+end
+
+--- 书源的设置页选项：全部 + 已启用的源。
+---@return {text: string, value: string}[]
+function M.sourceOptions()
+    local options = { { text = _("全部书源"), value = "" } }
+    for _idx, meta in ipairs(require("source.registry").listEnabled()) do
+        options[#options + 1] = { text = _(meta.name), value = meta.id }
+    end
+    return options
+end
+
+--- 书源显示名。
+---@return string
+function M.sourceLabel()
+    local id = M.source()
+    local meta = id and require("source.registry").meta(id)
+    return meta and _(meta.name) or _("全部书源")
 end
 
 --- 全屏海报墙；书库为空时明确显示空态，不能伪装成普通壁纸。

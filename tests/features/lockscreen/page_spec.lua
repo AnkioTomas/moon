@@ -81,6 +81,9 @@ package.preload["features.lockscreen.poster"] = function()
         styleOptions = function() return {} end,
         sort = function() return "recent_read" end,
         sortLabel = function() return "最近阅读" end,
+        source = function() return nil end,
+        sourceLabel = function() return "全部书源" end,
+        sourceOptions = function() return { { text = "全部书源", value = "" } } end,
         sortOptions = function()
             return {
                 { text = "最近阅读", value = "recent_read" },
@@ -176,7 +179,7 @@ Assert.eq(log[#log], "show:生成失败: boom")
 -- 海报墙背景：背景下面多「海报风格」「海报排序」，选中后写配置并走同一条刷新链路。
 background_mode = "poster"
 local poster_rows = Lockscreen:rows(desktop)
-Assert.len(poster_rows, 6)
+Assert.len(poster_rows, 7)
 local style_row = poster_rows[3]({})
 Assert.eq(style_row.title, "海报风格")
 Assert.eq(style_row.status, "竖屏排版")
