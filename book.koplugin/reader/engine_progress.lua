@@ -32,11 +32,13 @@ local function label(fraction)
     return fraction <= 0.5 and _("正在载入书籍") or _("正在排版")
 end
 
---- 只画弹窗本身并局部刷新。不能用 forceRePaint：它会重画整个窗口栈，阅读页绘制时
+--- 只画弹窗面板并局部刷新。不能用 forceRePaint：它会重画整个窗口栈，阅读页绘制时
 --- 触发文档再次排版，引擎回调又进来，无限递归（字体切换时一直「正在排版」）。
+--- 遮罩和背景在弹出时已画在屏上，每次回调只重画面板：整屏网点遮罩 / 壁纸每次都重画，
+--- 回调成百上千次时开书要慢几十秒。
 local function paintDialog(dialog)
     local Screen = require("device").screen
-    dialog:paintTo(Screen.bb, 0, 0)
+    dialog[1]:paintTo(Screen.bb, dialog.panel_x, dialog.panel_y)
     local box = dialog[1] and dialog[1].dimen
     if box then Screen:refreshFast(box.x, box.y, box.w, box.h) end
 end

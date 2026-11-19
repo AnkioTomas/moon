@@ -24,8 +24,9 @@ package.preload["ui.themes.widgets.progress_dialog"] = function()
             o.show = function(self) self.shown = true end
             o.close = function(self) self.closed = true end
             o.set = function(self, text, pct) self.sets[#self.sets + 1] = { text, pct } end
+            o.panel_x, o.panel_y = 0, 0
             o[1] = { dimen = { x = 0, y = 0, w = 10, h = 10 } }
-            o.paintTo = function(self) self.painted = (self.painted or 0) + 1 end
+            o[1].paintTo = function() o.painted = (o.painted or 0) + 1 end
             dialogs[#dialogs + 1] = o
             return o
         end,
@@ -64,7 +65,7 @@ Assert.eq(dialogs[1].sets[2][2], 70)
 Assert.eq(forced, 0)
 Assert.eq(dialogs[1].painted, 2)
 local nested
-dialogs[1].paintTo = function() nested = true; now_ms = now_ms + 1000; rolling:showEngineProgress(0.9) end
+dialogs[1][1].paintTo = function() nested = true; now_ms = now_ms + 1000; rolling:showEngineProgress(0.9) end
 now_ms = 4000
 rolling:showEngineProgress(0.8)
 Assert.is_true(nested)
