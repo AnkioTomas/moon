@@ -174,7 +174,7 @@ end
 function M.build(plan, cb)
     local cancelled = false
     local asset_job
-    local write_job
+    local write_job, image_job, pending_blocks
     local UIManager = require("ui/uimanager")
     asset_job = Background.ensure(plan.asset, function(path, err)
         if cancelled then return end
@@ -182,47 +182,67 @@ function M.build(plan, cb)
         UIManager:nextTick(function()
             if cancelled then return end
             local bg, blocks = layers(plan, path)
-            write_job = require("workers.job").run(function()
-                local ok, render_err, transparent = require("features.lockscreen.render").write(
-                    COMPOSE_PATH, bg, blocks)
-                if not ok then
-                    return { ok = false, err = render_err and tostring(render_err) or "render failed" }
-                end
-                return { ok = true, transparent = transparent or false }
-            end, {
-                name = "lockscreen.compose",
-                kind = "heavy",
-                timeout = 120,
-                on_done = function(result)
-                    write_job = nil
-                    if cancelled then return end
-                    if not (result and result.ok) then
-                        if path and result and result.err
-                            and tostring(result.err):find("cannot decode background", 1, true) then
-                            Background.invalidate(plan.asset)
-                        end
-                        return cb(false, result and result.err)
+            local widgets = {}
+            for _idx, block in ipairs(blocks) do
+                if block.widget then widgets[#widgets + 1] = block.widget end
+            end
+            -- 统计页等主体里的封面是异步下载 / 解码的：不等它落定，子进程画到的就只是占位封面。
+            pending_blocks = blocks
+            local function write()
+                image_job, pending_blocks = nil, nil
+                if cancelled then return end
+                write_job = require("workers.job").run(function()
+                    local ok, render_err, transparent = require("features.lockscreen.render").write(
+                        COMPOSE_PATH, bg, blocks)
+                    if not ok then
+                        return { ok = false, err = render_err and tostring(render_err) or "render failed" }
                     end
-                    cb(true, nil, result.transparent)
-                end,
-                on_failed = function(job_err)
+                    return { ok = true, transparent = transparent or false }
+                end, {
+                    name = "lockscreen.compose",
+                    kind = "heavy",
+                    timeout = 120,
+                    on_done = function(result)
+                        write_job = nil
+                        if cancelled then return end
+                        if not (result and result.ok) then
+                            if path and result and result.err
+                                and tostring(result.err):find("cannot decode background", 1, true) then
+                                Background.invalidate(plan.asset)
+                            end
+                            return cb(false, result and result.err)
+                        end
+                        cb(true, nil, result.transparent)
+                    end,
+                    on_failed = function(job_err)
+                        write_job = nil
+                        if cancelled then return end
+                        cb(false, job_err)
+                    end,
+                    on_cancelled = function()
+                        write_job = nil
+                    end,
+                })
+                if cancelled and write_job and write_job.cancel then
+                    write_job:cancel()
                     write_job = nil
-                    if cancelled then return end
-                    cb(false, job_err)
-                end,
-                on_cancelled = function()
-                    write_job = nil
-                end,
-            })
-            if cancelled and write_job and write_job.cancel then
-                write_job:cancel()
-                write_job = nil
+                end
+            end
+            if #widgets == 0 then
+                write()
+            else
+                image_job = require("ui.themes.widgets.image").await(widgets, write)
             end
         end)
     end)
     return { cancel = function()
         cancelled = true
         if asset_job then asset_job:cancel() end
+        if image_job then image_job:cancel() end
+        for _idx, block in ipairs(pending_blocks or {}) do
+            if block.widget and block.widget.free then block.widget:free() end
+        end
+        pending_blocks = nil
         if write_job and write_job.cancel then write_job:cancel() end
         write_job = nil
     end }
