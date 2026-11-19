@@ -313,8 +313,10 @@ function Chapter.refreshTocIfNeeded(session)
         return
     end
     -- 节流挡住时保留 open_refresh，后续翻页或联网再试。
-    -- 没有目录时不节流：空目录没有可保护的旧数据，必须尽快拉回来。
-    if has_toc and not require("source.toc").allowRefresh(identity.source_id, identity.stable_id) then
+    -- 没有目录时用短间隔：空目录没有可保护的旧数据要尽快拉回来，但失败不能每次翻页都重打。
+    local Toc = require("source.toc")
+    if not Toc.allowRefresh(identity.source_id, identity.stable_id, not has_toc and Toc.EMPTY_RETRY_INTERVAL or nil) then
+        if not has_toc then require("reader.session.progress").onTocReady(session, _("目录为空")) end
         return
     end
     local completed = false

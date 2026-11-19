@@ -30,6 +30,8 @@ local CACHE_LIMIT = 32
 
 --- 开书 / 临近章末拉新最短间隔（秒）。成功看 fetched_at，失败看本进程上次尝试时间。
 Toc.REFRESH_INTERVAL = 5 * 60
+--- 本地没有目录时的重试间隔：没有旧数据可保护，但失败也不能每次翻页都打网。
+Toc.EMPTY_RETRY_INTERVAL = 30
 --- 本进程内上次「尝试拉新」的时间：key → unix。失败也要记，不然离线狂开书会连打。
 ---@type table<string, integer>
 local last_attempt = {}
@@ -217,7 +219,7 @@ end
 function Toc.readAsync(source_id, stable_id, cb)
     local UI = require("ui/uimanager")
     local key = keyOf(source_id, stable_id)
-    local finished, active, step = false, nil, nil
+    local finished, active, step, restarts = false, nil, nil, 0
     local list, after, fetched_at, revision = {}, 0, nil, nil
     local function finish(result, err)
         if finished then return end
@@ -243,6 +245,8 @@ function Toc.readAsync(source_id, stable_id, cb)
             fetched_at, revision = current_at, current_revision
         elseif revision ~= current_revision then
             -- 分页读到一半被新写入换了快照：从头重读，不能把半截 / 报错当成空目录。
+            restarts = restarts + 1
+            if restarts > 3 then finish(nil, "toc snapshot changed"); return end
             list, after, revision = {}, 0, nil
             UI:nextTick(step); return
         end
@@ -270,11 +274,11 @@ end
 ---@param source_id string
 ---@param stable_id string
 ---@return boolean
-function Toc.allowRefresh(source_id, stable_id)
+function Toc.allowRefresh(source_id, stable_id, interval)
     local key = keyOf(source_id, stable_id)
     local now = os.time()
     local attempted = last_attempt[key]
-    if attempted and now - attempted < Toc.REFRESH_INTERVAL then
+    if attempted and now - attempted < (interval or Toc.REFRESH_INTERVAL) then
         return false
     end
     local hit = entry(source_id, stable_id)

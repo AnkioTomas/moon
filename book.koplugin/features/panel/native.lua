@@ -465,10 +465,7 @@ local function patchDrawerTab(menu)
     end
 end
 
---- KOReader 的 MenuSorter 会就地吃掉 menu_items（摘走 KOMenu:menu_buttons、改写顶层项），
---- 但插入物理键盘（翻页器、蓝牙键盘）会把 tab_item_table 置 nil 触发第二次 setUpdateItemTable，
---- 在已排序的表上重排必崩。每次重建前还原成第一次排序前的样子。
----@param menu table FileManagerMenu | ReaderMenu
+--- 只复制到每个菜单项一层：项里可能引用 ui / 控件（有环），不能深拷贝。
 local function copyItems(items)
     local copy = {}
     for key, value in pairs(items) do
@@ -482,6 +479,10 @@ local function copyItems(items)
     return copy
 end
 
+--- KOReader 的 MenuSorter 会就地吃掉 menu_items（摘走 KOMenu:menu_buttons、改写顶层项），
+--- 但插入物理键盘（翻页器、蓝牙键盘）会把 tab_item_table 置 nil 触发第二次 setUpdateItemTable，
+--- 在已排序的表上重排必崩。每次重建前还原成第一次排序前的样子。
+---@param menu table FileManagerMenu | ReaderMenu
 local function resetMenuItems(menu)
     local items = menu.menu_items
     if items and items["KOMenu:menu_buttons"] then
