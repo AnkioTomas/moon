@@ -10,11 +10,16 @@ package.preload["features.reviews.sheet"] = function()
 end
 package.preload["l10n"] = function() return { apply = function() end } end
 
--- 子进程定位同步跑完。
+-- 子进程定位同步跑完；读文件失败走 on_failed，与真实 Job 一致。
 package.preload["workers.job"] = function()
     return {
         run = function(worker, opts)
-            opts.on_done(worker())
+            local ok, result = pcall(worker)
+            if ok then
+                opts.on_done(result)
+            else
+                opts.on_failed(result)
+            end
             return { cancel = function() end }
         end,
     }
@@ -206,6 +211,13 @@ session = nil
 marks:updateView()
 Assert.len(source.fetches, 4)
 os.remove(chapter_file)
+
+-- 后面借段评 / 定位仍要读本章文件。
+do
+    local out = assert(io.open(chapter_file, "wb"))
+    out:write("<p>本章</p>")
+    out:close()
+end
 
 -- 关联书：目标来自 Linked.target；fetch 一次，place 每次视口变化调用；某章到了 redraw 重算。
 local Linked = require("features.reviews.linked")
@@ -418,3 +430,5 @@ Assert.len(marks:marks(), 0, "翻回前页立即移除漫画章评入口")
 end_source.enabled = false
 current_page = 5
 Assert.len(marks:marks(), 0, "关闭开关后漫画末页也不显示")
+
+os.remove(chapter_file)

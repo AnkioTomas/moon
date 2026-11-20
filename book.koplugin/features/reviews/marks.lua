@@ -2,7 +2,7 @@
 页内段评标记：本章他人段评的句子画下划线（虚线 / 实线见 `features.reviews.setting`），点按弹出段评列表。
 
 三种目标，都是「键 + fetch + place」：键变了才重新 fetch，视口变了才重新 place。
-- 微信读书章会话：fetch 拉本章热点并在子进程里定位到本章文件；place 只问当前页附近句子的屏幕框。
+- 微信读书章会话：fetch 拉本章热点，子进程按章文件路径读 HTML 并定位；place 只问当前页附近句子的屏幕框。
 - 关联了微信书目的本地书（见 ``features.reviews.linked``）：fetch 拉微信目录；place 按当前页拉章、找句、取框。
 - 章末段评：fetch 拉本章评论；place 只在文档末行挂入口，章节 HTML 与整篇 EPUB 共用。
 拉取失败（含离线且无缓存）过 ``RETRY`` 秒再试。
@@ -50,6 +50,7 @@ local RETRY = 60
 ---@field data any fetch 的结果；nil = 尚未取到
 ---@field retry_at integer|nil 拉取失败后的重试时刻（秒）
 ---@field job { cancel: fun() }|nil
+---@field generation integer|nil 请求代号；换章 / 重置后过期回调不得写入
 ---@field current ReviewPageMark[] 当前屏上标记（另带 spot）
 ---@field render_key string|nil
 ---@field spans integer[][]|nil 章会话 data[i] 的 { 起页, 止页 }
@@ -72,14 +73,32 @@ local function redraw(self)
     end
 end
 
---- 在子进程里把热点定位到 html：纯 Lua 文本匹配，Kindle 上一章要几百毫秒，放主进程会卡住翻页。
+--- 在 worker 里读本章文件并定位。主进程只传路径，避免同步 read("*a") 和把整章 HTML 带进闭包。
+--- 读失败当错误返回，让上层按 RETRY 再试，不把缺文件当成「零条热点」悄悄丢掉。
+---@param source ParagraphReviewSource
+---@param path string
+---@param hotspots WechatReviewHotspot[]
+---@return WechatReviewSpot[]
+function ReviewMarks.locateChapter(source, path, hotspots)
+    local file, open_err = io.open(path, "rb")
+    if not file then error(open_err or ("chapter file missing: " .. tostring(path))) end
+    local ok, html_or_err = pcall(file.read, file, "*a")
+    file:close()
+    if not ok then error(html_or_err) end
+    if html_or_err == nil then error("chapter read failed: " .. tostring(path)) end
+    return source:locateHotspots(hotspots, html_or_err)
+end
+
+--- 在子进程里读章文件并定位：纯 Lua 文本匹配，Kindle 上一章要几百毫秒，放主进程会卡住翻页。
 ---@param source ParagraphReviewSource
 ---@param hotspots WechatReviewHotspot[]
----@param html string
+---@param path string
 ---@param cb fun(spots: WechatReviewSpot[]|nil, err: string|nil)
 ---@return { cancel: fun() }
-local function locateAsync(source, hotspots, html, cb)
-    local job = Job.run(function() return source:locateHotspots(hotspots, html) end, {
+local function locateAsync(source, hotspots, path, cb)
+    local job = Job.run(function()
+        return ReviewMarks.locateChapter(source, path, hotspots)
+    end, {
         name = "reviews.locate",
         kind = "light",
         timeout = require("http.timeout").net(2),
@@ -102,21 +121,23 @@ local function chapterTarget(self, identity, source)
     -- 双语章按原章定位：译文元素只追加在段尾，原文 xpointer 两版通用。
     local file = require("utils.paths").chapterOrigin(self.ui.document.file)
     local fetch = function(cb)
-        local locate, borrowed
+        local gen, locate, borrowed = self.generation, nil, nil
+        local function stale()
+            return gen ~= nil and self.generation ~= gen
+        end
         local function onHotspots(hotspots, err)
+            if stale() then return end
             if not hotspots then
                 cb(nil, err)
                 return
             end
-            local f = io.open(file, "rb")
-            if not f then logger.warn("book.reviews chapter file missing", file) end
-            local html = f and f:read("*a") or ""
-            if f then f:close() end
             local function settle(list)
+                if stale() then return end
                 -- 句子可能换成借来的一批，页码跨度要重算。
                 self.spans, self.spans_hash = nil, nil
                 logger.dbg("book.reviews spots", #list, "borrowed", self.borrowed_idents and 1 or 0)
-                locate = locateAsync(source, list, html, function(spots, locate_err)
+                locate = locateAsync(source, list, file, function(spots, locate_err)
+                    if stale() then return end
                     logger.dbg("book.reviews located", spots and #spots or 0, "of", #list)
                     cb(spots, locate_err)
                 end)
@@ -128,6 +149,7 @@ local function chapterTarget(self, identity, source)
                 return
             end
             borrowed = Linked.chapterHotspotsAsync(source, identity, link, function(list)
+                if stale() then return end
                 -- 借来的热点按 range 记住属于关联书哪一章：点开时用那一章的身份，否则服务端回空。
                 local idents
                 if list and #list > 0 then
@@ -326,6 +348,7 @@ end
 
 ---@param self ReviewMarks
 local function reset(self)
+    self.generation = (self.generation or 0) + 1
     if self.job then self.job.cancel() end
     Linked.cancel(self.cache)
     self.job, self.key, self.data, self.retry_at, self.spans = nil, nil, nil, nil, nil
@@ -335,11 +358,13 @@ end
 ---@param self ReviewMarks
 ---@param target ReviewTarget
 local function fetch(self, target)
+    self.generation = (self.generation or 0) + 1
+    local gen = self.generation
     self.key = target.key
     local done = false
     local job = target.fetch(function(data, err)
         done = true
-        if self.key ~= target.key then return end
+        if self.generation ~= gen then return end
         self.job = nil
         if not data then
             logger.warn("book.reviews fetch failed", err)
@@ -349,6 +374,10 @@ local function fetch(self, target)
         self.data = data
         redraw(self)
     end)
+    if self.generation ~= gen then
+        if job then job.cancel() end
+        return
+    end
     if not done then self.job = job end
 end
 

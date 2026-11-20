@@ -87,6 +87,8 @@ end
 ---@field more boolean
 ---@field loaded boolean 首批已到
 ---@field job { cancel: fun() }|nil
+---@field generation integer 请求代号；关闭 / 重载后过期回调不得 refresh 或 close
+---@field closed boolean|nil 已关闭，回调不得再碰控件
 ---@field turn_after_load boolean 用户在末页点了下一页，续拉回来后翻过去
 local Sheet = Modal:extend{
     covers_fullscreen = true,
@@ -104,13 +106,26 @@ function Sheet:init()
     self.loaded = self.snapshot ~= nil or self.reply_preview ~= nil
     self.more = not self.loaded
     if self.loaded then self.total = self.spot.total end
+    self.closed = false
+    self.generation = (self.generation or 0) + 1
     self.close_callback = function()
+        self.closed = true
+        self.generation = (self.generation or 0) + 1
         if self.job then self.job.cancel() end
         self.job = nil
     end
     self:paginate()
     self:rebuild()
     self:load()
+end
+
+--- 这张面板仍接受该次请求的回调。同步完成、重入、关闭后的迟到回调都走这里。
+---@param gen integer|nil 发起请求时的 generation；缺省只看 closed
+---@return boolean
+function Sheet:alive(gen)
+    if self.closed then return false end
+    if gen ~= nil and self.generation ~= gen then return false end
+    return true
 end
 
 --- 横线分隔（引用竖条也用它）。
@@ -359,6 +374,7 @@ function Sheet:rebuild()
 end
 
 function Sheet:refresh()
+    if self.closed then return end
     local Perf = require("utils.perf")
     local started_at = Perf.now()
     self:rebuild()
@@ -368,10 +384,12 @@ end
 
 --- 拉下一批并追加；在线取最新、离线读缓存，没缓存又没网时源立即回错。
 function Sheet:load()
-    if self.job or not self.more then return end
+    if self.closed or self.job or not self.more then return end
+    local gen = self.generation
     local Toast = require("ui.themes.widgets.toast")
     local source = self.identity.source --[[@as ParagraphReviewSource]]
     if self.reply_page and not source.paragraphReviewRepliesAsync then
+        if not self:alive(gen) then return end
         Toast:new{ text = _("无法获取回复"), timeout = 2 }:show()
         self.turn_after_load = false
         if not self.loaded then self:close() end
@@ -380,7 +398,9 @@ function Sheet:load()
     local fetch = self.reply_page and source.paragraphReviewRepliesAsync or source.paragraphReviewPageAsync
     local done = false
     local job = fetch(source, self.identity, self.spot.range, self.max_idx, function(page, err)
-        done, self.job = true, nil
+        done = true
+        if not self:alive(gen) then return end
+        self.job = nil
         if not page then
             Toast:new{ text = err or (self.reply_page and _("无法获取回复") or _("无法获取评论")), timeout = 2 }:show()
             self.turn_after_load = false
@@ -397,6 +417,10 @@ function Sheet:load()
         self.turn_after_load = false
         self:refresh()
     end)
+    if not self:alive(gen) then
+        if job then job.cancel() end
+        return
+    end
     if not done then self.job = job end
 end
 
