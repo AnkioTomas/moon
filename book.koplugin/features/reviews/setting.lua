@@ -44,6 +44,7 @@ Setting.defaults = {
     mark_opacity = 100,
     mark_offset = 0,
     font_scale = 100,
+    replies_pos = "left",
     chapter_links = {},
 }
 
@@ -116,6 +117,25 @@ function Setting.entries(desktop)
                                         desktop:updateView()
                                     end,
                                 }:show()
+                            end,
+                        })
+                    end
+                    rows[#rows + 1] = function(iw)
+                        return Row.choice({
+                            width = iw,
+                            icon = "forum",
+                            title = _("回复按钮位置"),
+                            items = {
+                                { value = "left", text = _("左侧") },
+                                { value = "right", text = _("右侧") },
+                            },
+                            current = reviews.replies_pos or "left",
+                            on_select = function(value)
+                                reviews.replies_pos = value
+                                MoonSettings.save("features.reviews", reviews)
+                                local ui = require("apps/reader/readerui").instance
+                                if ui and ui.dialog then require("ui/uimanager"):setDirty(ui.dialog, "ui") end
+                                desktop:updateView()
                             end,
                         })
                     end

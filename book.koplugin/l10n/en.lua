@@ -2348,4 +2348,7 @@ return {
     ["没有可用的公众号来源"] = "No official-account source is available",
     ["底栏选中色半透明"] = "Translucent selected tab",
     ["选中格底色叠在壁纸上，不再是实心色块"] = "Selected cell fill is blended over the wallpaper instead of a solid block",
+    ["回复按钮位置"] = "Reply button position",
+    ["左侧"] = "Left",
+    ["右侧"] = "Right",
 }

@@ -221,6 +221,8 @@ function Sheet:card(i, avail)
     if type(item.reply_to) == "string" and item.reply_to ~= "" then
         body = T(_("回复 %1：%2"), item.reply_to, item.content)
     end
+    local reviews = require("utils.settings").get("features.reviews")
+    local replies_pos = reviews and reviews.replies_pos or "left"
     local replies = self:replyLine(item)
     local replies_h = replies and replies:getSize().h + space or 0
     local content = Text.box("body", body, w, { transparent = true, face = face,
@@ -239,17 +241,26 @@ function Sheet:card(i, avail)
         card[#card + 1] = pics
     end
     if replies then
-        card[#card + 1] = VerticalSpan:new{ width = space }
-        card[#card + 1] = replies
+        if replies_pos == "right" then
+            card[#card + 1] = HorizontalGroup:new{
+                HorizontalSpan:new{ width = w - replies:getSize().w },
+                replies,
+            }
+        else
+            card[#card + 1] = VerticalSpan:new{ width = space }
+            card[#card + 1] = replies
+        end
     end
-    self.cards[i] = require("ui.themes.widgets.tap").wrap(card, truncated and function()
-        require("ui.themes.widgets.text_viewer"):new{
-            title = (self.title or _("段评")) .. " · " .. item.author,
-            text = body,
-            emoji = true,
-            inline_images = item.inline_images,
-        }:show()
-    end or nil)
+    local card_body = card
+    self.cards[i] = require("ui.themes.widgets.tap").wrap(card_body,
+        truncated and function()
+            require("ui.themes.widgets.text_viewer"):new{
+                title = (self.title or _("段评")) .. " · " .. item.author,
+                text = body,
+                emoji = true,
+                inline_images = item.inline_images,
+            }:show()
+        end or nil)
     return self.cards[i]
 end
 

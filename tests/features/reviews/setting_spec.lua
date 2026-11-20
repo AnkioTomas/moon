@@ -3,7 +3,28 @@
 local Assert = require("support.assert")
 
 package.preload["ui.themes.widgets.row"] = function()
-    return { widget = function(opts) return opts end }
+    return {
+        widget = function(opts) return opts end,
+        -- 与生产 Row.choice 相同：居中单选列表，选了与 current 不同的值才回调。
+        choice = function(opts)
+            if opts.status == nil then
+                for _idx, item in ipairs(opts.items or {}) do
+                    if item.value == opts.current then opts.status = item.text end
+                end
+            end
+            opts.kind = opts.kind or "nav"
+            opts.callback = function()
+                require("ui.themes.widgets.list"):new{
+                    title = opts.title, items = opts.items, current = opts.current, centered = true,
+                    on_select = function(value)
+                        if value == nil or value == opts.current then return end
+                        opts.on_select(value)
+                    end,
+                }:show()
+            end
+            return opts
+        end,
+    }
 end
 local conf = { book_reviews_mark_style = "dashed", mark_gray = 73, mark_opacity = 100, mark_offset = 0, font_scale = 100 }
 local sources = { wechat = {}, qidian = { show_paragraph_reviews = true }, zhihu = {} }
@@ -63,7 +84,7 @@ Assert.eq(entries[1].page.sections()[1].rows[1](600).status, "开")
 
 local style = sections[2]
 Assert.eq(style.title, "段评")
-Assert.len(style.rows, 5)
+Assert.len(style.rows, 6)
 Assert.eq(style.rows[1](600).status, "虚线")
 
 style.rows[1](600).callback()
@@ -101,3 +122,34 @@ Assert.eq(zhihu.status, "关")
 zhihu.callback()
 Assert.is_true(sources.zhihu.show_paragraph_reviews)
 Assert.eq(entries[1].page.sections()[1].rows[3](600).status, "开")
+
+local pos = entries[1].page.sections()[2].rows[6](600)
+Assert.eq(pos.title, "回复按钮位置")
+Assert.eq(pos.status, "左侧")
+Assert.eq(pos.kind, "nav")
+
+local list, shown
+package.loaded["ui.themes.widgets.list"] = nil
+package.preload["ui.themes.widgets.list"] = function()
+    return {
+        new = function(_, o)
+            list = o
+            o.show = function() shown = true end
+            return o
+        end,
+    }
+end
+local updates_before = updates
+pos.callback()
+Assert.is_true(shown)
+Assert.is_true(list.centered, "回复按钮位置用居中小弹窗，不是全屏列表")
+Assert.eq(list.title, "回复按钮位置")
+Assert.eq(list.current, "left")
+list.on_select("left")
+Assert.is_nil(conf.replies_pos, "选当前值不写回")
+list.on_select("right")
+Assert.eq(conf.replies_pos, "right")
+Assert.eq(saved[#saved], "features.reviews")
+Assert.eq(dirty[1], reader.dialog)
+Assert.eq(updates, updates_before + 1, "选定后刷新设置页状态")
+Assert.eq(entries[1].page.sections()[2].rows[6](600).status, "右侧")
