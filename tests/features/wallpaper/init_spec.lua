@@ -160,3 +160,55 @@ do
         end
     end
 end
+
+-- 非全屏弹窗不按整屏 dimen 贴壁纸，否则会盖掉下层页面只剩淡壁纸+网点。
+do
+    local calls = {}
+    local function stub(bb, x, y, w, h, scope)
+        calls[#calls + 1] = { scope = scope, w = w, h = h }
+        bb.wiped = true
+        return true
+    end
+    local orig = Wallpaper.paintWindow
+    Wallpaper.paintWindow = stub
+    local backdrop = Ext.last("modal.backdrop")
+    local panel = tree()
+    local popup = {
+        name = "book_theme_confirm",
+        mask = true,
+        covers_fullscreen = false,
+        dimen = { w = 100, h = 100 },
+        [1] = panel,
+    }
+    local bb = { wiped = false }
+    backdrop(popup, bb, 0, 0)
+    Assert.eq(#calls, 0, "带遮罩的小弹窗不得整屏贴壁纸")
+    Assert.is_true(not bb.wiped, "下层画布必须保留")
+    Assert.eq(panel[1].style.bg, 1, "未铺壁纸时面板底色还原/保留")
+
+    -- 未标 covers_fullscreen 的弹窗同样不能盖住下层（Confirm / Spin 的默认情况）。
+    local implied = { name = "spin", mask = true, dimen = { w = 100, h = 100 }, [1] = tree() }
+    local bb_implied = { wiped = false }
+    backdrop(implied, bb_implied, 0, 0)
+    Assert.eq(#calls, 0, "covers_fullscreen 为空时也不整屏贴壁纸")
+    Assert.is_true(not bb_implied.wiped)
+
+    conf.wallpaper_custom_image, conf.wallpaper_enabled = "/tmp/g.png", true
+    conf.wallpaper_settings, conf.wallpaper_dialog = true, true
+    Wallpaper.invalidate()
+    local settings = {
+        name = "book_settings_overlay",
+        mask = false,
+        covers_fullscreen = true,
+        dimen = { w = 100, h = 100 },
+        [1] = tree(),
+    }
+    local bb_settings = { wiped = false }
+    backdrop(settings, bb_settings, 0, 0)
+    Assert.eq(#calls, 1)
+    Assert.eq(calls[1].scope, "settings")
+    Assert.eq(calls[1].w, 100)
+    Assert.eq(calls[1].h, 100)
+    Assert.is_true(bb_settings.wiped, "全屏设置页仍铺界面壁纸")
+    Wallpaper.paintWindow = orig
+end

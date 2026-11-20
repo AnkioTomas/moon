@@ -532,6 +532,12 @@ Ext.add("desktop.backdrop", {
 })
 
 Ext.add("modal.backdrop", function(modal, bb, x, y)
+    -- 非全屏弹窗的 dimen 是整屏（含遮罩点按区）。若按这块整屏贴壁纸，会盖掉下层页面：
+    -- 壁纸位图从白底按透明度淡化而来，再叠网点，看起来就像只有遮罩没有原内容。
+    if modal.mask or not modal.covers_fullscreen then
+        M.restore(modal[1])
+        return
+    end
     local scope = modal.name == "book_settings_overlay" and "settings" or "dialog"
     local painted = M.paintWindow(bb, x, y, modal.dimen.w, modal.dimen.h, scope)
     if painted then M.hollow(modal[1], scope) else M.restore(modal[1]) end
