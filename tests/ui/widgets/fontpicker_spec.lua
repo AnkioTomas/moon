@@ -48,6 +48,10 @@ package.preload["ui.fonts"] = function()
         -- set 成功须返回真值；fontpicker 按 ok 决定 Toast「已选择」还是「无法打开」。
         set = function(id) selected = id; return true end,
         downloadedPath = function(id) return id:match("^wr") and "/fonts/" .. id .. ".ttf" end,
+        getFace = function(id)
+            if id:match("%.ttf$") then getface_n = getface_n + 1 end
+            return { id = id, size = 12 }
+        end,
     }
 end
 package.preload["ui.fonts.catalog"] = function()

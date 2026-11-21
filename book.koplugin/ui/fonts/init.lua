@@ -286,6 +286,101 @@ function Fonts.faceForId(id)
     return face
 end
 
+--- 按 id / basename / 绝对路径找字体文件。精确比 basename，不用宿主那种易炸的 path:find。
+---@param realname string|nil
+---@return string|nil
+function Fonts.resolveFacePath(realname)
+    if type(realname) ~= "string" or realname == "" then return nil end
+    if Fonts.isFile(realname) then return realname end
+    local dir = FontList.fontdir
+    if dir and Fonts.isFile(dir .. "/" .. realname) then
+        return dir .. "/" .. realname
+    end
+    -- resolvePath = 微信读书落盘 + 设置目录 / FontList 按 basename 精确匹配
+    return select(1, resolvePath(realname))
+end
+
+--- 按绝对路径打开 face，写入与宿主相同的 `Font.faces` 缓存键。
+--- 回落字体名通常在内置目录，经 patch 后走宿主实现，这里不复制一份 getFallbackFont。
+---@param font string
+---@param size number|nil
+---@param faceindex number|nil
+---@return table|nil
+function Fonts.getFace(font, size, faceindex)
+    if type(font) ~= "string" or font == "" then return nil end
+    local orig_size = size or (Font.sizemap and Font.sizemap[font]) or 16
+    local scaled = orig_size
+    local device = require("device")
+    if device.screen and type(device.screen.scaleBySize) == "function" then
+        scaled = device.screen:scaleBySize(orig_size)
+    end
+    local realname = (Font.fontmap and Font.fontmap[font]) or font
+    local hash = realname .. scaled
+    if faceindex then hash = hash .. "/" .. faceindex end
+    if type(Font.faces) ~= "table" then Font.faces = {} end
+    local cached = Font.faces[hash]
+    if cached then
+        if cached.orig_size ~= orig_size then cached.orig_size = orig_size end
+        return cached
+    end
+    local path = Fonts.resolveFacePath(realname) or Fonts.resolveFacePath(font)
+    if not path then return nil end
+    local ok, ftsize = pcall(require("ffi/freetype").newFaceSize, path, scaled, faceindex)
+    if not ok or not ftsize then return nil end
+    local face_obj = {
+        orig_font = font,
+        realname = realname,
+        size = scaled,
+        orig_size = orig_size,
+        ftsize = ftsize,
+        hash = hash,
+        is_real_bold = type(Font.isRealBoldFont) == "function" and Font:isRealBoldFont(realname) or false,
+        hb_features = { "+kern", "+liga" },
+    }
+    -- 主字体直接返回自己；其余回落到 Font.fallbacks（Noto 等），由 patch 进宿主 getFace。
+    face_obj.getFallbackFont = function(num)
+        if not num or num == 0 then return face_obj end
+        if not face_obj.fallbacks then face_obj.fallbacks = {} end
+        if face_obj.fallbacks[num] ~= nil then return face_obj.fallbacks[num] end
+        local next_num, cur = #face_obj.fallbacks + 1, 0
+        for _idx, name in ipairs(Font.fallbacks or {}) do
+            if name ~= face_obj.realname then
+                local fb = Font:getFace(name, face_obj.orig_size)
+                if fb then
+                    cur = cur + 1
+                    if cur == next_num then
+                        face_obj.fallbacks[next_num] = fb
+                        return fb
+                    end
+                end
+            end
+        end
+        face_obj.fallbacks[next_num] = false
+        return false
+    end
+    Font.faces[hash] = face_obj
+    return face_obj
+end
+
+local _getface_patched = false
+
+--- 内置目录仍走宿主；否则用绝对路径打开，成功直接返回，失败返回 nil。
+--- 不再调用宿主里会因 `%1` 等抛 invalid capture index 的 :find 回落。
+function Fonts.patchGetFace()
+    if _getface_patched or type(Font.getFace) ~= "function" then return end
+    _getface_patched = true
+    local orig = Font.getFace
+    Font.getFace = function(self, font, size, faceindex)
+        font = font or (self.fontmap and self.fontmap.cfont)
+        local realname = (self.fontmap and self.fontmap[font]) or font
+        local dir = FontList.fontdir
+        if type(realname) == "string" and dir and Fonts.isFile(dir .. "/" .. realname) then
+            return orig(self, font, size, faceindex)
+        end
+        return Fonts.getFace(font, size, faceindex)
+    end
+end
+
 --- FreeType 能否真正打开该文件。文件在盘上 ≠ 可用：坏 ttf / 假后缀 / 截断下载
 --- 会让 KOReader 冷启动建 FileManager 时 face 为 nil 直接崩（见 KPW5 crash.log）。
 ---@param path string
@@ -311,9 +406,8 @@ local function canOpenMapped(basename)
     local dir = FontList.fontdir
     if dir and Fonts.canOpen(dir .. "/" .. basename) then return true end
     FontList:getFontList()
-    local escaped = basename:gsub("([%^%$%(%)%%%.%[%]%*%+%-%?])", "%%%1")
     for _idx, path in ipairs(FontList.fontlist or {}) do
-        if path:find(escaped, 1) and Fonts.canOpen(path) then return true end
+        if Text.basename(path) == basename and Fonts.canOpen(path) then return true end
     end
     return false
 end
@@ -376,6 +470,7 @@ end
 --- 文件缺失或 FreeType 打不开时退回系统默认并清配置，不让 KO 因坏字体起不来。
 --- 在 FileManager:setupLayout 之前由插件 init 调用，正好挡在冷启动崩点前。
 function Fonts.applyCurrent()
+    Fonts.patchGetFace()
     -- 只备份一次。settings 里已污染的 fontmap 不能当备份，改用 SAFE_UI。
     if not _defaults then
         _defaults = {}

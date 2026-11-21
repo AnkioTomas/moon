@@ -12,7 +12,6 @@
 
 local Blitbuffer = require("ffi/blitbuffer")
 local Device = require("device")
-local Font = require("ui/font")
 local NetworkMgr = require("ui/network/manager")
 local TextWidget = require("ui/widget/textwidget")
 local Fonts = require("ui.fonts")
@@ -48,8 +47,14 @@ local function localPreview(it, pw)
     if it.kind == "weread" or not it.id or it.id == "" then
         return nil
     end
-    local face = Font:getFace(it.id, Theme.fontSize(18))
-    if not face then return nil end
+    -- 不用直接调用宿主 Font:getFace：系统字体常以 basename 匹配 FontList，
+    -- 而 getFace 只转义 `-` 再 path:find，文件名含 `%1` 等会抛 invalid capture index，整页被 Guard 关掉。
+    local ok, face = pcall(Fonts.getFace, it.id, Theme.fontSize(18), it.faceindex)
+    if not ok then
+        require("utils.log").warn("book.font preview failed", it.id, face)
+        return nil
+    end
+    if type(face) ~= "table" then return nil end
     return TextWidget:new{
         text = it.name or _("字体预览"),
         face = face,
