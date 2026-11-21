@@ -94,7 +94,11 @@ end
 
 function Source:syncBooksAsync(opts, cb)
     if not self:configured() then return SourceBase.skipped(cb, "legado not configured") end
-    return Shelf.syncAsync(self.id, Remote, function(rows) return Mapper.shelfList(Client.coverUrl, rows) end, opts, cb)
+    opts = opts or {}
+    local sync_opts = {}
+    for k, v in pairs(opts) do sync_opts[k] = v end
+    sync_opts.inserted_at_from_row = true
+    return Shelf.syncAsync(self.id, Remote, function(rows) return Mapper.shelfList(Client.coverUrl, rows) end, sync_opts, cb)
 end
 
 --- 取书架行再交给 fn(row, toc, done)；没配置 / 不在书架上 / 目录空都走 cb 报错。

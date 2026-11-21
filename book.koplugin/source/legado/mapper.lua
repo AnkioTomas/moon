@@ -40,8 +40,13 @@ end
 ---@return Book[]
 function Mapper.shelfList(coverUrl, rows)
     local out, groups = {}, rows.groups
-    for _idx, row in ipairs(rows) do
+    local now = os.time()
+    local n = #rows
+    for idx, row in ipairs(rows) do
         if type(row.bookUrl) == "string" and row.bookUrl ~= "" then
+            local dur_time = tonumber(row.durChapterTime)
+            local read_at = (dur_time and dur_time > 1000000000)
+                and math.floor(dur_time > 100000000000 and dur_time / 1000 or dur_time) or nil
             out[#out + 1] = {
                 source_id = SOURCE_ID,
                 stable_id = row.bookUrl,
@@ -51,6 +56,8 @@ function Mapper.shelfList(coverUrl, rows)
                 category_authoritative = groups and true or nil,
                 intro = row.intro and Text.stripHtml(row.intro),
                 cover = cover(coverUrl, row),
+                read_at = read_at,
+                inserted_at = now + (n - idx),
             }
         end
     end
