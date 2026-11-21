@@ -4,6 +4,8 @@
   +-------------------------------+
   | [<]       阅读页顶栏          |
   |-------------------------------|
+  | 浏览  已安装  更新    搜索    |  可选 nav：横向下划线页签，贴标题栏，不用预览框
+  |-------------------------------|
   | [ 预览（可选） ]              |
   |-------------------------------|
   | 分组标题                      |
@@ -32,6 +34,7 @@ local _ = require("gettext")
 ---@class BookSettingsOverlaySpec
 ---@field id string|nil
 ---@field title string
+---@field nav (fun(width: number): table)|nil 标题栏下的横向导航（如内容区下划线页签），全宽贴边，不用预览卡片
 ---@field preview (fun(width: number): table)|nil
 ---@field sections fun(): BookThemeSection[]
 ---@field docs string|nil 官网手册路径（相对 moon.ankio.net）；有则页底追加「查看指南」
@@ -39,6 +42,9 @@ local _ = require("gettext")
 ---@field refresh_seconds number|nil 页面在最上层时每隔这么久重算一次（运行状态这类实时页）
 ---@field right_icon string|nil 标题栏右上角图标
 ---@field right_callback (fun())|nil
+---@field extra_icon string|nil 兼容：右侧第二个图标（在 right_icon 左侧）
+---@field extra_callback (fun())|nil
+---@field right_actions table|nil 右侧多个图标按钮 { icon, callback }[]，优先于 right_icon / extra_icon
 
 ---@class BookSettingsOverlay : BookThemeModal
 ---@field spec BookSettingsOverlaySpec
@@ -149,9 +155,17 @@ function Overlay:rebuild()
         width = w, title = self.spec.title,
         left_icon = "arrow_back", left_callback = function() self:close() end,
         right_icon = self.spec.right_icon, right_callback = self.spec.right_callback,
+        extra_icon = self.spec.extra_icon, extra_callback = self.spec.extra_callback,
+        right_actions = self.spec.right_actions,
     })
     local page = VerticalGroup:new{ align = "left", bar }
     local head_h = bar:getSize().h
+    -- nav 贴在标题栏下全宽放置，不要套进预览卡片或居中框，否则会和订阅页签布局不一致。
+    if self.spec.nav then
+        local nav = self.spec.nav(w)
+        page[#page + 1] = nav
+        head_h = head_h + nav:getSize().h
+    end
     if self.spec.preview then
         local pad = Theme.px(t.space.md)
         local preview = self.spec.preview(w - pad * 2)
