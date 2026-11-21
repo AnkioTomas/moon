@@ -34,6 +34,7 @@ local Button = require("ui.themes.widgets.button")
 local Pager = require("ui.themes.widgets.pager")
 local Tap = require("ui.themes.widgets.tap")
 local Text = require("ui.themes.widgets.text")
+local Tabs = require("ui.themes.widgets.tabs")
 local T = require("ffi/util").template
 local _ = require("gettext")
 
@@ -124,27 +125,27 @@ function Paper.view(page, w, h)
     local _first, total = SubDB.stream(opts, 1, 0)
     local status = page:status()
 
-    -- 筛选行：未读 全部 收藏 │ 搜索
-    local tabs = HorizontalGroup:new{ align = "top" }
+    -- 筛选行：未读 全部 收藏 │ 搜索（与插件市场共用横向下划线页签）。
+    local tab_items = {}
     for _idx, m in ipairs(MODES) do
-        local active = m.id == mode.id
-        local label = Text.line("body", m.label(), { bold = active, color = active and t.color.accent or faint, optical = true })
-        local cell = VerticalGroup:new{ align = "center", label, VerticalSpan:new{ width = sm },
-            rule(label:getSize().w, active and math.max(2, Theme.px(2)) or 0, t.color.accent) }
-        tabs[#tabs + 1] = area(HorizontalGroup:new{ cell, HorizontalSpan:new{ width = pad } }, function()
-            page:filter({ stream_mode = m.id })
-        end)
+        tab_items[#tab_items + 1] = { id = m.id, text = m.label() }
     end
-    local search = area(HorizontalGroup:new{ align = "center", ico("search", q ~= "" and t.color.accent or faint),
-        HorizontalSpan:new{ width = sm }, Text.line("body", q ~= "" and q or _("搜索"), { color = q ~= "" and t.color.accent or faint, optical = true }) },
-        function() Paper.search(page) end)
+    local search = Tabs.action({
+        icon = "search",
+        text = q ~= "" and q or _("搜索"),
+        accent = q ~= "",
+        on_tap = function() Paper.search(page) end,
+    })
     local count = Text.line("body", tostring(total), { color = faint, optical = true })
-    local right = HorizontalGroup:new{ align = "center", count, HorizontalSpan:new{ width = pad }, search }
-    -- 页签带下划线、比搜索行高；右侧补同样高度，两边文字才在同一水平线上。
-    local underline = sm + math.max(2, Theme.px(2))
-    right = VerticalGroup:new{ align = "right", right, VerticalSpan:new{ width = underline } }
-    local filter = VerticalGroup:new{ align = "left", VerticalSpan:new{ width = sm }, ends(tabs, right),
-        padded(rule(iw, 1, t.color.faint)) }
+    local trailing = HorizontalGroup:new{ align = "center", count, HorizontalSpan:new{ width = pad }, search }
+    local filter = Tabs.row({
+        width = w,
+        pad = pad,
+        tabs = tab_items,
+        active = mode.id,
+        on_tab = function(id) page:filter({ stream_mode = id }) end,
+        trailing = trailing,
+    })
 
     -- 文章行：固定高度（标题一行 + 来源行），分页数才稳定。
     local bullet_w = Text.line("title", "★"):getSize().w
