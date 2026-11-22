@@ -86,23 +86,6 @@ local function originOf(url)
     return origin, scheme:lower(), host
 end
 
--- 带 HTTP Basic 门禁的镜像：凭据只发给同 origin 的请求，不随跨主机重定向或其它镜像泄露
-local MIRROR_AUTH = {
-    ["https://iread.ink"] = "iread:DGvG2h3JMOvEoS",
-}
-
---- 给指向门禁镜像的请求补 Authorization；其它地址原样返回。
----@param url string
----@param headers table<string, string>
----@return table<string, string>
-local function withMirrorAuth(url, headers)
-    local cred = MIRROR_AUTH[originOf(url)]
-    if not cred then return headers end
-    local out = { Authorization = "Basic " .. Text.base64Encode(cred) }
-    for k, v in pairs(headers) do out[k] = v end
-    return out
-end
-
 -- ---------------------------------------------------------------------------
 -- 镜像选择与故障转移
 -- ---------------------------------------------------------------------------
@@ -365,7 +348,7 @@ function Client:_jsonAsync(method, path, opts, cb)
             url = url,
             method = m,
             body = req_body,
-            headers = withMirrorAuth(url, headers),
+            headers = headers,
             jar = jar,
             timeout = opts.timeout or require("http.timeout").net(1),
         }, function(res, err)
@@ -630,7 +613,7 @@ function Client:downloadAsync(id, hash, dest, on_progress, cb)
         job = Request.download({
             url = link,
             method = "GET",
-            headers = withMirrorAuth(link, self:headers(true)),
+            headers = self:headers(true),
             timeout = require("http.timeout").net(6),
             -- CDN 直链常带 301/302：允许 Turbo 自动跟随
             allow_redirects = true,
