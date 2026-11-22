@@ -39,7 +39,10 @@ end
 
 --- 下一 tick 关闭文档并回到月读桌面（点击调用栈里不能同步关文档）。
 ---@param ui table|nil ReaderUI
-function ReaderExit.closeToDesktop(ui)
+---@param plugin table|nil 月读插件实例；关书后到 FM 上按同名取宿主
+function ReaderExit.closeToDesktop(ui, plugin)
+    local Desktop = require("desktop")
+    local reader_plugin = Desktop.hostPlugin(ui, plugin)
     UIManager:nextTick(Guard.wrap("close to desktop", function()
         local started_at = Perf.now()
         -- DocCache:serialize 按 lfs access 时间排序磁盘缓存，文件已被删就是 nil，排序直接崩；先摘掉失效项。
@@ -51,10 +54,10 @@ function ReaderExit.closeToDesktop(ui)
         if ui and ui.onClose then ui:onClose() end
         Perf.slow("exit onClose", started_at)
         -- 打开书时 ReaderUI 会关掉 FileManager；这里先重建，否则关闭文档后窗口栈为空直接退出。
-        local Desktop = require("desktop")
         local fm = Desktop.ensureFileManager()
         Perf.slow("exit ensureFileManager", started_at)
-        Desktop.open(fm.book)
+        local host = Desktop.hostPlugin(fm, reader_plugin)
+        if host then Desktop.open(host) end
         Perf.slow("exit total", started_at)
     end))
 end

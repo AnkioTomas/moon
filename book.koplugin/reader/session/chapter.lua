@@ -427,8 +427,10 @@ local function requestChapter(chapter, idx, opts)
                 failRequest(chapter, tostring(switch_err or _("章节打开失败")))
                 -- 旧书可能已在 switchDocument 里关掉：没有阅读器了就回桌面，否则窗口栈清空会退出 KOReader。
                 if not ReaderUI.instance then
-                    local fm = require("desktop").ensureFileManager()
-                    require("desktop").open(fm.book)
+                    local Desktop = require("desktop")
+                    local fm = Desktop.ensureFileManager()
+                    local host = Desktop.hostPlugin(fm)
+                    if host then Desktop.open(host) end
                 end
             end
         end)

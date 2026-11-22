@@ -28,8 +28,11 @@ local WidgetContainer = require("ui/widget/container/widgetcontainer")
 -- 版本门禁必须在其它业务模块加载之前：旧版 KOReader 缺 ffi/posix 等，顶层 require 就会抛错。
 local KoVersion = require("ko_version")
 if not KoVersion.supported() then return KoVersion.stub(WidgetContainer) end
--- 缺文件时业务模块 require 会一路抛错，先拦住并提示重装。
 local InstallCheck = require("install_check")
+-- 目录名必须是 book.koplugin：PluginLoader 按目录名挂 ui.book，叫错会关书回桌面崩。
+local WRONG_DIR = InstallCheck.dirName(ROOT)
+if WRONG_DIR then return InstallCheck.wrongDir(WidgetContainer, WRONG_DIR) end
+-- 缺文件时业务模块 require 会一路抛错，先拦住并提示重装。
 local MISSING = InstallCheck.check(ROOT, INDEX)
 if MISSING then return InstallCheck.stub(WidgetContainer, MISSING) end
 local logger = require("utils.log")

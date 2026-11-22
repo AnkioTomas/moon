@@ -44,3 +44,23 @@ package.loaded["src.wechat"] = nil
 Assert.errors(function() dofile(other .. "/caller.lua") end, "src.wechat")
 package.loaded["src.wechat"] = nil
 os.execute("rm -rf " .. tmp .. " " .. other)
+
+-- 别的插件抢先污染 package.loaded 同名模块时，本插件目录内的 require 仍拿本目录文件。
+local mine = os.tmpname()
+os.remove(mine)
+local foe = os.tmpname()
+os.remove(foe)
+os.execute("mkdir -p " .. mine .. "/desktop " .. foe .. "/desktop")
+writeFile(mine .. "/desktop/init.lua", "return { who = 'mine' }")
+-- 不用 `return require(...)`：尾调用抹掉发起方栈帧，包装层就认不出是本插件在 require。
+writeFile(mine .. "/use.lua", "local m = require('desktop') return m")
+writeFile(foe .. "/desktop/init.lua", "return { who = 'foe' }")
+Modules.install(mine)
+package.loaded["desktop"] = assert(loadfile(foe .. "/desktop/init.lua"))()
+Assert.eq(package.loaded["desktop"].who, "foe", "先制造同名污染")
+Assert.eq(dofile(mine .. "/use.lua").who, "mine", "本插件 require 穿透污染")
+Assert.eq(package.loaded["desktop"].who, "mine", "权威缓存写回 package.loaded")
+-- 权威缓存命中：再次污染 package.loaded 仍返回本插件模块。
+package.loaded["desktop"] = { who = "foe2" }
+Assert.eq(dofile(mine .. "/use.lua").who, "mine", "权威缓存不受二次污染")
+os.execute("rm -rf " .. mine .. " " .. foe)

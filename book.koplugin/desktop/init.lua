@@ -703,9 +703,10 @@ end
 --- 已有桌面先销毁再重建。桌面可见后后台同步书架与统计（desktop.sync）。
 ---@param plugin BookPlugin
 function Desktop.open(plugin)
+    if not plugin then return end
     -- 阅读中（主菜单「月读」）：调用栈里不能同步关文档，下一 tick 关书 → 重建 FM → 再开桌面。
     if plugin.ui and plugin.ui.document then
-        require("desktop.reader_exit").closeToDesktop(plugin.ui)
+        require("desktop.reader_exit").closeToDesktop(plugin.ui, plugin)
         return
     end
 
@@ -767,6 +768,31 @@ function Desktop.ensureFileManager()
         G_reader_settings:saveSetting("lastdir", lastdir)
     end
     return FileManager.instance
+end
+
+--- 在 FileManager / ReaderUI 上找月读实例。
+--- PluginLoader 用**目录名**挂模块（book.koplugin → ui.book）。目录叫错时 ui.book 是 nil，
+--- 写死 `.book` 就会 Desktop.open(nil) 崩——堆栈里那个怪插件名往往就是装错的目录名。
+---@param ui table|nil
+---@param hint table|nil 已知的月读实例（取其 name / path）
+---@return table|nil
+function Desktop.hostPlugin(ui, hint)
+    if ui and hint and hint.name and ui[hint.name] then return ui[hint.name] end
+    if ui and ui.book then return ui.book end
+    if ui then
+        for _name, mod in pairs(ui) do
+            if type(mod) == "table" and type(mod.path) == "string"
+                and mod.path:match("book%.koplugin$") then
+                return mod
+            end
+        end
+        if hint and hint.path then
+            for _name, mod in pairs(ui) do
+                if type(mod) == "table" and mod.path == hint.path then return mod end
+            end
+        end
+    end
+    return nil
 end
 
 --- FM 显示时按启动项自动开桌面，本进程只开一次；Reader 实例忽略。

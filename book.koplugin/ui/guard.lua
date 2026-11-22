@@ -21,20 +21,29 @@ local Guard = {}
 --- 错误页在屏上时后续错误只记日志：每页都抛的 bug 不能刷出一摞对话框。
 local showing = false
 
---- 本插件目录名（交付物固定叫 book.koplugin）。
-local OURS = "book.koplugin"
+--- guard.lua 所在插件根（…/xxx.koplugin）；目录名随安装名变，不能写死 book.koplugin。
+local GUARD_SRC = debug.getinfo(1, "S").source
+local PLUGIN_ROOT = GUARD_SRC:match("^@(.*)/ui/guard%.lua$")
+local OURS = (PLUGIN_ROOT and PLUGIN_ROOT:match("([^/\\]+%.koplugin)$")) or "book.koplugin"
+local PLUGINS_PARENT = PLUGIN_ROOT and PLUGIN_ROOT:match("^(.*)/[^/\\]+$")
 
---- 从堆栈找出其它 `.koplugin` 目录名（含后缀）。跳过 guard 自身帧；没有则视为月读。
+--- 堆栈里扫到的其它 `.koplugin`：必须在磁盘上真有这个目录，否则当月读自己的错
+--- （避免路径被污染 / 残留字符串时甩锅给根本不存在的插件名）。
 ---@param trace string
 ---@return string[]|nil
 function Guard.foreignPlugins(trace)
+    local lfs = require("libs/libkoreader-lfs")
     local seen, list = {}, {}
     for line in tostring(trace):gmatch("[^\r\n]+") do
         if not line:find("[/\\]ui[/\\]guard%.lua", 1) then
             local name = line:match("([^/\\]+%.koplugin)[/\\]")
             if name and name ~= OURS and not seen[name] then
-                seen[name] = true
-                list[#list + 1] = name
+                -- 目录不在月读同级 plugins/ 下就不甩锅：堆栈字符串可能被污染，或残留已删插件路径。
+                local dir = PLUGINS_PARENT and (PLUGINS_PARENT .. "/" .. name)
+                if dir and lfs.attributes(dir, "mode") == "directory" then
+                    seen[name] = true
+                    list[#list + 1] = name
+                end
             end
         end
     end
@@ -65,7 +74,7 @@ local function show(label, trace)
         local labels = {}
         for i, dir in ipairs(foreign) do labels[i] = pluginLabel(dir) end
         local joined = table.concat(labels, _("、"))
-        title = _("其它插件出错了")
+        title = T(_("插件「%1」出错了"), joined)
         guide = T(_("这个错误看起来来自插件「%1」，不是月读本身。请把下面的信息反馈给该插件的作者，而不是月读。"), joined)
         ownership = T(_("归属：其它插件 %1"), table.concat(foreign, ", "))
     else

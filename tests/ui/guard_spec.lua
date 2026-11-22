@@ -88,17 +88,30 @@ Assert.matches(clipboard, "归属：月读")
 Assert.is_nil(clipboard:find("反馈给开发者", 1, true))
 Assert.eq(toasts, 1)
 
--- 归属解析：其它 .koplugin 归对方；跳过 guard 自身与本插件
+-- 归属解析：其它 .koplugin 归对方（目录必须真实存在）；跳过 guard 自身与本插件
 Assert.is_nil(Guard.foreignPlugins("stack traceback:\n\t/mnt/us/koreader/plugins/book.koplugin/ui/foo.lua:1: in function 'x'"))
 Assert.is_nil(Guard.foreignPlugins("stack traceback:\n\t/mnt/us/koreader/plugins/book.koplugin/ui/guard.lua:10: in function 'call'"))
+-- 堆栈里写了不存在的插件名：不当成其它插件（否则会甩锅给用户根本没装的东西）
+Assert.is_nil(Guard.foreignPlugins(table.concat({
+    "stack traceback:",
+    "\tplugins/fontmap.koplugin/desktop/init.lua:707: in function 'open'",
+    "\t/tmp/plugins/book.koplugin/ui/guard.lua:1: in function 'call'",
+}, "\n")))
+
+-- 在月读同级建一个真目录，归属才能成立
+local plugins_parent = (debug.getinfo(1, "S").source:match("^@(.+)/tests/") or ".") .. "/book.koplugin"
+plugins_parent = plugins_parent:match("^(.*)/[^/]+$")
+local weather_dir = plugins_parent .. "/weather.koplugin"
+os.execute("mkdir -p '" .. weather_dir .. "'")
 local foreign = Guard.foreignPlugins(table.concat({
     "stack traceback:",
     "\t[C]: in function 'error'",
-    "\t/mnt/us/koreader/plugins/weather.koplugin/main.lua:42: in function 'refresh'",
-    "\t/mnt/us/koreader/plugins/book.koplugin/ui/guard.lua:87: in function 'call'",
+    "\t" .. weather_dir .. "/main.lua:42: in function 'refresh'",
+    "\t" .. plugins_parent .. "/book.koplugin/ui/guard.lua:87: in function 'call'",
 }, "\n"))
 Assert.eq(#foreign, 1)
 Assert.eq(foreign[1], "weather.koplugin")
+os.execute("rmdir '" .. weather_dir .. "'")
 
 -- 错误页还在：后续错误只记日志，不叠窗
 Guard.call("again", function() error("second") end)
@@ -156,16 +169,19 @@ Guard.paint("xray.paintTo", function(bb, x) painted = { bb, x } end, "bb", 3)
 Assert.eq(painted[1], "bb")
 Assert.eq(painted[2], 3)
 
--- 其它插件：换标题与引导，复制内容带归属（假堆栈）
+-- 其它插件：换标题与引导，复制内容带归属（假堆栈；目录必须真实存在）
 shown[#shown]:close()
+local maps_dir = plugins_parent .. "/maps.koplugin"
+os.execute("mkdir -p '" .. maps_dir .. "'")
 local real_tb = debug.traceback
 debug.traceback = function(msg)
-    return tostring(msg) .. "\nstack traceback:\n\t/tmp/plugins/maps.koplugin/init.lua:3: in function 'draw'\n\t/tmp/plugins/book.koplugin/ui/guard.lua:1: in function 'call'"
+    return tostring(msg) .. "\nstack traceback:\n\t" .. maps_dir .. "/init.lua:3: in function 'draw'\n\t"
+        .. plugins_parent .. "/book.koplugin/ui/guard.lua:1: in function 'call'"
 end
 Guard.call("feature panel", function() error("foreign boom") end)
 debug.traceback = real_tb
 local foreign_dialog = shown[#shown]
-Assert.eq(foreign_dialog.title, "其它插件出错了")
+Assert.eq(foreign_dialog.title, "插件「maps」出错了")
 Assert.matches(foreign_dialog.text, "插件「maps」")
 Assert.matches(foreign_dialog.text, "反馈给该插件的作者")
 Assert.matches(foreign_dialog.text, "归属：其它插件 maps%.koplugin")
@@ -173,3 +189,4 @@ foreign_dialog.buttons[2].callback()
 Assert.matches(clipboard, "归属：其它插件 maps%.koplugin")
 Assert.is_nil(clipboard:find("反馈给该插件的作者", 1, true))
 foreign_dialog:close()
+os.execute("rmdir '" .. maps_dir .. "'")

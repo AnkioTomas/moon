@@ -23,4 +23,10 @@ local missing = Check.check(dir, index)
 Assert.eq(table.concat(missing, ","), "desktop/pages/home,desktop/pages/library")
 os.execute("rm -rf '" .. dir .. "'")
 
+-- 目录名必须是 book.koplugin：叫错时 PluginLoader 不挂 ui.book，关书回桌面会崩。
+Assert.is_nil(Check.dirName("/mnt/us/koreader/plugins/book.koplugin"))
+Assert.is_nil(Check.dirName("/mnt/us/koreader/plugins/book.koplugin/"))
+Assert.eq(Check.dirName("/mnt/us/koreader/plugins/fontmap.koplugin"), "fontmap.koplugin")
+Assert.eq(Check.dirName("/tmp/月读"), "月读")
+
 return true

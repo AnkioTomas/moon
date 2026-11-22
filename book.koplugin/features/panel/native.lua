@@ -449,7 +449,7 @@ local function patchDrawerTab(menu)
             tab.remember = false
             local native = tab.callback
             tab.callback = function()
-                local plugin = menu.ui and menu.ui.book
+                local plugin = require("desktop").hostPlugin(menu.ui)
                 if plugin and not plugin.desktop and ReaderExit.drawerOpensDesktop() then
                     -- switchMenuTab 在回调后还要渲染本 Tab，关菜单推迟到下一 tick。
                     UIManager:nextTick(require("ui.guard").wrap("open desktop", function()

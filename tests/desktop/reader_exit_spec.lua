@@ -38,7 +38,12 @@ local opened_desktop = 0
 package.preload["desktop"] = function()
     return {
         open = function() opened_desktop = opened_desktop + 1 end,
-        ensureFileManager = function() return { book = {} } end,
+        ensureFileManager = function() return { book = { name = "book", path = "/plugins/book.koplugin" } } end,
+        hostPlugin = function(ui, hint)
+            if ui and hint and hint.name and ui[hint.name] then return ui[hint.name] end
+            if ui and ui.book then return ui.book end
+            return nil
+        end,
     }
 end
 package.preload["utils.settings"] = function()
