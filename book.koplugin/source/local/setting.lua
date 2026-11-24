@@ -134,10 +134,25 @@ function Setting.rows(plugin)
                 repaint()
             end })
     end
+    local function progressGuardRow(iw)
+        local Settings = require("utils.settings")
+        local cfg = Settings.getSource(SOURCE_ID)
+        local on = cfg.webdav_check_progress_before_upload == true
+        return Row.widget({ width = iw, chevron = false, kind = "toggle", icon = "cloud_upload",
+            title = _("上传前检查云端进度"),
+            subtitle = _("开书时询问是否采用领先的云端进度，上传前再次检查"),
+            status = on and _("开") or _("关"), status_on = on,
+            callback = function()
+                cfg.webdav_check_progress_before_upload = not on
+                Settings.saveSource(SOURCE_ID, cfg)
+                repaint()
+            end })
+    end
     return {
         localPathRow,
         folderCategoryRow,
         uploadRow,
+        progressGuardRow,
         row("webdav_url", _("WebDAV 地址"), false, "dns"),
         row("webdav_username", _("WebDAV 用户名"), false, "person"),
         row("webdav_password", _("WebDAV 密码"), true, "key"),

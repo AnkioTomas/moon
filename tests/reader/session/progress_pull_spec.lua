@@ -743,6 +743,35 @@ do
     package.loaded["ui/network/manager"] = nil
 end
 
+do
+    local current = Session.current
+    local ui = {
+        document = {
+            isXPointerInDocument = function() return true end,
+        },
+        rolling = { onGotoXPointer = function() end },
+    }
+    local id = { source_id = "local", stable_id = "b1" }
+    local whole = { identity = id, ui = ui }
+    Session.current = function() return whole end
+    id.source = { getProgressAsync = function(_, _, cb)
+        cb({ fraction = 0.0089 }, nil, { webdav_progress_marker = "seen-marker" })
+    end }
+    pending_row = { fraction = 0.0046, updated_at = 12, sync_status = 1, locator = "/body/p[1]/text().0" }
+    local RemoteData = require("source.local.remote_data")
+    local enabled = RemoteData.progressUploadGuardEnabled
+    RemoteData.progressUploadGuardEnabled = function() return true end
+    shown, upserted = {}, {}
+    Progress.clearConflicts(id)
+    Progress.pull(whole)
+    Assert.len(shown, 1, "首次开书发现远端领先时弹窗，不用等到相差一个百分点")
+    Assert.is_false(require("book.progress").canPush(id), "询问时关书不能推送")
+    shown[1].cancel_callback()
+    Assert.eq(upserted[1].extra.webdav_overwrite_marker, "seen-marker")
+    RemoteData.progressUploadGuardEnabled = enabled
+    Session.current = current
+end
+
 for _, name in ipairs({
     "ui/uimanager", "ui/widget/infomessage", "ui/widget/confirmbox", "ui/event",
     "reader.session.toc", "reader.session", "logger",

@@ -847,7 +847,53 @@ do
     dav.getAsync = get
 end
 
--- 精确进度跨设备保留正文坐标与未舍入比例；其它客户端改写 .po 后不能复用旧坐标。
+-- 上传前复查。确认只允许覆盖弹窗中看到的那一版。
+do
+    local RemoteData = require("source.local.remote_data")
+    local enabled = RemoteData.progressUploadGuardEnabled
+    RemoteData.progressUploadGuardEnabled = function() return true end
+    local dav = fakeDav()
+    local c = client(dav)
+    local id = "webdav://guarded.epub"
+    local remote = ROOT .. "/.Moon+/Cache/guarded.epub.po"
+    local seen = "1700000200000*4@0#0:0.9%"
+    local changed = "1700000201000*4@0#0:1.1%"
+    local pos = { updated_at = 1700000202, fraction = 0.0046, locator = "/body/p[1]/text().0" }
+    local function push()
+        local ok, err
+        c:putProgressAsync(id, pos, function(v, e) ok, err = v, e end)
+        Stubs.flush()
+        return ok, err
+    end
+    dav:put(remote, seen)
+    putSync(dav, { { filename = "guarded.epub" } })
+    progress[id] = { fraction = 0.0046, updated_at = 1700000000, sync_status = 1 }
+    Assert.is_true(scan(c))
+    Assert.eq(progress[id].fraction, 0.0046, "书架刷新不能在开书询问前采用远端")
+    Assert.is_nil(push(), "小于一个百分点也不允许自动覆盖")
+    Assert.eq(dav.files[remote].data, seen)
+    pos.extra = { webdav_overwrite_marker = seen }
+    dav:put(remote, changed)
+    Assert.is_nil(push(), "新版本需要重新确认")
+    Assert.eq(dav.files[remote].data, changed)
+    pos.extra.webdav_overwrite_marker = changed
+    Assert.is_true(push())
+    Assert.is_nil(Json.decode(dav.files[remote .. ".json"].data).position.extra)
+    local get = dav.getAsync
+    function dav:getAsync(path, dest, opts, cb)
+        if path == remote then return cb(nil, "offline") end
+        return get(self, path, dest, opts, cb)
+    end
+    local published = dav.files[remote].data
+    local ok, err = push()
+    Assert.is_nil(ok)
+    Assert.eq(err, "offline")
+    Assert.eq(dav.files[remote].data, published)
+    books, progress = {}, {}
+    RemoteData.progressUploadGuardEnabled = enabled
+end
+
+--- 精确进度跨设备保留正文坐标与未舍入比例；其它客户端改写 .po 后不能复用旧坐标。
 do
     local dav = fakeDav()
     local a, b = client(dav), client(dav)

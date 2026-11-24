@@ -582,7 +582,7 @@ end
 ---@param snapshot ReaderSessionSnapshot
 ---@param local_pos ProgressPosition
 ---@param remote_pos ProgressPosition
-local function askProgressConflict(id, snapshot, local_pos, remote_pos)
+local function askProgressConflict(id, snapshot, local_pos, remote_pos, webdav_marker)
     local state = Progress.decision(id)
     if state.resolved then return end
     state.phase = "choosing"
@@ -616,6 +616,11 @@ local function askProgressConflict(id, snapshot, local_pos, remote_pos)
             -- 可能比本地记录更靠前，那会把「保留本地」变成覆盖本地。
             local adopt = {}
             for k, v in pairs(local_pos) do adopt[k] = v end
+            if webdav_marker then
+                adopt.extra = {}
+                for k, v in pairs(local_pos.extra or {}) do adopt.extra[k] = v end
+                adopt.extra.webdav_overwrite_marker = webdav_marker
+            end
             adopt.updated_at = Progress.nextRevision()
             if not ProgressDB.upsert(id.source_id, id.stable_id, adopt) then
                 logger.warn("book.progress adopt local failed", id.stable_id)
@@ -727,6 +732,17 @@ function ReaderProgress.pull(snapshot, opts)
         end
         local local_position = localProgressForPull(id, snapshot)
         local row = ProgressDB.get(id.source_id, id.stable_id)
+        local webdav_marker = type(meta) == "table" and meta.webdav_progress_marker
+        local protect_upload = false
+        if type(webdav_marker) == "string" and id.source_id == "local" then
+            local RemoteData = require("source.local.remote_data")
+            protect_upload = RemoteData.progressUploadGuardEnabled()
+                and RemoteData.isProgressAhead(remote_pos, local_position)
+        end
+        if protect_upload then
+            askProgressConflict(id, snapshot, local_position, remote_pos, webdav_marker)
+            return
+        end
         local page_level = type(meta) == "table" and meta.page_level == true
         if progressDiffers(local_position, remote_pos, id, snapshot, page_level) then
             -- 只有两边自上次同步后都动过才问；手动拉取是用户要看对比，照常问。
