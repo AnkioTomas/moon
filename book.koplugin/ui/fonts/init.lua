@@ -31,6 +31,9 @@ local _ = require("gettext")
 
 local Fonts = {}
 
+--- 字体存储迁移版本号（1 = 将旧 .moon/fonts 迁入 $DATA/fonts 用户字体目录并同步配置）。
+Fonts.MIGRATION_VER = 1
+
 local UI_FACES = {
     "cfont", "tfont", "smalltfont", "x_smalltfont",
     "ffont", "smallffont", "largeffont",
@@ -130,10 +133,94 @@ function Fonts.finalizeWoff(woff, path)
     return os.rename(woff, path) == true
 end
 
+--- 用户字体目录（$DATA/fonts）下的安全文件路径；拒绝路径穿越与控制字符。
+---@param filename string|nil
+---@return string|nil
+function Fonts.userFontPath(filename)
+    if type(filename) ~= "string" then return nil end
+    local clean = Text.trim(filename)
+    if clean == "" or clean:find("[/\\]") or clean:find("%.%.") or clean:find("[%c%z]") or clean:sub(1, 1) == "." then
+        return nil
+    end
+    return Fonts.settingsFontsDir() .. "/" .. clean
+end
+
 --- KOReader 设置目录 fonts（$DATA/fonts）
 ---@return string
 function Fonts.settingsFontsDir()
     return DataStorage:getDataDir() .. "/fonts"
+end
+
+--- 从内存与 FontList/Font.faces 缓存里移除指定字体路径，避免删除后继续命中失效缓存。
+---@param filename string
+---@param path string
+local function purgeFontCaches(filename, path)
+    local stem = filename:gsub("%.[^%.]+$", "")
+    for key, val in pairs(_resolved_paths) do
+        if val == path or key == filename or key == stem then
+            _resolved_paths[key] = nil
+        end
+    end
+    _registered_fonts[path] = nil
+    if type(FontList.fontlist) == "table" then
+        for i = #FontList.fontlist, 1, -1 do
+            if FontList.fontlist[i] == path then
+                table.remove(FontList.fontlist, i)
+            end
+        end
+    end
+    if type(FontList.fontinfo) == "table" then
+        FontList.fontinfo[path] = nil
+    end
+    if type(Font.faces) == "table" then
+        for hash, face_obj in pairs(Font.faces) do
+            if type(face_obj) == "table"
+                and (face_obj.realname == filename or face_obj.realname == path or face_obj.orig_font == filename) then
+                Font.faces[hash] = nil
+            end
+        end
+    end
+    local catalog = package.loaded["ui.fonts.catalog"]
+    if type(catalog) == "table" and type(catalog.invalidateLocalScan) == "function" then
+        catalog.invalidateLocalScan()
+    end
+end
+
+--- 删除用户字体（$DATA/fonts/<filename>）；若正是当前界面或西文字体，自动回退兜底避免闪退。
+---@param filename string
+---@return boolean
+function Fonts.deleteUserFont(filename)
+    local path = Fonts.userFontPath(filename)
+    if not path then return false end
+    local removed = false
+    if Fonts.isFile(path) then
+        removed = os.remove(path) == true
+    end
+    if not removed then
+        -- 兼容旧目录残留的同名文件
+        local stem = filename:gsub("%.[^%.]+$", "")
+        removed = Fonts.removeDownloaded(stem)
+    end
+    if not removed then return false end
+    purgeFontCaches(filename, path)
+    local stem = filename:gsub("%.[^%.]+$", "")
+    local cur = Fonts.currentId()
+    if cur == filename or cur == stem then
+        local ui_conf = MoonSettings.get("ui")
+        ui_conf.ui_font = ""
+        ui_conf.ui_font_name = ""
+        MoonSettings.save("ui")
+        Fonts.applyCurrent()
+    end
+    local ok_reader, reader_conf = pcall(MoonSettings.get, "reader")
+    if ok_reader and type(reader_conf) == "table"
+        and (reader_conf.western_font_id == filename or reader_conf.western_font_id == stem) then
+        reader_conf.western_font_id = ""
+        reader_conf.western_font_name = ""
+        pcall(MoonSettings.save, "reader")
+    end
+    logger.info("book.font deleted user font", filename, path)
+    return true
 end
 
 --- 已装的微信读书字体路径；旧版 .woff 在这里就地迁移。
@@ -224,13 +311,21 @@ local function ensureFontInfo(path)
 end
 
 --- 字体 id → 字体文件路径，并登记进 FontList。
+--- 优先在 $DATA/fonts 与 FontList 精确查找；无扩展名的旧版 id（如微信读书 "syst"）自动尝试补 `.ttf`，
+--- 最后兜底查旧 .moon/fonts，确保已有书籍 .sdr 与旧设置升级后无缝命中。
 ---@param id string
 ---@return string|nil path, string|nil err
 local function resolvePath(id)
     local path = _resolved_paths[id]
     if path and Fonts.isFile(path) then return path end
     _resolved_paths[id] = nil
-    path = installedWereadPath(id) or findInstalledFont(id)
+    path = findInstalledFont(id)
+    if not path and not id:match("%.[^%.]+$") then
+        path = findInstalledFont(id .. ".ttf")
+    end
+    if not path then
+        path = installedWereadPath(id)
+    end
     if not path then return nil, _("字体文件不存在") end
     registerFontPath(path)
     _resolved_paths[id] = path
@@ -364,7 +459,8 @@ end
 
 local _getface_patched = false
 
---- 内置目录仍走宿主；否则用绝对路径打开，成功直接返回，失败返回 nil。
+--- 内置目录仍走宿主；否则用绝对路径打开，成功直接返回。
+--- 若界面 fontmap 指向的字体已被删或损坏，自动兜底到 SAFE_UI 内置字体，避免 KOReader UI 闪退。
 --- 不再调用宿主里会因 `%1` 等抛 invalid capture index 的 :find 回落。
 function Fonts.patchGetFace()
     if _getface_patched or type(Font.getFace) ~= "function" then return end
@@ -377,7 +473,18 @@ function Fonts.patchGetFace()
         if type(realname) == "string" and dir and Fonts.isFile(dir .. "/" .. realname) then
             return orig(self, font, size, faceindex)
         end
-        return Fonts.getFace(font, size, faceindex)
+        local face = Fonts.getFace(font, size, faceindex)
+        if face then return face end
+        -- 仅对 fontmap 槽位（界面字体）做安全内置字体兜底；显式传坏路径的调用仍返回 nil。
+        if self.fontmap and font and self.fontmap[font] then
+            local safe = SAFE_UI[font] or "NotoSans-Regular.ttf"
+            if safe ~= realname then
+                logger.warn("book.font getFace missing, fallback safe", tostring(font), tostring(realname), "->", safe)
+                self.fontmap[font] = safe
+                return orig(self, safe, size, faceindex) or Fonts.getFace(safe, size, faceindex)
+            end
+        end
+        return nil
     end
 end
 
@@ -515,8 +622,138 @@ function Fonts.applyCurrent()
     clearPersistedFontmap()
 end
 
---- 插件 init：UI fontmap 每进程应用一次，阅读字体组合按文档安装。
+--- 跨文件系统流式搬运文件（rename 失败时回落），先写 .tmp 再原子改名，完成后删源文件。
+---@param src string
+---@param dest string
+---@return boolean
+local function moveFile(src, dest)
+    if os.rename(src, dest) then return true end
+    local tmp = dest .. ".mig.tmp"
+    local fin = io.open(src, "rb")
+    if not fin then return false end
+    local fout = io.open(tmp, "wb")
+    if not fout then fin:close(); return false end
+    local ok = true
+    while true do
+        local chunk = fin:read(65536)
+        if not chunk then break end
+        if not fout:write(chunk) then ok = false; break end
+    end
+    fin:close()
+    local closed = fout:close()
+    if not ok or not closed or not os.rename(tmp, dest) then
+        os.remove(tmp)
+        return false
+    end
+    os.remove(src)
+    return true
+end
+
+--- 首次升级一次性迁移（按 ui.fonts_migrated_ver 版本号）：
+--- 1. 把旧 .moon/fonts 里的字体（含旧 .woff）迁入 $DATA/fonts 用户字体目录；
+--- 2. 把已配置的界面 / 西文 / 默认阅读字体 id 更新为迁移后的文件名；
+--- 3. 若配置指向的字体文件缺失或无法打开，立刻清掉配置兜底，避免冷启动闪退。
+---@return boolean migrated 本次是否实际执行了迁移
+function Fonts.migrateLegacy()
+    local ui_conf = MoonSettings.get("ui")
+    if (tonumber(ui_conf.fonts_migrated_ver) or 0) >= Fonts.MIGRATION_VER then
+        return false
+    end
+    local moved = {}
+    local legacy_dir = Paths.fontsDir()
+    local user_dir = Fonts.settingsFontsDir()
+    if lfs.attributes(legacy_dir, "mode") == "directory" then
+        if type(Paths.ensureDir) == "function" then
+            Paths.ensureDir(user_dir)
+        elseif type(lfs.mkdir) == "function" then
+            lfs.mkdir(user_dir)
+        end
+        local ok_dir, iter, state = pcall(lfs.dir, legacy_dir)
+        if ok_dir and type(iter) == "function" then
+            for name in iter, state do
+                if type(name) == "string" and name ~= "." and name ~= ".." then
+                    local src = legacy_dir .. "/" .. name
+                    local low = name:lower()
+                    if lfs.attributes(src, "mode") == "file" then
+                        local stem = name:gsub("%.[^%.]+$", "")
+                        if low:match("%.woff$") then
+                            local target_name = stem .. ".ttf"
+                            local dest = user_dir .. "/" .. target_name
+                            if Fonts.isFile(dest) then
+                                os.remove(src)
+                                moved[stem], moved[name] = target_name, target_name
+                            elseif Fonts.finalizeWoff(src, dest) then
+                                moved[stem], moved[name] = target_name, target_name
+                            end
+                        elseif low:match("%.[ot]t[fc]$") then
+                            local dest = user_dir .. "/" .. name
+                            if Fonts.isFile(dest) then
+                                os.remove(src)
+                                moved[stem], moved[name] = name, name
+                            elseif moveFile(src, dest) then
+                                moved[stem], moved[name] = name, name
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    if next(moved) then
+        _resolved_paths = {}
+        local catalog = package.loaded["ui.fonts.catalog"]
+        if type(catalog) == "table" and type(catalog.invalidateLocalScan) == "function" then
+            catalog.invalidateLocalScan()
+        end
+    end
+
+    -- 迁移并兜底界面字体
+    local ui_id = ui_conf.ui_font or ""
+    if ui_id ~= "" then
+        if moved[ui_id] then ui_id = moved[ui_id]; ui_conf.ui_font = ui_id end
+        local p = select(1, resolvePath(ui_id))
+        if not p or not Fonts.canOpen(p) then
+            logger.warn("book.font migration fallback ui_font", ui_id)
+            ui_conf.ui_font = ""
+            ui_conf.ui_font_name = ""
+        end
+    end
+
+    -- 迁移并兜底西文字体
+    local ok_reader, reader_conf = pcall(MoonSettings.get, "reader")
+    if ok_reader and type(reader_conf) == "table" and type(reader_conf.western_font_id) == "string"
+        and reader_conf.western_font_id ~= "" then
+        local wid = reader_conf.western_font_id
+        local changed = false
+        if moved[wid] then wid = moved[wid]; reader_conf.western_font_id = wid; changed = true end
+        local p = select(1, resolvePath(wid))
+        if not p or not Fonts.canOpen(p) then
+            logger.warn("book.font migration fallback western_font_id", wid)
+            reader_conf.western_font_id = ""
+            reader_conf.western_font_name = ""
+            changed = true
+        end
+        if changed then pcall(MoonSettings.save, "reader") end
+    end
+
+    -- 迁移全局默认阅读字体 id
+    local gs = rawget(_G, "G_reader_settings")
+    if gs and type(gs.readSetting) == "function" and type(gs.saveSetting) == "function" then
+        local def_id = gs:readSetting("book_reader_default_font_id")
+        if type(def_id) == "string" and moved[def_id] then
+            gs:saveSetting("book_reader_default_font_id", moved[def_id])
+        end
+    end
+
+    ui_conf.fonts_migrated_ver = Fonts.MIGRATION_VER
+    MoonSettings.save("ui")
+    logger.info("book.font legacy migration done", "ver=" .. tostring(Fonts.MIGRATION_VER))
+    return true
+end
+
+--- 插件 init：先执行一次性旧字体迁移，再应用 UI fontmap 与阅读字体组合。
 function Fonts.onCreate(ui)
+    Fonts.migrateLegacy()
     if not _defaults then Fonts.applyCurrent() end
     if ui and ui.document then require("ui.fonts.mixed").install(ui.document) end
 end

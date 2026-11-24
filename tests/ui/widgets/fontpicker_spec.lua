@@ -1,5 +1,6 @@
 --[[--
-fontpicker：主题 List 分栏；无系统默认行；预览按页懒构建；当前字体是选中项。
+fontpicker：只展示本地字体（用户/本地/系统），无在线分栏；
+用户分栏每行右侧提供删除按钮，确认后删除并更新列表；预览按页懒构建。
 
 @module tests.ui.widgets.fontpicker_spec
 --]]
@@ -9,15 +10,13 @@ local Kit = require("support.widget_stubs")
 Kit.install("paper")
 
 local getface_n = 0
-local image_n = 0
-local last_image
 local selected
-local prepare_callback, prepare_cancelled
+local deleted = {}
+local cur_id = "Font25.ttf"
 
 package.preload["ui/font"] = function()
     return {
         fontmap = {},
-        -- 只数字体文件预览；主题文字 / 图标字体也走 getFace。
         getFace = function(_, id)
             if id:match("%.ttf$") then getface_n = getface_n + 1 end
             return { id = id, size = 12 }
@@ -26,28 +25,15 @@ package.preload["ui/font"] = function()
 end
 package.loaded["ui/font"] = nil
 
--- 只数预览图构建次数；主题图片外观另有 image_spec。
-package.preload["ui.themes.widgets.image"] = function()
-    return {
-        widget = function(o)
-            image_n = image_n + 1
-            last_image = o
-            return { _src = o.src, getSize = function() return { w = o.width, h = o.height } end,
-                paintTo = function() end }
-        end,
-    }
-end
-
-package.preload["ui/network/manager"] = function()
-    return { runWhenConnected = function(_, cb) cb() end }
-end
-
 package.preload["ui.fonts"] = function()
     return {
-        currentId = function() return "Font25.ttf" end,
-        -- set 成功须返回真值；fontpicker 按 ok 决定 Toast「已选择」还是「无法打开」。
-        set = function(id) selected = id; return true end,
-        downloadedPath = function(id) return id:match("^wr") and "/fonts/" .. id .. ".ttf" end,
+        currentId = function() return cur_id end,
+        set = function(id) selected = id; cur_id = id; return true end,
+        deleteUserFont = function(id)
+            deleted[#deleted + 1] = id
+            if cur_id == id then cur_id = "" end
+            return true
+        end,
         getFace = function(id)
             if id:match("%.ttf$") then getface_n = getface_n + 1 end
             return { id = id, size = 12 }
@@ -56,6 +42,19 @@ package.preload["ui.fonts"] = function()
 end
 package.preload["ui.fonts.catalog"] = function()
     local items = {}
+    for i = 1, 2 do
+        items[#items + 1] = {
+            id = string.format("User%d.ttf", i),
+            name = "User" .. i,
+            kind = "user",
+        }
+    end
+    items[#items + 1] = {
+        id = "LegacyWeb.woff",
+        name = "LegacyWeb",
+        kind = "user",
+        woff = true,
+    }
     for i = 1, 40 do
         items[#items + 1] = {
             id = string.format("Font%02d.ttf", i),
@@ -70,28 +69,11 @@ package.preload["ui.fonts.catalog"] = function()
             kind = "system",
         }
     end
-    for i = 1, 20 do
-        items[#items + 1] = {
-            id = "wr" .. i,
-            name = "Weread" .. i,
-            kind = "weread",
-            preview = "https://example.com/p" .. i .. ".svg",
-            zip_size = 1000,
-        }
-    end
-    local online_enabled = true
     return {
-        -- 缓存命中时同步回调。
-        listAsync = function(cb)
+        listLocalAsync = function(cb)
             cb(items)
             return { cancel = function() end }
         end,
-        ensureInstalledAsync = function(_item, _progress, cb)
-            prepare_callback = cb
-            return { cancel = function() prepare_cancelled = true end }
-        end,
-        onlineEnabled = function() return online_enabled end,
-        _setOnlineEnabled = function(v) online_enabled = v end,
     }
 end
 package.loaded["ui.fonts"] = nil
@@ -105,102 +87,72 @@ local list = Kit.shown[#Kit.shown]
 Assert.eq(list.title, "字体")
 Assert.eq(Kit.closed[1] ~= nil and Kit.closed[1].text, "正在加载字体列表…", "列表到了先关加载提示")
 
--- 当前字体在本地分栏第 25 项：默认打开本地分栏并翻到它所在页（每页 13 项，含底栏）。
+-- 底部只有 3 个本地分栏：用户 / 本地 / 系统（不再显示在线分栏）
+local function tab_ids(shown)
+    local ids = {}
+    for _idx, tab in ipairs(shown.tabs.tabs) do ids[#ids + 1] = tab.id end
+    return table.concat(ids, ",")
+end
+Assert.eq(tab_ids(list), "user,local,system", "只展示本地三栏，无在线栏")
+
+-- 当前字体在本地分栏第 25 项：自动定位到本地分栏与对应页
 Assert.eq(list.tabs.active, "local")
-Assert.len(list.tabs.tabs, 4, "底部四个分栏：在线/用户/本地/系统")
-Assert.len(list.items, 40, "本地 40 行，无系统默认行")
-Assert.eq(list.items[1].text, "", "行只留预览，无名字列")
+Assert.len(list.items, 40)
 Assert.eq(list.page, math.ceil(25 / list.per_page))
-Assert.len(Kit.find(list, function(w) return w.text == "radio_button_checked" end), 1, "当前字体是选中项")
+Assert.len(Kit.find(list, function(w) return w.text == "radio_button_checked" end), 1)
 Assert.is_true(getface_n >= 1 and getface_n <= list.per_page, "只构建当前页预览, got " .. getface_n)
-Assert.eq(image_n, 0, "本地页不拉图")
+Assert.is_nil(list.items[1].action_icon, "本地分栏不显示删除按钮")
 
--- 切到在线分栏：预览改走远程图，同样只建一页。
-getface_n = 0
-list:switchTab("weread")
-Assert.eq(list.tabs.active, "weread")
-Assert.len(list.items, 20)
-Assert.eq(list.page, 1, "在线分栏没有当前项，停在第 1 页")
-Assert.eq(image_n, list.per_page, "在线页懒构建预览图")
-Assert.eq(getface_n, 0, "在线页不碰本地字体")
-Assert.is_nil(last_image.style.bg, "预览图不画 image 表面灰底")
-Assert.is_true(last_image.width <= math.floor(last_image.height * 90 / 24), "预览图按 90×24 比例定宽、靠左")
-
--- 用户分栏为空：一条禁用占位行。
-list:switchTab("user")
-Assert.len(list.items, 1)
-Assert.is_false(list.items[1].enabled)
-
--- 系统字库单独一栏，预览走本地字体渲染。
+-- 系统分栏不显示删除按钮
 getface_n = 0
 list:switchTab("system")
 Assert.len(list.items, 3)
-Assert.eq(list.items[1].value.id, "Sys1.ttf")
-Assert.eq(getface_n, 3, "系统页用字体本身渲染预览")
+Assert.is_nil(list.items[1].action_icon)
+Assert.eq(getface_n, 3)
 
--- 选中已安装字体：关列表、写设置、提示。
+-- 用户分栏每行右侧带删除按钮；WOFF 字体在页面显示「WOFF · 兼容性差」
+list:switchTab("user")
+Assert.len(list.items, 3)
+Assert.eq(list.items[1].action_icon, "delete", "用户字体右侧必须有删除按钮")
+Assert.eq(type(list.items[1].action_callback), "function")
+local preview_box = list.items[1].widget()
+Assert.is_true(preview_box:getSize().w >= 400, "普通字体预览应占满剩余行宽并左对齐，不挤到最右侧")
+Assert.eq(list.items[3].value.id, "LegacyWeb.woff")
+Assert.eq(list.items[3].action_icon, "delete", "WOFF 用户字体同样支持一键删除")
+local page_texts = table.concat(Kit.texts(list), "|")
+Assert.is_true(page_texts:find("WOFF · 兼容性差", 1, true) ~= nil, "页面应明确提示 WOFF 兼容性差")
+
+-- 选择 WOFF 字体先弹兼容性警告确认，确认后才应用
+selected = nil
+list.on_select(list.items[3].value)
+local woff_warn = Kit.shown[#Kit.shown]
+Assert.eq(woff_warn.ok_text, "仍要使用")
+Assert.is_true(woff_warn.text:find("兼容性差", 1, true) ~= nil)
+Assert.is_nil(selected, "确认前不得提前应用 WOFF 字体")
+woff_warn.ok_callback()
+Assert.eq(selected, "LegacyWeb.woff")
+
+-- 点击删除先确认，确认后删文件并立即刷新列表
+list.items[1].action_callback()
+local confirm_dlg = Kit.shown[#Kit.shown]
+Assert.eq(confirm_dlg.ok_text, "删除")
+Assert.is_true(confirm_dlg.text:find("User1", 1, true) ~= nil)
+confirm_dlg.ok_callback()
+Assert.eq(deleted[1], "User1.ttf")
+Assert.len(list.items, 2, "删除后列表立刻移除该项")
+Assert.eq(list.items[1].value.id, "User2.ttf")
+Assert.eq(Kit.shown[#Kit.shown].text, "已删除：User1")
+
+-- 选中本地字体：关列表、写设置、提示
 list:switchTab("local")
 Kit.taps(list)[1]:onTapThemeArea()
-Assert.eq(Kit.closed[#Kit.closed], list, "选中即关列表")
-Assert.is_true(selected ~= nil and selected:match("^Font%d+%.ttf$") ~= nil, "写入选中字体")
-Assert.eq(Kit.shown[#Kit.shown].text, "已选择：" .. selected:gsub("%.ttf$", ""))
+Assert.eq(Kit.closed[#Kit.closed], list)
+Assert.is_true(selected ~= nil and selected:match("^Font%d+%.ttf$") ~= nil)
 
--- 已下载在线字体选「使用」也先异步准备，不联网、不提前写设置。
-selected = nil
-FontPicker.open{ title = "字体" }
-list = Kit.shown[#Kit.shown]
-list:switchTab("weread")
-list.on_select(list.items[1].value)
-local sheet = Kit.shown[#Kit.shown]
-Assert.eq(sheet.items[1].text, "使用")
-sheet.items[1].callback()
-local preparing = Kit.shown[#Kit.shown]
-Assert.eq(preparing.title, "正在准备字体 Weread1")
-Assert.is_nil(selected)
-prepare_callback(true)
-Assert.eq(selected, "wr1")
-Assert.is_nil(prepare_cancelled, "正常完成关进度窗不取消任务")
-
-selected = nil
-sheet.items[1].callback()
-preparing = Kit.shown[#Kit.shown]
-preparing:close()
-Assert.is_true(prepare_cancelled, "关闭进度窗取消准备任务")
-prepare_callback(true)
-Assert.is_nil(selected, "关闭后迟到的完成回调不能应用字体")
-
+-- 首次无选中项默认打开「用户」分栏；指定 initial_tab = "system" 切到系统栏
 FontPicker.open{ title = "西文字体", initial_tab = "system", current_id = function() return "" end }
-Assert.eq(Kit.shown[#Kit.shown].tabs.active, "system", "首次选西文字体直接打开系统字库")
-FontPicker.open{ initial_tab = "system", current_id = function() return "Font25.ttf" end }
-Assert.eq(Kit.shown[#Kit.shown].tabs.active, "local", "已选字体仍优先定位到所在分栏")
-
--- 关闭在线字体：底部不出现「在线」栏；打开后四个分栏都在。
-do
-    local Catalog = require("ui.fonts.catalog")
-    local function tab_ids(shown)
-        local ids = {}
-        for _idx, tab in ipairs(shown.tabs.tabs) do ids[#ids + 1] = tab.id end
-        return table.concat(ids, ",")
-    end
-    Catalog._setOnlineEnabled(false)
-    FontPicker.open{ title = "字体" }
-    local off = Kit.shown[#Kit.shown]
-    Assert.eq(tab_ids(off), "user,local,system", "关闭后不展示在线分栏")
-    Assert.eq(off.tabs.active, "local", "当前字体仍定位到所在分栏")
-    for _idx, tab in ipairs(off.tabs.tabs) do
-        Assert.is_true(tab.id ~= "weread")
-        Assert.is_true(tab.text ~= "在线")
-    end
-    -- 即使指定打开在线栏，也应落到第一个可见栏，而不是空的在线页。
-    FontPicker.open{ title = "字体", initial_tab = "weread", current_id = function() return "" end }
-    Assert.eq(Kit.shown[#Kit.shown].tabs.active, "user")
-    Assert.eq(tab_ids(Kit.shown[#Kit.shown]), "user,local,system")
-
-    Catalog._setOnlineEnabled(true)
-    FontPicker.open{ title = "字体" }
-    local on = Kit.shown[#Kit.shown]
-    Assert.eq(tab_ids(on), "weread,user,local,system", "打开后仍有在线分栏")
-    Assert.eq(on.tabs.tabs[1].text, "在线")
-end
+Assert.eq(Kit.shown[#Kit.shown].tabs.active, "system")
+FontPicker.open{ title = "字体", current_id = function() return "" end }
+Assert.eq(Kit.shown[#Kit.shown].tabs.active, "user")
 
 return true

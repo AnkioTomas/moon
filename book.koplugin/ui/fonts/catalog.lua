@@ -1,14 +1,13 @@
 --[[--
-字体目录：可选字体列表与微信读书字体下载。
+字体目录：本地字体扫描（用户 / 本地 / 系统）与在线字体（moon-store.ankio.net）分类浏览下载。
 
-列表顺序：微信读书 → 用户（设置目录 fonts 根目录）→ 本地（fonts 子目录）→ 系统（FontList 其余路径，含 /mnt/us/fonts）。
-扫描走 Job 子进程；微信列表经 http.Cache 持久化 30 天，TTL 内不联网；
-拉取失败且磁盘上还有旧列表时回落旧列表。设置里可关闭在线字体（默认开启）。
+- `listLocalAsync(cb)`：只扫描本地字体（用户 = $DATA/fonts 根目录，本地 = 子目录，系统 = FontList 其余路径），零联网。
+- `listOnlineAsync(cb, opts)`：从 moon-store 拉取在线字体目录（含分类与名称预览图），经 http.Cache 持久化 24 小时，失败回落旧缓存。
+- `downloadToUserAsync(item, on_progress, cb)`：直接把在线 TTF 下载到 `$DATA/fonts/<filename>`（先落 `.dl`，子进程校验 SFNT 魔数并按需补齐空格后原子改名）。
 
 @module koplugin.book.ui.fonts.catalog
 --]]
 
-local Archiver = require("ffi/archiver")
 local FontList = require("fontlist")
 local JSON = require("json")
 local logger = require("utils.log")
@@ -18,21 +17,42 @@ local Paths = require("utils.paths")
 local Job = require("workers.job")
 local Text = require("utils.text")
 local Fonts = require("ui.fonts")
-local MoonSettings = require("utils.settings")
 local Mem = require("utils.mem")
 local Sfnt = require("ui.fonts.sfnt")
 local _ = require("gettext")
 
 local Catalog = {}
 
-Catalog.LIST_URL = "https://weread.qq.com/feconfig/font/list?type=web_v2"
-Catalog.LIST_TTL = 30 * 24 * 3600 -- 30 天
+Catalog.BASE_URL = "https://moon-store.ankio.net"
+Catalog.LIST_URL = Catalog.BASE_URL .. "/api/v1/store/fonts"
+Catalog.LIST_TTL = 24 * 3600 -- 24 小时
+Catalog.PAGE_SIZE = 100
+Catalog.MAX_PAGES = 20
 
---- 本地可选扩展名（不含 woff：微信下载落在 .moon/fonts）
+--- 在线字体固定分类（与 moon-store FontCategoryCatalog 对齐）。
+Catalog.CATEGORIES = {
+    { code = "song", name = _("宋体") },
+    { code = "hei", name = _("黑体") },
+    { code = "kai", name = _("楷体") },
+    { code = "yuan", name = _("圆体") },
+    { code = "other", name = _("其他") },
+}
+
+--- 本地可选扩展名；用户目录额外展示 woff / woff2（界面标明兼容性差）。
 local LOCAL_EXT = { ttf = true, ttc = true, cff = true, otf = true }
+local WOFF_EXT = { woff = true, woff2 = true }
+
+--- 合法 SFNT / TrueType Collection 文件头魔数。
+local SFNT_MAGIC = {
+    ["\0\1\0\0"] = true, -- TrueType
+    OTTO = true,         -- OpenType / CFF
+    ["true"] = true,     -- Apple TrueType
+    typ1 = true,         -- PostScript Type 1 SFNT
+    ttcf = true,         -- TrueType Collection
+}
 
 --- 本地扫描结果（用户在前、本地在后）：扫描要起子进程，所以按设置目录 fonts 的修改时间缓存，
---- 目录没变就不重扫；用户新放进去的字体下次打开列表即可见。
+--- 目录没变就不重扫；用户新下载或删除字体后立刻失效重扫。
 ---@type MoonFontItem[]|nil
 local scanned
 ---@type integer|nil
@@ -42,21 +62,75 @@ local function fontsMtime()
     return require("libs/libkoreader-lfs").attributes(Fonts.settingsFontsDir(), "modification")
 end
 
---- 在线字体默认开启；仅当设置显式为 false 时关闭（opt-out）。
----@return boolean
-function Catalog.onlineEnabled()
-    return MoonSettings.get("ui").online_fonts ~= false
+--- 下载或删除用户字体后调用，确保下次打开字体选择框立刻反映磁盘变更。
+function Catalog.invalidateLocalScan()
+    scanned = nil
+    scanned_mtime = nil
 end
 
 ---@class MoonFontItem
----@field id string 写入 ui_font
+---@field id string 写入 ui_font（本地为 basename，在线为 uid）
 ---@field name string
----@field kind string "weread"|"user"|"local"|"system"
+---@field kind string "online"|"user"|"local"|"system"
+---@field woff boolean|nil 用户目录下的 woff / woff2 字体（兼容性差提示）
+---@field filename string|nil 在线字体的原始文件名
 ---@field url string|nil
 ---@field preview string|nil
----@field zip_size number|nil
+---@field size number|nil
+---@field size_label string|nil
+---@field category string|nil
+---@field category_name string|nil
+---@field note string|nil
 
 local function byName(a, b) return a.name < b.name end
+
+---@param value any
+---@return string|nil
+local function absUrl(value)
+    if type(value) ~= "string" or value == "" then return nil end
+    if value:match("^https?://") then return value end
+    if value:sub(1, 1) == "/" then return Catalog.BASE_URL .. value end
+    return nil
+end
+
+---@param kind any
+---@return boolean
+local function isOnlineKind(kind)
+    return kind == "online" or kind == "weread"
+end
+
+--- 计算在线字体下载到本地用户字体目录（$DATA/fonts）的安全文件名。
+---@param item MoonFontItem|table
+---@return string|nil
+function Catalog.targetFilename(item)
+    if type(item) ~= "table" then return nil end
+    local raw = type(item.filename) == "string" and Text.trim(item.filename) or ""
+    if raw ~= "" and not raw:find("[/\\]") and not raw:find("%.%.") and not raw:find("[%c%z]")
+        and raw:sub(1, 1) ~= "." and LOCAL_EXT[raw:lower():match("%.([^.]+)$")] then
+        return raw
+    end
+    local id = type(item.id) == "string" and Text.stripWhitespace(item.id):gsub("[^%w%._%-]", "_") or ""
+    if id == "" then return nil end
+    if LOCAL_EXT[id:lower():match("%.([^.]+)$")] then return id end
+    return id .. ".ttf"
+end
+
+--- 在线字体对应的本地用户字体完整路径。
+---@param item MoonFontItem|table
+---@return string|nil
+function Catalog.userFilePath(item)
+    local name = Catalog.targetFilename(item)
+    if not name then return nil end
+    return Fonts.userFontPath(name)
+end
+
+--- 在线字体是否已经下载到本地用户字体目录。
+---@param item MoonFontItem|table
+---@return boolean
+function Catalog.isDownloadedToUser(item)
+    local path = Catalog.userFilePath(item)
+    return path ~= nil and Fonts.isFile(path)
+end
 
 --- 字体登记的任一中文名。OpenType name ID：4 = 全名，1 = 族名（与 getLocalizedFontName 同序）。
 ---@param names table|nil fontinfo 的 names：语言 → { [name_id] = string }
@@ -77,7 +151,9 @@ local function scanInstalledFonts()
     local zh = (_.current_lang or ""):match("^zh")
     local function add(path, kind)
         local file = Text.basename(path)
-        if seen[file] or not LOCAL_EXT[file:lower():match("%.([^.]+)$")] then return end
+        local ext = file:lower():match("%.([^.]+)$")
+        local is_woff = kind == "user" and WOFF_EXT[ext] == true
+        if seen[file] or (not LOCAL_EXT[ext] and not is_woff) then return end
         seen[file] = true
         local info = FontList.fontinfo[path]
         info = info and info[1]
@@ -85,10 +161,8 @@ local function scanInstalledFonts()
         if info and (info.bold or info.italic) then return end
         local name = FontList:getLocalizedFontName(path, 0) or (zh and info and chineseName(info.names))
             or (info and info.name) or file:gsub("%.[^%.]+$", "")
-        table.insert(groups[kind], { id = file, name = name, kind = kind })
+        table.insert(groups[kind], { id = file, name = name, kind = kind, woff = is_woff or nil })
     end
-    -- getFontList 载入 fontinfo 缓存；设置目录不一定在其扫描范围内，_readList 顺带采集 fontinfo，
-    -- 追加的路径只活在子进程里。
     local root = Fonts.settingsFontsDir()
     local fontlist = FontList:getFontList()
     local n = #fontlist
@@ -107,68 +181,145 @@ local function scanInstalledFonts()
     return out
 end
 
---- 把微信列表回包或缓存值收成 MoonFontItem[]；解析失败返回 nil。
---- 缓存里只写解析后的列表，避免强制门户的 200 非 JSON 占住 TTL。
----@param items any
----@return MoonFontItem[]|nil
-local function itemsFromApi(items)
-    if type(items) ~= "table" then return nil end
-    local out = {}
-    for _idx, it in ipairs(items) do
-        local id = type(it) == "table" and (it.id or it.font)
-        if id and it.url then
-            out[#out + 1] = {
-                id = tostring(id),
-                name = tostring(it.name or it.fontName or id),
-                kind = "weread",
-                url = it.url,
-                preview = it.preview or it.previewImageUrl or it.preview_image_url,
-                zip_size = it.zip_size or it.zipSize,
-            }
-        end
+--- 只扫描本地字体（用户 / 本地 / 系统），绝不触发网络请求。
+---@param cb fun(items: MoonFontItem[], err: string|nil)
+---@return { cancel: fun() }
+function Catalog.listLocalAsync(cb)
+    local mtime = fontsMtime()
+    if scanned_mtime ~= mtime then scanned = nil end
+    if scanned then
+        cb(scanned, nil)
+        return { cancel = function() end }
     end
-    table.sort(out, byName)
-    return out
+    local cancelled = false
+    local scan_job = Job.run(scanInstalledFonts, {
+        name = "font.scan",
+        kind = "medium",
+        on_done = function(data)
+            if cancelled then return end
+            scanned, scanned_mtime = data or {}, mtime
+            cb(scanned, nil)
+        end,
+        on_failed = function(e)
+            if cancelled then return end
+            logger.warn("book.font scan failed", e)
+            cb({}, e or _("字体扫描失败"))
+        end,
+    })
+    return { cancel = function()
+        cancelled = true
+        if scan_job then scan_job:cancel() end
+    end }
 end
 
---- 缓存里是已解析的列表；HTTP 回包是 JSON 字符串或 { items = ... }。
----@param value any
----@return MoonFontItem[]|nil
-local function parseWereadList(value)
+--- 兼容入口：本地字体列表（不再混入在线字体）。
+Catalog.listAsync = Catalog.listLocalAsync
+
+--- 把 moon-store 字体接口的单页回包收成 MoonFontItem[]；解析失败返回 nil。
+---@param raw any
+---@return MoonFontItem[]|nil items
+---@return integer|nil total
+local function parseApiPage(raw)
+    local value = raw
     if type(value) == "string" then
         local ok, data = pcall(JSON.decode, value)
         if not ok then return nil end
         value = data
     end
-    if type(value) ~= "table" then return nil end
-    if type(value.items) == "table" then
-        return itemsFromApi(value.items)
+    if type(value) ~= "table" or type(value.data) ~= "table" then return nil end
+    local out = {}
+    for _idx, it in ipairs(value.data) do
+        if type(it) == "table" then
+            local id = it.uid
+            local url = absUrl(it.download_url)
+            if type(id) == "string" and id ~= "" and url then
+                out[#out + 1] = {
+                    id = id,
+                    name = tostring(it.name or it.filename or id),
+                    filename = type(it.filename) == "string" and it.filename ~= "" and it.filename or nil,
+                    kind = "online",
+                    url = url,
+                    preview = absUrl(it.name_preview_url or it.preview_url),
+                    size = tonumber(it.size_bytes),
+                    size_label = type(it.size_label) == "string" and it.size_label ~= "" and it.size_label or nil,
+                    category = type(it.category) == "string" and it.category ~= "" and it.category or "other",
+                    category_name = type(it.category_name) == "string" and it.category_name ~= "" and it.category_name or nil,
+                    note = type(it.note) == "string" and it.note ~= "" and it.note or nil,
+                }
+            end
+        end
     end
+    return out, tonumber(value.count)
+end
+
+--- 缓存里是已解析的 MoonFontItem[]；格式不符返回 nil。
+---@param value any
+---@return MoonFontItem[]|nil
+local function parseCachedList(value)
+    if type(value) ~= "table" then return nil end
     local first = value[1]
-    if type(first) == "table" and first.id and first.kind == "weread" then
+    if type(first) == "table" and first.id and isOnlineKind(first.kind) then
         return value
     end
     if next(value) == nil then
         return value
     end
+    return nil
 end
 
---- 微信读书字体列表。有效缓存直接返回，不联网；写入的是解析后的列表。
---- 拉取或解析失败时回落磁盘上的过期列表，避免用户两手空空。
----@param cb fun(items: MoonFontItem[]|nil, err: string|nil)
+--- 按页拉取 moon-store 全部启用字体，合并排序后回调。
+---@param done fun(items: MoonFontItem[]|nil, err: string|nil)
 ---@return { cancel: fun() }
-local function fetchWereadAsync(cb)
-    local cache_key = Cache.key("GET", Catalog.LIST_URL)
-    return Cache.fetch(cache_key, Catalog.LIST_TTL, function(done)
-        return Request.get(Catalog.LIST_URL, { accept = "application/json" }, function(body, err)
+local function requestAllPages(done)
+    local cancelled = false
+    local current_job
+    local all, seen = {}, {}
+    local page = 1
+
+    local function fetchPage()
+        if cancelled then return end
+        local url = string.format("%s?page=%d&pageSize=%d", Catalog.LIST_URL, page, Catalog.PAGE_SIZE)
+        current_job = Request.get(url, { accept = "application/json" }, function(body, err)
+            if cancelled then return end
             if not body then return done(nil, err or _("获取字体列表失败")) end
-            local out = parseWereadList(body)
-            if not out then return done(nil, _("字体列表解析失败")) end
-            done(out)
+            local items, total = parseApiPage(body)
+            if not items then return done(nil, _("字体列表解析失败")) end
+            for _idx, it in ipairs(items) do
+                if not seen[it.id] then
+                    seen[it.id] = true
+                    all[#all + 1] = it
+                end
+            end
+            local more = #items >= Catalog.PAGE_SIZE
+                and (not total or #all < total)
+                and page < Catalog.MAX_PAGES
+            if more then
+                page = page + 1
+                fetchPage()
+                return
+            end
+            table.sort(all, byName)
+            done(all)
         end)
-    end, function(value, err)
-        local items = parseWereadList(value)
-        if items then return cb(items) end
+    end
+
+    fetchPage()
+    return { cancel = function()
+        cancelled = true
+        if current_job and current_job.cancel then current_job.cancel() end
+    end }
+end
+
+--- 在线字体目录（moon-store.ankio.net）。有效缓存直接返回，不联网；失败时回落磁盘旧缓存。
+---@param cb fun(items: MoonFontItem[]|nil, err: string|nil)
+---@param opts { force?: boolean }|nil
+---@return { cancel: fun() }
+function Catalog.listOnlineAsync(cb, opts)
+    local cache_key = Cache.key("GET", Catalog.LIST_URL)
+    if opts and opts.force then Cache.forget(cache_key) end
+    return Cache.fetch(cache_key, Catalog.LIST_TTL, requestAllPages, function(value, err)
+        local items = parseCachedList(value)
+        if items then return cb(items, nil) end
         if value ~= nil and err == nil then
             Cache.forget(cache_key)
             return cb(nil, _("字体列表解析失败"))
@@ -177,113 +328,32 @@ local function fetchWereadAsync(cb)
     end, { stale_on_error = true })
 end
 
---- 异步列表：本地扫描（子进程，会话内只跑一次）与微信列表并发，都到齐后合并回调一次。
---- 任一路的错误都带回给调用方，但列表仍按已有结果给出。
----@param cb fun(items: MoonFontItem[], err: string|nil)
----@return { cancel: fun() }
-function Catalog.listAsync(cb)
-    local mtime = fontsMtime()
-    if scanned_mtime ~= mtime then scanned = nil end
-    local need_scan, need_net = not scanned, Catalog.onlineEnabled()
-    local cancelled, pending = false, (need_scan and 1 or 0) + (need_net and 1 or 0)
-    local weread, err
-    local function finish(e)
-        err = err or e
-        pending = pending - 1
-        if cancelled or pending > 0 then return end
-        local out = {}
-        for _idx, list in ipairs({ weread or {}, scanned or {} }) do
-            for _i, it in ipairs(list) do out[#out + 1] = it end
-        end
-        cb(out, err)
-    end
-
-    if pending == 0 then
-        finish()
-        return { cancel = function() end }
-    end
-
-    local scan_job = need_scan and Job.run(scanInstalledFonts, {
-        name = "font.scan",
-        kind = "medium",
-        on_done = function(data)
-            scanned, scanned_mtime = data, mtime
-            finish()
-        end,
-        on_failed = function(e)
-            logger.warn("book.font scan failed", e)
-            finish(e or _("字体扫描失败"))
-        end,
-    })
-    local net_job = need_net and fetchWereadAsync(function(items, e)
-        weread = items
-        finish(e)
-    end) or nil
-
-    return { cancel = function()
-            cancelled = true
-            if scan_job then scan_job:cancel() end
-            if net_job then net_job.cancel() end
-        end }
-end
-
---- 从下载的 zip 里抽出第一个 .woff/.woff2，转成 sfnt 落到 dest；返回失败原因（nil 为成功）。
---- 无论成功失败都删掉 zip 和中间的 .woff。在 Job 子进程里执行（会阻塞地解压）。
----@param zip_path string
+--- 校验下载下来的字体文件魔数、按需补齐空格字形，并原子移动到 dest；返回失败原因（nil 为成功）。
+--- 无论成功失败都不保留 dl_path。在 Job 子进程里执行。
+---@param dl_path string
 ---@param dest string
 ---@return string|nil err
-local function extractInstalledFont(zip_path, dest)
-    local f = io.open(zip_path, "rb")
+local function installDownloadedFont(dl_path, dest)
+    local f = io.open(dl_path, "rb")
     local magic = f and f:read(4)
     if f then f:close() end
-    local err
-    if magic ~= "PK\3\4" then
-        -- 强制门户 / CDN 错误页等以 200 返回的非 zip 内容
-        err = "not a zip: " .. string.format("%q", (magic or ""):gsub("%c", "?"))
-    else
-        local woff = dest:gsub("%.ttf$", ".woff")
-        local arc = Archiver.Reader:new()
-        err = "no woff in zip"
-        if arc:open(zip_path) then
-            for entry in arc:iterate() do
-                local path = entry.path:lower()
-                -- 跳过 macOS 打包残留的 __MACOSX/._xxx.woff 资源叉
-                if entry.mode == "file" and path:match("%.woff2?$") and not path:match("^__macosx/") then
-                    -- libarchive 在 vfat 等盘上设属性时可能回 ARCHIVE_WARN（返回 false）但文件已完整写出：按落盘大小判定
-                    arc:extractToPath(entry.path, woff)
-                    local out = io.open(woff, "rb")
-                    local size = out and out:seek("end")
-                    if out then out:close() end
-                    if size ~= tonumber(entry.size) then
-                        err = "extract failed: " .. tostring(arc.err) .. " " .. tostring(size) .. "/" .. tostring(entry.size)
-                    else
-                        err = nil
-                    end
-                    break
-                end
-            end
-        else
-            err = "open zip failed: " .. tostring(arc.err)
-        end
-        arc:close()
-        if not err then
-            -- 新下载转换失败不能把原 WOFF 改名成 .ttf 冒充已安装：FreeType 读不出，且之后永远判为已下载。
-            logger.info("book.font woff convert start", dest)
-            logger.flushSync()
-            local ok, convert_err = require("ui.fonts.woff").toSfnt(woff, dest)
-            if not ok then err = "woff convert failed: " .. tostring(convert_err) end
-            if not err then
-                local _changed, repair_err = Sfnt.ensureSpace(dest)
-                err = repair_err
-                if err then os.remove(dest) end
-            end
-        end
-        os.remove(woff)
+    if not magic or not SFNT_MAGIC[magic] then
+        os.remove(dl_path)
+        return "not a font: " .. string.format("%q", (magic or ""):gsub("%c", "?"))
     end
-    os.remove(zip_path)
-    return err
+    local _changed, repair_err = Sfnt.ensureSpace(dl_path)
+    if repair_err then
+        os.remove(dl_path)
+        return repair_err
+    end
+    os.remove(dest)
+    local renamed, rename_err = os.rename(dl_path, dest)
+    if not renamed then
+        os.remove(dl_path)
+        return tostring(rename_err or "rename failed")
+    end
+    return nil
 end
-
 
 --- UI 线程：内存不够则记日志、弹窗（Kindle 可提供 no-framework 重启），再回调失败。
 local function refuseMemory(item, dest, what, detail, cb)
@@ -298,28 +368,91 @@ local function refuseMemory(item, dest, what, detail, cb)
     cb(nil, _("内存不足"))
 end
 
---- 确保字体可用：新下载在解包子进程里修复，已有下载在独立子进程里迁移/修复。
---- 下载前先删掉残留 zip，避免续用上次中断的半截包。
+--- 下载在线字体到本地用户字体目录（$DATA/fonts/<filename>）。
+--- 成功回调 cb(true, filename)；失败回调 cb(nil, err)。
 ---@param item MoonFontItem
----@param on_progress fun(bytes: number)|nil 下载字节进度
+---@param on_progress fun(bytes: number)|nil
+---@param cb fun(ok: boolean|nil, detail: string|nil)
+---@return { cancel: fun() }
+function Catalog.downloadToUserAsync(item, on_progress, cb)
+    local noop = { cancel = function() end }
+    local filename = Catalog.targetFilename(item)
+    local dest = filename and Fonts.userFontPath(filename)
+    if not dest or type(item.url) ~= "string" or item.url == "" then
+        cb(nil, _("无效字体项"))
+        return noop
+    end
+    if type(Paths.ensureDir) == "function" then
+        Paths.ensureDir(Fonts.settingsFontsDir())
+    else
+        require("libs/libkoreader-lfs").mkdir(Fonts.settingsFontsDir())
+    end
+    local dl_path = dest .. ".dl"
+    local cancelled = false
+    local install_job
+    os.remove(dl_path)
+    local host = item.url:match("^https?://([^/]+)")
+    logger.info("book.font download start", item.id, item.name, "dest=" .. dest, "dl=" .. dl_path,
+        "size=" .. tostring(item.size or ""), host and ("host=" .. host) or "host=")
+    logger.flushSync()
+    local download_job = Request.download({
+        url = item.url,
+        timeout = require("http.timeout").net(10),
+        resume = true,
+        allow_redirects = true,
+        on_progress = on_progress,
+    }, dl_path, function(ok, err)
+        if cancelled then return end
+        if not ok then
+            logger.warn("book.font download failed", item.id, "dl=" .. dl_path, err)
+            logger.flushSync()
+            return cb(nil, err)
+        end
+        local dl_file = io.open(dl_path, "rb")
+        local dl_bytes = dl_file and dl_file:seek("end")
+        if dl_file then dl_file:close() end
+        logger.info("book.font download done", item.id, "dl=" .. dl_path, "bytes=" .. tostring(dl_bytes or ""))
+        logger.flushSync()
+        local function done(install_err)
+            if cancelled then return end
+            if install_err or not Fonts.isFile(dest) then
+                logger.warn("book.font install failed", item.id, dest, install_err)
+                logger.flushSync()
+                return cb(nil, _("字体安装失败"))
+            end
+            Catalog.invalidateLocalScan()
+            logger.info("book.font installed", item.id, dest)
+            logger.flushSync()
+            cb(true, filename)
+        end
+        install_job = Job.run(function() return installDownloadedFont(dl_path, dest) end,
+            { name = "font.install", kind = "medium", on_done = done, on_failed = done })
+    end)
+    return { cancel = function()
+        cancelled = true
+        download_job.cancel()
+        if install_job then install_job:cancel() end
+    end }
+end
+
+--- 兼容旧调用：确保在线字体已落到本地用户字体目录（含旧版 .woff 迁移）。
+---@param item MoonFontItem
+---@param on_progress fun(bytes: number)|nil
 ---@param cb fun(ok: boolean|nil, err: string|nil)
 ---@return { cancel: fun() }
 function Catalog.ensureInstalledAsync(item, on_progress, cb)
     local noop = { cancel = function() end }
-    if item.kind ~= "weread" then
+    if not isOnlineKind(item.kind) then
         cb(true)
         return noop
     end
-    local dest = Fonts.wereadPath(item.id)
+    local filename = Catalog.targetFilename(item)
+    local dest = filename and Fonts.userFontPath(filename)
     if not dest then
         cb(nil, _("无效字体项"))
         return noop
     end
-    local installed = Fonts.downloadedPath(item.id)
-    if not installed and not Catalog.onlineEnabled() then
-        cb(nil, _("在线字体已关闭"))
-        return noop
-    end
+    local installed = Fonts.isFile(dest) and dest or Fonts.downloadedPath(item.id)
     if installed then
         local cancelled = false
         local function done(err)
@@ -329,12 +462,11 @@ function Catalog.ensureInstalledAsync(item, on_progress, cb)
                 logger.flushSync()
                 cb(nil, _("应用字体失败"))
             else
-                cb(true)
+                Catalog.invalidateLocalScan()
+                cb(true, filename)
             end
         end
-        logger.info("book.font prepare start", item.id, "src=" .. installed, "dest=" .. dest)
-        logger.flushSync()
-        if installed ~= dest then
+        if installed:match("%.woff$") then
             local src = io.open(installed, "rb")
             local src_size = src and src:seek("end")
             if src then src:close() end
@@ -343,11 +475,20 @@ function Catalog.ensureInstalledAsync(item, on_progress, cb)
                 return refuseMemory(item, dest, _("字体转换"), detail, cb)
             end
         end
+        if type(Paths.ensureDir) == "function" then
+            Paths.ensureDir(Fonts.settingsFontsDir())
+        else
+            require("libs/libkoreader-lfs").mkdir(Fonts.settingsFontsDir())
+        end
         local job = Job.run(function()
-            if installed ~= dest then
+            if installed:match("%.woff$") then
                 local ok, err = require("ui.fonts.woff").toSfnt(installed, dest)
                 if not ok then return err end
                 os.remove(installed)
+            elseif installed ~= dest then
+                if not os.rename(installed, dest) then
+                    return "rename failed"
+                end
             end
             local _changed, err = Sfnt.ensureSpace(dest)
             return err
@@ -357,61 +498,7 @@ function Catalog.ensureInstalledAsync(item, on_progress, cb)
             job:cancel()
         end }
     end
-    Paths.ensureFonts()
-    local zip_path = dest:gsub("%.ttf$", ".zip")
-    local cancelled = false
-    local extract_job
-    os.remove(zip_path)
-    -- 下载/转码可能把低内存设备直接杀掉：里程碑用 info（失败用 warn），并 flushSync 立刻落盘，
-    -- 不等攒满一批或下一个 UI tick。不记带签名的完整 URL，host + 字体 id 足够对照。
-    local host = type(item.url) == "string" and item.url:match("^https?://([^/]+)")
-    logger.info("book.font download start", item.id, item.name, "dest=" .. dest, "zip=" .. zip_path,
-        "zip_size=" .. tostring(item.zip_size or ""), host and ("host=" .. host) or "host=")
-    logger.flushSync()
-    local download_job = Request.download({ url = item.url, timeout = require("http.timeout").net(10), resume = true, on_progress = on_progress },
-        zip_path, function(ok, err)
-            if cancelled then return end
-            if not ok then
-                logger.warn("book.font download failed", item.id, "zip=" .. zip_path, err)
-                logger.flushSync()
-                return cb(nil, err)
-            end
-            local zip_file = io.open(zip_path, "rb")
-            local zip_bytes = zip_file and zip_file:seek("end")
-            if zip_file then zip_file:close() end
-            logger.info("book.font download done", item.id, "zip=" .. zip_path, "bytes=" .. tostring(zip_bytes or ""))
-            local affordable, _mem_err, detail = Mem.canAfford(Mem.estimateWoffToSfnt(zip_bytes))
-            if not affordable then
-                os.remove(zip_path)
-                return refuseMemory(item, dest, _("字体解压"), detail, cb)
-            end
-            logger.info("book.font extract start", item.id, "zip=" .. zip_path, "dest=" .. dest,
-                "need=" .. tostring(Mem.mb(detail.needed) or "?") .. "MB",
-                "avail=" .. tostring(Mem.mb(detail.available) or "?") .. "MB")
-            logger.flushSync()
-            local function done(extract_err)
-                if cancelled then return end
-                if extract_err or not Fonts.isFile(dest) then
-                    logger.warn("book.font extract failed", item.id, dest, extract_err)
-                    logger.flushSync()
-                    if Mem.isInsufficient(extract_err) then
-                        local _ok, _err, failed = Mem.canAfford(Mem.estimateWoffToSfnt(zip_bytes))
-                        return refuseMemory(item, dest, _("字体转换"), failed, cb)
-                    end
-                    return cb(nil, _("字体解压失败"))
-                end
-                logger.info("book.font installed", item.id, dest)
-                logger.flushSync()
-                cb(true)
-            end
-            extract_job = Job.run(function() return extractInstalledFont(zip_path, dest) end,
-                { name = "font.extract", kind = "heavy", on_done = done, on_failed = done })
-        end)
-    return { cancel = function()
-            cancelled = true
-            download_job.cancel()
-            if extract_job then extract_job:cancel() end
-        end }
+    return Catalog.downloadToUserAsync(item, on_progress, cb)
 end
 
 return Catalog

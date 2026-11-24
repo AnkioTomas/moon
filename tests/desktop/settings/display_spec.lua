@@ -9,7 +9,11 @@ end
 package.preload["ui.themes.widgets.row"] = function()
     return { widget = function(opts) return opts end }
 end
+local online_opened = 0
 package.preload["ui.widgets.fontpicker"] = function() return { open = function() end } end
+package.preload["ui.widgets.online_fonts"] = function()
+    return { open = function() online_opened = online_opened + 1 end }
+end
 local Themed = require("support.theme_stubs")
 Themed.install()
 package.preload["ui.themes"] = function()
@@ -103,15 +107,11 @@ Assert.eq(rows[1][2].title, "背景遮罩")
 Assert.is_true(rows[1][2].toggle)
 Assert.eq(rows[2][1].title, "界面字体")
 Assert.eq(rows[2][2].title, "在线字体")
-Assert.is_true(rows[2][2].toggle, "在线字体默认开启")
+Assert.eq(rows[2][2].kind, "nav", "在线字体改为分类下载导航入口")
 Assert.eq(rows[2][3].title, "字体加粗")
 Assert.eq(rows[2][4].title, "界面缩放")
 rows[2][2].callback()
-Assert.is_false(settings.online_fonts)
-titles, rows = flatten(Display:appearanceSections(ctx))
-Assert.is_false(rows[2][2].toggle)
-rows[2][2].callback()
-Assert.is_true(settings.online_fonts)
+Assert.eq(online_opened, 1, "点击在线字体打开分类下载页")
 Assert.len(rows[3], 1, "彩色关闭时只有开关")
 Assert.eq(rows[3][1].title, "彩色显示")
 Assert.is_false(rows[3][1].toggle)

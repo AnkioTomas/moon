@@ -255,16 +255,17 @@ function Display:appearanceSections(ctx)
             })
         end,
         function(iw)
-            local conf = MoonSettings.get("ui")
             return Row.widget({
                 width = iw,
-                icon = "font_download", title = _("在线字体"),
-                subtitle = _("从网上获取可选字体；关闭后不再下载，已安装的仍可使用"),
-                toggle = conf.online_fonts ~= false,
+                kind = "nav", icon = "font_download", title = _("在线字体"),
+                subtitle = _("按分类浏览并下载字体到本地用户字体"),
                 callback = function()
-                    conf.online_fonts = conf.online_fonts == false
-                    MoonSettings.save("ui", conf)
-                    desktop:updateView()
+                    require("ui.widgets.online_fonts").open{
+                        on_done = function()
+                            require("ui.fonts").applyCurrent()
+                            desktop:updateView()
+                        end,
+                    }
                 end,
             })
         end,

@@ -212,6 +212,8 @@ function List:rebuild()
             image_headers = item.image_headers,
             status = status or item.mandatory,
             chevron = item.chevron == true,
+            action_icon = columns == 1 and item.action_icon or nil,
+            action_callback = columns == 1 and item.action_callback or nil,
             selected = not self.multi and self:checked(item) == true,
             enabled = item.enabled,
             callback = function() self:choose(item) end,

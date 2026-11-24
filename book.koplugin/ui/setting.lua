@@ -10,8 +10,10 @@ return {
         ui_font = "",
         ui_font_name = "",
         font_bold = false,
-        -- 在线字体默认开启；设为 false 后不再拉取或下载在线字体，已安装的仍可用。
+        -- 在线字体默认开启（旧版配置保留，避免旧设置文件出现未知键）。
         online_fonts = true,
+        -- 字体存储迁移版本号：0 → 1 把旧 .moon/fonts 迁入 $DATA/fonts 用户字体目录。
+        fonts_migrated_ver = 0,
         tabbar_labels = true,
         grid_max_cols = 4,
         mesh_mask = true,

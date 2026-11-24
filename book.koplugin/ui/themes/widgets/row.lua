@@ -83,6 +83,7 @@ function Row.widget(opts)
     local image_h = opts.image and math.min(Theme.px(opts.image_h or t.control.icon), h - Theme.px(t.space.xs) * 2)
     local image_w = opts.image and Theme.px(opts.image_w or opts.image_h or t.control.icon)
     local chev_w = chevron and icon_sz or 0
+    local action_w = opts.action_icon and (icon_sz + gap) or 0
     local status_widget = type(opts.status) == "table" and opts.status or nil
     local status_w = status_widget and status_widget:getSize().w or 0
     if not status_widget and opts.status then
@@ -91,7 +92,7 @@ function Row.widget(opts)
         status_w = math.min(math.max(probe:getSize().w, math.floor(inner * 0.4)), math.floor(inner * 0.65))
         probe:free()
     end
-    local text_w = math.max(1, inner - icon_w - (image_w and image_w + gap or 0) - status_w - chev_w)
+    local text_w = math.max(1, inner - icon_w - (image_w and image_w + gap or 0) - status_w - chev_w - action_w)
 
     local content = HorizontalGroup:new{ align = "center" }
     if opts.icon then
@@ -128,8 +129,19 @@ function Row.widget(opts)
     if chevron then
         content[#content + 1] = CenterContainer:new{
             dimen = Geom:new{ w = chev_w, h = h },
-            Icon.widget{ name = "chevron_right", size = t.control.icon, color = Blitbuffer.Color8(muted) },
+            Icon.widget{ name = "chevron_right", size = t.control.icon, color = Theme.color(muted) },
         }
+    end
+    if opts.action_icon then
+        -- 仅整行反白主题（selected.ink == 0xFF，如 bold）随选中反白；浅底选中行（paper / soft）保持 muted，
+        -- 避免彩色模式下把 24 位 RGB 选中色传给 Color8 截断成白色。
+        local action_color = not enabled and t.color.disabled
+            or (sel and t.selected.ink == 0xFF and 0xFF or t.color.muted)
+        local btn = CenterContainer:new{
+            dimen = Geom:new{ w = action_w, h = h },
+            Icon.widget{ name = opts.action_icon, size = t.control.icon, color = Theme.color(action_color) },
+        }
+        content[#content + 1] = Tap.wrap(btn, enabled and opts.action_callback or nil)
     end
 
     local group = VerticalGroup:new{
