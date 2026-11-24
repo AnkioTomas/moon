@@ -99,10 +99,20 @@ function List:init()
     self:updateView()
 end
 
+--- 列表中是否存在带副标题的行；用于按真实行高算每页条数，避免双行内容把翻页条顶出屏幕。
+---@param items table[]|nil
+---@return boolean
+local function hasSubtitle(items)
+    for _idx, item in ipairs(items or {}) do
+        if item.subtitle and item.subtitle ~= "" then return true end
+    end
+    return false
+end
+
 function List:updateView()
     local t = self.theme
     self.row_w = self.centered and self:innerWidth() or self.dimen.w
-    self.row_h = self.row_height and Theme.px(self.row_height) or Row.height(false)
+    self.row_h = self.row_height and Theme.px(self.row_height) or Row.height(hasSubtitle(self.items))
     self.pitch = self.row_h + Theme.px(t.row.divider)
     self.header_widget = self:buildHeader()
     local header_h = self.header_widget and self.header_widget:getSize().h or 0

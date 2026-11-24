@@ -8,6 +8,6 @@ local _ = require("gettext")
 
 return {
     name = _("存储空间"),
-    description = _("占用查看与清理"),
-    abilities = { _("空间占用统计"), _("缓存清理") },
+    description = _("占用查看、缓存清理与诊断文件清理"),
+    abilities = { _("空间占用统计"), _("缓存清理"), _("诊断文件清理") },
 }

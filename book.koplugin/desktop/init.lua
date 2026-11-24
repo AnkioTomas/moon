@@ -72,6 +72,8 @@ local Tabbar = require("ui.themes.widgets.tabbar")
 ---@field settings_overlay BookSettingsOverlay|nil
 ---@field storage_usage BookStorageUsage|nil 存储空间页的统计缓存（features/storage）
 ---@field storage_job { cancel: fun() }|nil
+---@field storage_dumps { items: table[], total: number, count: number, at?: integer }|nil
+---@field storage_dumps_job { cancel: fun() }|nil
 ---@field _tabs table[]
 ---@field _shell string|nil 外壳签名：屏幕尺寸 / 主题 / 缩放
 ---@field _books_sync table<string, { cancel: { cancel: fun(self) }|nil }> 源 id → 在飞书架同步（desktop.sync）

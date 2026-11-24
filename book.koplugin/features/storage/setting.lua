@@ -1,6 +1,7 @@
 --[[--
 存储空间：挂在「我的设备 → 本机」，点进去才是这一页。设备占用条，以及月读每一类文件是什么、能不能清。
 书籍按本清理；字体、输入法词库、生僻字、下载残留按条清理，正在用的那一条不能删。
+Kindle 用户存储根目录上的崩溃转储与 Indexer 诊断单独一类，列出后由用户选择删除，不自动清理。
 
 统计结果缓存在桌面实例的 `storage_usage` 上（1 分钟内复用），算完后刷新叠层；没算完时显示「计算中…」。
 清理后立即重新统计。
@@ -19,21 +20,52 @@ local function friendly(bytes)
     return require("util").getFriendlySize(bytes) or tostring(bytes)
 end
 
---- 起一次统计（同一时刻只有一个在飞）；force 忽略缓存新鲜度。
+--- 起一次统计（同一时刻只有一个在飞）；force 忽略缓存新鲜度并替换在飞任务。
 ---@param desktop BookDesktop
 ---@param force boolean|nil
 local function measure(desktop, force)
     local cached = desktop.storage_usage
-    if desktop.storage_job or (not force and cached and cached.items and os.time() - cached.at < FRESH_SECONDS) then
+    if not force and (desktop.storage_job or (cached and cached.items and os.time() - cached.at < FRESH_SECONDS)) then
         return
     end
-    desktop.storage_job = require("features.storage.usage").measureAsync(function(result)
+    if desktop.storage_job then
+        desktop.storage_job:cancel()
+        desktop.storage_job = nil
+    end
+    local settled = false
+    local job = require("features.storage.usage").measureAsync(function(result)
+        settled = true
         desktop.storage_job = nil
         if not result then return end -- 统计失败：保留上一次结果，不把占用刷成 0
         result.at = os.time()
         desktop.storage_usage = result
         if not desktop.closed and desktop.settings_overlay then desktop.settings_overlay:updateView() end
     end)
+    if not settled then desktop.storage_job = job end
+end
+
+--- 起一次诊断文件扫描（与月读占用分开，同一时刻只有一个在飞）；force 替换在飞任务。
+---@param desktop BookDesktop
+---@param force boolean|nil
+local function scanDumps(desktop, force)
+    local cached = desktop.storage_dumps
+    if not force and (desktop.storage_dumps_job or (cached and cached.items and os.time() - cached.at < FRESH_SECONDS)) then
+        return
+    end
+    if desktop.storage_dumps_job then
+        desktop.storage_dumps_job:cancel()
+        desktop.storage_dumps_job = nil
+    end
+    local settled = false
+    local job = require("features.storage.dumps").scanAsync(function(result)
+        settled = true
+        desktop.storage_dumps_job = nil
+        if not result then return end
+        result.at = os.time()
+        desktop.storage_dumps = result
+        if not desktop.closed and desktop.settings_overlay then desktop.settings_overlay:updateView() end
+    end)
+    if not settled then desktop.storage_dumps_job = job end
 end
 
 --- 缓存目录名（slug）→ 显示名与书库里的书。书库的书直接给书名；订阅不在书库里，
@@ -315,6 +347,108 @@ local function showItems(desktop, kind, title)
     view:show()
 end
 
+local DUMP_ERRORS = {
+    missing = _("文件已不在"),
+    replaced = _("文件已被替换，已跳过"),
+    not_file = _("不是可删除的文件"),
+    invalid = _("不是可删除的文件"),
+    out_of_scope = _("不在可清理范围内"),
+}
+
+local function formatTime(mtime)
+    if type(mtime) ~= "number" or mtime <= 0 then return _("未知时间") end
+    return os.date("%Y-%m-%d %H:%M", mtime)
+end
+
+--- 列出诊断文件，多选后确认删除。列表在点开时才构造。
+---@param desktop BookDesktop
+local function showDumps(desktop)
+    local Dumps = require("features.storage.dumps")
+    local cached = desktop.storage_dumps
+    local list_items = {}
+    for _idx, item in ipairs(cached and cached.items or {}) do
+        list_items[#list_items + 1] = {
+            text = item.name,
+            subtitle = _("设备存储") .. " · " .. formatTime(item.mtime),
+            mandatory = friendly(item.size),
+            checked = false,
+            dump = item,
+        }
+    end
+    local view
+    local function deleteSelected()
+        local list, names, bytes = {}, {}, 0
+        for _idx, row in ipairs(list_items) do
+            if row.checked then
+                list[#list + 1] = row.dump
+                names[#names + 1] = row.dump.name
+                bytes = bytes + (row.dump.size or 0)
+            end
+        end
+        if #list == 0 then
+            require("ui.themes.widgets.toast"):new{ text = _("请先选择要删除的文件") }:show()
+            return
+        end
+        local confirm
+        confirm = require("ui.themes.widgets.text_viewer"):new{
+            title = _("删除诊断文件"),
+            text = T(_("删除这 %1 个诊断文件（共 %2）？删除后无法恢复。\n\n%3"),
+                tostring(#list), friendly(bytes), table.concat(names, "\n")),
+            fullscreen = false,
+            buttons = {
+                { text = _("取消"), callback = function() confirm:close() end },
+                { text = _("删除"), variant = "primary", callback = function()
+                    confirm:close()
+                    local result = Dumps.removeMany(list)
+                    local removed, errors = #result.removed, result.errors
+                    view:close()
+                    desktop.storage_dumps = nil
+                    scanDumps(desktop, true)
+                    measure(desktop, true)
+                    if not desktop.storage_dumps and not desktop.closed and desktop.settings_overlay then
+                        desktop.settings_overlay:updateView()
+                    end
+                    if #errors == 0 then
+                        require("ui.themes.widgets.toast"):new{
+                            text = T(_("已删除 %1 个"), tostring(removed)),
+                        }:show()
+                    else
+                        local reasons = {}
+                        for _i, one in ipairs(errors) do
+                            local reason = DUMP_ERRORS[one.err] or _("删除失败")
+                            reasons[#reasons + 1] = (one.item and one.item.name or "") .. "：" .. reason
+                        end
+                        local text = removed > 0
+                            and T(_("已删除 %1 个，有 %2 个未能删除。\n%3"),
+                                tostring(removed), tostring(#errors), table.concat(reasons, "\n"))
+                            or T(_("没有文件被删除。\n%1"), table.concat(reasons, "\n"))
+                        local report
+                        report = require("ui.themes.widgets.text_viewer"):new{
+                            title = _("删除结果"),
+                            text = text,
+                            fullscreen = false,
+                            buttons = {
+                                { text = _("知道了"), variant = "primary", callback = function() report:close() end },
+                            },
+                        }
+                        report:show()
+                    end
+                end },
+            },
+        }
+        confirm:show()
+    end
+    view = require("ui.themes.widgets.list"):new{
+        title = _("崩溃与诊断文件"),
+        subtitle = T(_("%1 个，共 %2"), tostring(cached and cached.count or 0), friendly(cached and cached.total or 0)),
+        multi = true,
+        left_icon = "delete",
+        left_callback = deleteSelected,
+        items = list_items,
+    }
+    view:show()
+end
+
 --- 设备占用条：已用 / 总量。
 ---@param disk table
 ---@return fun(iw: number): table
@@ -338,6 +472,8 @@ local function sections(desktop)
     local Row = require("ui.themes.widgets.row")
     local Usage = require("features.storage.usage")
     measure(desktop)
+    local has_dumps = #require("features.storage.dumps").defaultRoots() > 0
+    if has_dumps then scanDumps(desktop) end
     local cached = desktop.storage_usage
     local disk = require("features.storage").disk() or {}
     local device = {}
@@ -347,6 +483,25 @@ local function sections(desktop)
             return Row.widget({ width = iw, chevron = false, icon = "storage",
                 title = T(_("已用 %1 / 共 %2"), friendly(disk.used), friendly(disk.total)),
                 status = T(_("可用 %1"), friendly(disk.available)), status_on = true })
+        end
+    end
+    if has_dumps then
+        device[#device + 1] = function(iw)
+            local dumps = desktop.storage_dumps
+            local status, open
+            if not dumps or not dumps.items then
+                status, open = _("计算中…"), false
+            elseif (dumps.count or 0) == 0 then
+                status, open = _("没有这类文件"), false
+            else
+                status, open = T(_("%1 个 · %2"), tostring(dumps.count), friendly(dumps.total)), true
+            end
+            return Row.widget({
+                width = iw, icon = "report", title = _("崩溃与诊断文件"),
+                subtitle = _("Kindle 崩溃转储和 Indexer 诊断，可选择后删除。"),
+                status = status, status_on = true, chevron = open,
+                callback = open and function() showDumps(desktop) end or nil,
+            })
         end
     end
     local rows = {}

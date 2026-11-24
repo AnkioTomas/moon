@@ -179,6 +179,21 @@ Assert.eq(list.tabs.active, "y")
 Assert.len(list.items, 40)
 Assert.eq(list.page, 3, "翻到第 35 项所在页")
 
+-- 带副标题的行按双行高度算 per_page，避免底行和翻页条被顶出屏幕。
+local sub_items = {}
+for i = 1, 30 do
+    sub_items[i] = { text = "文件" .. i, subtitle = "设备存储 · 2026-11-24 12:00", checked = false }
+end
+local sub_list = List:new{ title = "诊断文件", items = sub_items, multi = true }
+Assert.is_true(sub_list.per_page < 14, "双行高度每页应少于单行 14 项")
+Assert.eq(sub_list[1]:getSize().h, 800, "含副标题的列表面板不得溢出整屏高度")
+local sub_group = sub_list[1][1]
+local children_h = 0
+for i = 1, #sub_group do
+    children_h = children_h + sub_group[i]:getSize().h
+end
+Assert.is_true(children_h <= 800, "标题栏 + 双行内容 + 翻页条总高不得超过屏高")
+
 -- 嵌进别的窗口：按给定尺寸布局，刷新打到宿主窗口；点击范围跟着绘制位置走。
 local host = {}
 list = List:new{ items = items(30), width = 300, height = 400, show_parent = host }
