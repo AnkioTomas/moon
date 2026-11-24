@@ -65,14 +65,17 @@ ok, err = login('{"errors":["Too many logins #2. Try again later."]}')
 Assert.is_nil(ok)
 Assert.eq(#urls, 1, "被限流不再试第二个入口")
 
--- 门禁镜像带 Basic，其它镜像不带
-local function loginAt(base)
-    replies, urls, sent = { '{"response":{"user_id":1,"user_key":"k"}}' }, {}, {}
+-- eAPI 携带 source: android，/rpc.php 不带；不再发已废弃的 Basic 认证
+local function loginAt(base, first, second)
+    replies, urls, sent = { first, second }, {}, {}
     Client.new({ email = "a", password = "p", base_url = base }):loginAsync(function() end)
 end
-loginAt("https://iread.ink")
-Assert.matches(sent[1].Authorization, "^Basic ")
-loginAt("https://m.example")
+loginAt("https://iread.ink", '{"response":{"user_id":1,"user_key":"k"}}')
 Assert.is_nil(sent[1].Authorization)
+Assert.is_nil(sent[1].source)
+loginAt("https://m.example", '{"response":{"validationError":true,"message":"fail"}}',
+    '{"success":1,"user":{"id":9,"remix_user_key":"legacy"}}')
+Assert.eq(sent[2].source, "android")
+Assert.eq(sent[2].Accept, "application/json")
 
 return true
