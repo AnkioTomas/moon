@@ -1,7 +1,7 @@
 --[[--
 生僻字注音 / WordWise 释义词库目录：可下载词库清单、安装 / 删除、按设置加载已启用的词库。
 
-托管与输入法词库相同：仓库 assets/rare/<id>/ 下 manifest.json + 分片，设备经 http.mirror 多源拉取，
+托管与输入法词库相同：仓库 assets/rare/<id>/ 下 manifest.json + 分片，设备经 http.github 多源拉取，
 下载、校验、落位全走 features.ime.download.install。落盘在 $DATA/.moon/rare/<id>.tsv；
 用户自制词库同格式放进这个目录（文件名即 id）也会出现在列表里。
 

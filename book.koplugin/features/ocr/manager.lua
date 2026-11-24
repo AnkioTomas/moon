@@ -8,7 +8,7 @@ OCR 识别模型（Tesseract traineddata）管理：清单、下载校验、原�
 --]]
 
 local JSON = require("json")
-local Mirror = require("http.mirror")
+local Github = require("http.github")
 local Job = require("workers.job")
 local lfs = require("libs/libkoreader-lfs")
 
@@ -55,7 +55,7 @@ end
 ---@param cb fun(items: table[]|nil, err: any)
 ---@return table
 function Manager.catalog(cb)
-    return Mirror.get(Manager.BASE_PATH .. "/manifest.json", { timeout = require("http.timeout").net(1) }, function(body, err)
+    return Github.get(Manager.BASE_PATH .. "/manifest.json", { timeout = require("http.timeout").net(1) }, function(body, err)
         if not body then cb(nil, err); return end
         local ok, manifest = pcall(JSON.decode, body)
         -- 解析器报错是内部细节（清单被 CDN 换成 HTML 页时就会触发），
@@ -184,7 +184,7 @@ function Manager.install(item, dir, cb, on_progress)
     if not made then cb(false, make_err); return end
     local part = dir .. "/" .. item.id .. SUFFIX .. ".part"
     local target = dir .. "/" .. item.id .. SUFFIX
-    return Mirror.download(Manager.BASE_PATH .. "/" .. item.file, {
+    return Github.download(Manager.BASE_PATH .. "/" .. item.file, {
         timeout = require("http.timeout").net(10),
         allow_redirects = true,
         resume = true,

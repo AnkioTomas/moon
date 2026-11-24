@@ -231,7 +231,7 @@ end
 ---@param key string|nil
 ---@return string
 function Weather.iconUrl(key)
-    return require("http.mirror").url("assets/weather/" .. (ICONS[key] or ICONS.unknown))
+    return require("http.github").url("assets/weather/" .. (ICONS[key] or ICONS.unknown))
 end
 
 ---@param code string|nil

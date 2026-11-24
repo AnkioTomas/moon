@@ -6,6 +6,10 @@ package.preload["json"] = function() return {} end
 local download_call
 package.preload["http.request"] = function()
     return {
+        get = function(_url, _opts, cb)
+            cb(nil, "offline")
+            return { cancel = function() end }
+        end,
         download = function(opts, dest, cb)
             download_call = { opts = opts, dest = dest, cb = cb }
             return { cancel = function() end }
@@ -142,7 +146,7 @@ local failed
 local removed_part
 os.remove = function(path) removed_part = path; return true end
 Manager.install(item, "/dict", function(ok, err) failed = { ok, err } end)
-for _i = 1, #require("http.mirror").DEFAULTS do
+for _i = 1, #require("http.github").FALLBACK_FILES do
     if failed then break end
     download_call.cb(false, "HTTP 404")
 end

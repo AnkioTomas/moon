@@ -65,7 +65,7 @@ do -- 有城市 + 默认 TTL + 丰富字段
     Assert.eq(got.latitude, 31.239)
     Assert.eq(got.longitude, 121.504)
     Assert.eq(got.icon, "overcast")
-    Assert.eq(got.image, require("http.mirror").url("assets/weather/yin.png"))
+    Assert.eq(got.image, require("http.github").url("assets/weather/yin.png"))
     Assert.len(got.days, 2)
     Assert.eq(got.days[2].date, "2026-09-10")
     Assert.eq(got.days[2].icon, "rain")
@@ -161,7 +161,7 @@ do -- 码表按现象分开，不再把雷、冻雨、雨夹雪、暴风雪塞�
     Assert.eq(Weather.iconKey("350"), "ice")
     Assert.eq(Weather.iconKey("386"), "storm")
     Assert.eq(Weather.iconKey("395"), "thunder_snow")
-    Assert.eq(Weather.iconUrl("cloudy"), require("http.mirror").url("assets/weather/cloudy.png"))
+    Assert.eq(Weather.iconUrl("cloudy"), require("http.github").url("assets/weather/cloudy.png"))
 end
 
 do -- 官方 WWO 条件码 60 个都有图标；霾、烟、沙尘不靠描述碰运气

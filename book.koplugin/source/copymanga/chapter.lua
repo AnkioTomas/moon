@@ -94,7 +94,7 @@ function Chapter.materializeAsync(client, identity, chapter, on_progress, cb)
                 current = current + 1
                 nextImage()
             end)
-            -- 回调同步触发时已发出下一个请求，不能用旧句柄覆盖它（同 http/mirror）。
+            -- 回调同步触发时已发出下一个请求，不能用旧句柄覆盖它（同 http/github）。
             if current == mine then state.active = handle end
         end
         nextImage()

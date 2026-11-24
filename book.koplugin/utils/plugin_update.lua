@@ -28,7 +28,7 @@ local Paths = require("utils.paths")
 local Text = require("utils.text")
 local Job = require("workers.job")
 local Install = require("utils.plugin_install")
-local Release = require("http.release")
+local Github = require("http.github")
 local _ = require("gettext")
 local T = require("ffi/util").template
 
@@ -229,7 +229,7 @@ function Updater:install(release, ctx, cb, on_progress, on_installing)
     if not release.sha256 then
         return installFrom(self, release.url, release, ctx, done, on_progress, on_installing)
     end
-    self._job = Release.pick(release, function(url)
+    self._job = Github.pickRelease(release, function(url)
         installFrom(self, url, release, ctx, done, on_progress, on_installing)
     end)
 end

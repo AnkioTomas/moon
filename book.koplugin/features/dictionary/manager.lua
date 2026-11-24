@@ -7,7 +7,7 @@ StarDict 词典管理：清单、分片下载校验、原子安装、切换与�
 --]]
 
 local JSON = require("json")
-local Mirror = require("http.mirror")
+local Github = require("http.github")
 local Paths = require("utils.paths")
 local Job = require("workers.job")
 local lfs = require("libs/libkoreader-lfs")
@@ -66,7 +66,7 @@ end
 ---@param cb fun(items: table[]|nil, err: any)
 ---@return table
 function Manager.catalog(cb)
-    return Mirror.get(BASE_PATH .. "/manifest.json", { timeout = require("http.timeout").net(1) }, function(body, err)
+    return Github.get(BASE_PATH .. "/manifest.json", { timeout = require("http.timeout").net(1) }, function(body, err)
         if not body then cb(nil, err); return end
         local ok, manifest = pcall(JSON.decode, body)
         if not ok then cb(nil, manifest); return end
@@ -249,7 +249,7 @@ local function downloadParts(item, dir, idx, completed, done, report)
         downloadParts(item, dir, idx + 1, completed, done, report)
         return
     end
-    Mirror.download(BASE_PATH .. "/" .. part.file, {
+    Github.download(BASE_PATH .. "/" .. part.file, {
         timeout = require("http.timeout").net(10),
         allow_redirects = true,
         resume = true,

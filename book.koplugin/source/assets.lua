@@ -156,7 +156,7 @@ function Assets.localizeAsync(html, images_dir, download, cb)
             end
             nextUrl()
         end)
-        -- 回调同步触发时已发出下一个请求，不能用旧句柄覆盖它（同 http/mirror）。
+        -- 回调同步触发时已发出下一个请求，不能用旧句柄覆盖它（同 http/github）。
         if index == mine then active_job = handle end
     end
     nextUrl()

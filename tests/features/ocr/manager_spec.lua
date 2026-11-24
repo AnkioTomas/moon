@@ -30,7 +30,7 @@ package.preload["json"] = function()
     }
 end
 local mirror_body
-package.preload["http.mirror"] = function()
+package.preload["http.github"] = function()
     return {
         get = function(_path, _opts, cb) cb(mirror_body); return {} end,
         url = function(path) return "mirror:///" .. path end,
@@ -91,7 +91,7 @@ local result
 Manager.install(item, dir, function(ok, err) result = { ok = ok, err = err } end)
 Assert.len(downloads, 1)
 Assert.eq(downloads[1].dest, dir .. "/chi_sim.traineddata.part")
-Assert.eq(downloads[1].opts.url, require("http.mirror").url(Manager.BASE_PATH .. "/chi_sim.traineddata"))
+Assert.eq(downloads[1].opts.url, require("http.github").url(Manager.BASE_PATH .. "/chi_sim.traineddata"))
 local f = assert(io.open(downloads[1].dest, "wb")); f:write(body); f:close()
 downloads[1].cb(true)
 Assert.is_true(result.ok)

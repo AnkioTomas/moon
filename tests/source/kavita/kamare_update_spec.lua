@@ -87,9 +87,9 @@ package.preload["http.request"] = function()
     }
 end
 local pick_calls = 0
-package.preload["http.release"] = function()
+package.preload["http.github"] = function()
     return {
-        pick = function(release, cb)
+        pickRelease = function(release, cb)
             pick_calls = pick_calls + 1
             cb(release.url)
             return { cancel = function() end }

@@ -6,8 +6,8 @@
   manifest.json                { tag, built_at, entries, raw_sha256, raw_size, parts:[{file,size,sha256}] }
   dictionary.sqlite3.part.NNN  原始 SQLite 二进制分片，按序拼出原始 sqlite
 
-设备经 http.mirror 按仓库文件拉取（多源回落）；jsDelivr 单文件有大小上限，所以切片。
-下载逐片走 Mirror.download（Turbo，不堵 UI）；拼接/分片 SHA-256/落位放 Job 子进程
+设备经 http.github 按仓库文件拉取（多源回落）；jsDelivr 单文件有大小上限，所以切片。
+下载逐片走 Github.download（Turbo，不堵 UI）；拼接/分片 SHA-256/落位放 Job 子进程
 （大文件 IO，主进程做会卡 UI）。
 
 落盘文件名由 Paths.imeDictPath 决定。生僻字注音词库（features.rare）复用 ``M.install``，同一套 manifest + 分片格式。
@@ -18,7 +18,7 @@
 local lfs = require("libs/libkoreader-lfs")
 local logger = require("utils.log")
 local JSON = require("json")
-local Mirror = require("http.mirror")
+local Github = require("http.github")
 local Paths = require("utils.paths")
 local Perf = require("utils.perf")
 local MoonSettings = require("utils.settings")
@@ -210,7 +210,7 @@ end
 --- 一份可下载词库的描述。
 ---@class BookDictSpec
 ---@field name string 日志与 Job 名
----@field base_path string manifest.json 与分片所在的仓库内目录（经 http.mirror 取）
+---@field base_path string manifest.json 与分片所在的仓库内目录（经 http.github 取）
 ---@field dest string 落盘路径（续传目录为 dest .. ".dl"）
 ---@field installed string|nil 已装版本的 built_at
 ---@field tmp string|nil 续传目录，缺省 dest .. ".dl"
@@ -221,7 +221,7 @@ end
 ---@param cb fun(manifest: table|nil, total: number|nil, err: any)
 ---@return CancelHandle
 local function fetchManifest(spec, cb)
-    return Mirror.get(spec.base_path .. "/manifest.json", { timeout = require("http.timeout").net(1) }, function(body, err)
+    return Github.get(spec.base_path .. "/manifest.json", { timeout = require("http.timeout").net(1) }, function(body, err)
         if err then
             cb(nil, nil, err)
             return
@@ -382,7 +382,7 @@ downloadParts = function(spec, manifest, idx, done, report, done_bytes, total, s
     -- 网络响应尚未返回时也先通知当前分片，避免进度框长时间停在上一阶段。
     report("part", done_bytes, total, idx, #parts)
     local file = tmpDir(spec) .. "/" .. part.file
-    bind(Mirror.download(spec.base_path .. "/" .. part.file, {
+    bind(Github.download(spec.base_path .. "/" .. part.file, {
         timeout = require("http.timeout").net(10),
         allow_redirects = true,
         -- 15MB 一片，断在中途整片重下太亏：保留 .part，换源/重试都带 Range 续传。

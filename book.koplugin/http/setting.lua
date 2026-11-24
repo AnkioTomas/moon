@@ -14,9 +14,15 @@ return {
         dns_bind = {},
         -- 休眠（按电源键 / 自动休眠）时替用户关闭 Wi-Fi，见 http/wifi.lua。
         wifi_off_on_suspend = false,
-        -- 上次下载成功的默认源模板，下次优先尝试。
+        -- 上次下载成功的仓库文件镜像模板，下次优先使用。
         mirror_last = "",
-        -- 竞速 / 回落中失败过的源 → 失败时间；Mirror.DEAD_TTL 内不再尝试。
+        -- 从 api.ankio.net/gh/mirrors 拉回的仓库文件镜像模板（jsdelivr + raw），长期缓存。
+        mirror_files = {},
+        -- 上次下载成功的 Release 加速前缀，下次优先使用。
+        mirror_release_last = "",
+        -- 从 api.ankio.net/gh/mirrors 拉回的 Release 加速前缀，长期缓存。
+        mirror_release = {},
+        -- 竞速 / 回落中失败过的源 → 失败时间；Github.DEAD_TTL 内不再尝试。
         mirror_dead = {},
     },
 }

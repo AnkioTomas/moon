@@ -171,7 +171,7 @@ local ok_run, err_run = pcall(function()
     Stubs.flush()
     Assert.is_true(failed)
     Assert.matches(failed_err, "network failed")
-    local mirrors = #require("http.mirror").templates()
+    local mirrors = #require("http.github").FALLBACK_FILES
     Assert.eq(#downloads, 1 + mirrors)
     Assert.is_true(downloads[2] ~= downloads[3])
     fail_part_once = false

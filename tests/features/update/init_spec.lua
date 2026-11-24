@@ -61,7 +61,11 @@ local probes = {}
 local gets = 0
 package.preload["http.request"] = function()
     return {
-        get = function(_, _, cb)
+        get = function(url, _, cb)
+            if url == require("http.github").MIRRORS_API then
+                cb(nil, "offline")
+                return { cancel = function() end }
+            end
             gets = gets + 1
             check_cb = cb
             return { cancel = function() end }
@@ -90,7 +94,17 @@ end
 local update_saves = 0
 package.preload["utils.settings"] = function()
     local update = { auto_check = true, update_last_checked_at = 0 }
-    local http = { mirror_dead = {} }
+    local http = {
+        mirror_release = {
+            "https://m1.example/https://github.com",
+            "https://m2.example/https://github.com",
+            "https://m3.example/https://github.com",
+            "https://m4.example/https://github.com",
+            "https://m5.example/https://github.com",
+        },
+        mirror_release_last = "",
+        mirror_dead = {},
+    }
     return {
         get = function(name) assert(name == "features.update" or name == "http"); return name == "http" and http or update end,
         save = function(name)
@@ -309,9 +323,13 @@ local parsed_update = check(update_release)
 probes, download_opts = {}, nil
 local install_ok, install_err
 Update:install(parsed_update, "/plugins/book.koplugin", function(ok, e) install_ok, install_err = ok, e end)
-for _, probe in ipairs(probes) do probe.handlers.on_done("timeout") end
-Assert.is_nil(download_opts)
-flush()
+while not download_opts do
+    local batch = probes
+    probes = {}
+    Assert.is_true(#batch > 0)
+    for _, probe in ipairs(batch) do probe.handlers.on_done("timeout") end
+    flush()
+end
 Assert.eq(download_opts.url, direct)
 download_cb(false, "direct failed")
 Assert.is_false(install_ok)
