@@ -877,6 +877,28 @@ do
     Assert.is_nil(push(), "新版本需要重新确认")
     Assert.eq(dav.files[remote].data, changed)
     pos.extra.webdav_overwrite_marker = changed
+    local ProgressDB = require("book.progress_db")
+    Assert.is_true(ProgressDB.upsert("local", id, pos))
+    local put_file = dav.putFileAsync
+    function dav:putFileAsync(path, local_path, cb, timeout)
+        if path == remote .. ".json" then return cb(nil, "offline") end
+        return put_file(self, path, local_path, cb, timeout)
+    end
+    local failed, failure = push()
+    Assert.is_nil(failed)
+    Assert.eq(failure, "offline")
+    Assert.eq(dav.files[remote].data, changed)
+    local snapshot = {
+        identity = { source_id = "local", stable_id = id },
+        doc_fraction = pos.fraction,
+        ui = { rolling = { xpointer = pos.locator } },
+    }
+    require("reader.session.progress").save(snapshot, function(saved)
+        Assert.is_true(saved)
+    end)
+    pos = ProgressDB.get("local", id)
+    dav.putFileAsync = put_file
+    Assert.eq(pos.extra and pos.extra.webdav_overwrite_marker, changed, "重新保存保留待重试的确认")
     Assert.is_true(push())
     Assert.is_nil(Json.decode(dav.files[remote .. ".json"].data).position.extra)
     local get = dav.getAsync

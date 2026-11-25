@@ -148,7 +148,7 @@ end
 --- 边车恢复出来的位置和 pending 不是同一处。真表示要回落。
 --- 书架同步只改 pending，不改这台设备的 `.sdr`。流式文档用 XPointer：相同就是同一处，
 --- 页码随屏幕和字号变，不能拿来判。固定版式总页数一致时比页码。
---- 都对不上时，全书比例差 ≥1% 才算不同，和开书冲突同一口径。
+--- 都对不上时，按全书比例比较；整本 WebDAV 书使用与开书拉取相同的容差。
 ---@param snapshot ReaderSessionSnapshot
 ---@param row ProgressPosition
 ---@return boolean
@@ -168,7 +168,14 @@ local function documentMissesPending(snapshot, row)
             return false
         end
     end
-    return math.abs(Progress.clampFraction(snapshot.doc_fraction) - Progress.clampFraction(row.fraction)) >= 0.01
+    local id = snapshot.identity
+    local tolerance = 0.01
+    if id.source_id == "local" and id.stable_id
+        and require("source.local.common").remoteRelativePath(id.stable_id) then
+        tolerance = require("source.local.remote_data").progressFractionTolerance()
+    end
+    local difference = math.abs(Progress.clampFraction(snapshot.doc_fraction) - Progress.clampFraction(row.fraction))
+    return difference > 0 and difference >= tolerance
 end
 
 --- 冷打开：用本地记录恢复阅读位置。
@@ -219,6 +226,10 @@ function ReaderProgress.save(snapshot, cb)
         -- position 只包含通用阅读坐标；同章时保留源侧不透明 extra，
         -- 避免保存本地进度时丢失远端桥接坐标。
         pos.extra = previous_extra
+    elseif id.source_id == "local" and previous_extra and previous.sync_status == 0
+        and type(previous_extra.webdav_overwrite_marker) == "string" then
+        -- WebDAV 覆盖确认属于整本书；上传失败后重新保存仍可重试同一个远端版本。
+        pos.extra = { webdav_overwrite_marker = previous_extra.webdav_overwrite_marker }
     end
     pos.updated_at = Progress.nextRevision()
     local ok = ProgressDB.upsert(id.source_id, id.stable_id, pos)

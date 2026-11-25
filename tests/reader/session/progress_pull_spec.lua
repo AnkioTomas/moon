@@ -78,7 +78,7 @@ end
 package.preload["book.progress_db"] = function()
     return {
         get = function(_, stable_id)
-            if stable_id == "b1" then
+            if stable_id == "b1" or stable_id == "webdav://b1.epub" then
                 return pending_row
             end
         end,
@@ -793,6 +793,46 @@ do
     Assert.eq(upserted[1].extra.webdav_overwrite_marker, "seen-marker")
     RemoteData.progressUploadGuardEnabled = enabled
     Session.current = current
+end
+
+-- 书架已经采用云端进度时，开书还要用同一阈值比较设备上的阅读位置。
+do
+    local cfg = require("utils.settings").getSource("local")
+    local prior_tolerance = cfg.webdav_ignore_small_progress_diff
+    local jumped_to
+    local snapshot = {
+        identity = { source_id = "local", stable_id = "webdav://b1.epub" },
+        doc_fraction = 0.4,
+        page = 80,
+        total_pages = 200,
+        ui = {
+            document = { getPageCount = function() return 200 end },
+            handleEvent = function(_, event) jumped_to = event.args[1] end,
+        },
+    }
+    pending_row = { fraction = 0.405, page = 81, total_pages = 200, sync_status = 1 }
+    cfg.webdav_ignore_small_progress_diff = nil
+    Progress.applyLocalPending(snapshot)
+    Assert.is_nil(jumped_to, "默认阈值在恢复时仍忽略小差额")
+
+    cfg.webdav_ignore_small_progress_diff = false
+    Progress.applyLocalPending(snapshot)
+    Assert.eq(jumped_to, 81, "关闭阈值后恢复书架拉取的小幅云端进度")
+
+    jumped_to = nil
+    snapshot.page = 81
+    Progress.applyLocalPending(snapshot)
+    Assert.is_nil(jumped_to, "精确页码相同则不跳转")
+    snapshot.page = 80
+    snapshot.doc_fraction = pending_row.fraction
+    Progress.applyLocalPending(snapshot)
+    Assert.is_nil(jumped_to, "比例相同则不跳转")
+
+    snapshot.doc_fraction = 0.4
+    snapshot.identity.stable_id = "b1"
+    Progress.applyLocalPending(snapshot)
+    Assert.is_nil(jumped_to, "纯本地书仍使用默认阈值")
+    cfg.webdav_ignore_small_progress_diff = prior_tolerance
 end
 
 for _, name in ipairs({
