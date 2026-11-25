@@ -38,6 +38,7 @@ local _ = require("gettext")
 ---@field preview (fun(width: number): table)|nil
 ---@field sections fun(): BookThemeSection[]
 ---@field docs string|nil 官网手册路径（相对 moon.ankio.net）；有则页底追加「查看指南」
+---@field searchable boolean|nil false 时「搜索设置」只索引页面入口，不展开页面内部行（动态长目录用）
 ---@field on_close (fun())|nil
 ---@field refresh_seconds number|nil 页面在最上层时每隔这么久重算一次（运行状态这类实时页）
 ---@field right_icon string|nil 标题栏右上角图标

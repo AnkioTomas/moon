@@ -21,6 +21,8 @@
 ---@field preview (fun(width: number): table)|nil
 ---@field sections (fun(): table[])|nil 页面自带分节；全靠第三层追加时可省略
 ---@field docs string|nil 官网手册路径，叠层页底「查看指南」
+---@field searchable boolean|nil false 时「搜索设置」不展开页面内部行
+---@field on_close (fun())|nil
 ---@field refresh_seconds number|nil 页面在最上层时定时重算（实时状态页）
 
 ---@class BookSettingEntry
@@ -186,6 +188,8 @@ function Tree.build(groups, entries)
             preview = page.preview,
             nav = page.nav,
             docs = page.docs,
+            searchable = page.searchable,
+            on_close = page.on_close,
             right_icon = page.right_icon,
             refresh_seconds = page.refresh_seconds,
             right_callback = page.right_callback,

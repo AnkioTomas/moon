@@ -49,12 +49,14 @@ function Search.build(groups)
             local page = entry.page
             if page then
                 add(hits, page, nil, entry.title, entry.subtitle)
-                local sections = Guard.call("settings search " .. tostring(page.id), page.sections) or {}
-                for _j, section in ipairs(sections) do
-                    for _k, build in ipairs(section.rows) do
-                        local widget = build(PROBE_WIDTH)
-                        if widget.row_title then
-                            add(hits, page, section.title, widget.row_title, widget.row_subtitle)
+                if page.searchable ~= false then
+                    local sections = Guard.call("settings search " .. tostring(page.id), page.sections) or {}
+                    for _j, section in ipairs(sections) do
+                        for _k, build in ipairs(section.rows) do
+                            local widget = build(PROBE_WIDTH)
+                            if widget.row_title then
+                                add(hits, page, section.title, widget.row_title, widget.row_subtitle)
+                            end
                         end
                     end
                 end
