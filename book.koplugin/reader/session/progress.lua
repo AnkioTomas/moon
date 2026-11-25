@@ -473,8 +473,9 @@ end
 ---@param id BookIdentity
 ---@param snapshot ReaderSessionSnapshot
 ---@param page_level boolean|nil 远端是页/spine 级：比例不参与比较
+---@param fraction_tolerance number|nil 整本书百分比比较阈值
 ---@return boolean
-local function progressDiffers(local_pos, remote_pos, id, snapshot, page_level)
+local function progressDiffers(local_pos, remote_pos, id, snapshot, page_level, fraction_tolerance)
     -- 精确坐标一致就是同一个位置，不必再拿会漂移的比例去比。
     local here = local_pos and local_pos.locator
     if here and here == remote_pos.locator then
@@ -523,7 +524,8 @@ local function progressDiffers(local_pos, remote_pos, id, snapshot, page_level)
         end
     end
     local local_frac = local_pos and local_pos.fraction or 0
-    return math.abs(local_frac - remote_pos.fraction) >= 0.01
+    local difference = math.abs(local_frac - remote_pos.fraction)
+    return difference > 0 and difference >= (fraction_tolerance or 0.01)
 end
 
 --- 采纳云端位置时的落库坐标：页级源的远端只有 spine 粒度，同 spine 时
@@ -734,8 +736,10 @@ function ReaderProgress.pull(snapshot, opts)
         local row = ProgressDB.get(id.source_id, id.stable_id)
         local webdav_marker = type(meta) == "table" and meta.webdav_progress_marker
         local protect_upload = false
+        local fraction_tolerance
         if type(webdav_marker) == "string" and id.source_id == "local" then
             local RemoteData = require("source.local.remote_data")
+            fraction_tolerance = RemoteData.progressFractionTolerance()
             protect_upload = RemoteData.progressUploadGuardEnabled()
                 and RemoteData.isProgressAhead(remote_pos, local_position)
         end
@@ -744,10 +748,10 @@ function ReaderProgress.pull(snapshot, opts)
             return
         end
         local page_level = type(meta) == "table" and meta.page_level == true
-        if progressDiffers(local_position, remote_pos, id, snapshot, page_level) then
+        if progressDiffers(local_position, remote_pos, id, snapshot, page_level, fraction_tolerance) then
             -- 只有两边自上次同步后都动过才问；手动拉取是用户要看对比，照常问。
             local cloud_moved = not (row and row.synced)
-                or progressDiffers(row.synced, remote_pos, id, snapshot, page_level)
+                or progressDiffers(row.synced, remote_pos, id, snapshot, page_level, fraction_tolerance)
             -- 本地读得更靠后时不往回拽：页级源比 spine，按章书比章序号。
             local local_ahead = (page_level and spineCmp(local_position, remote_pos) == -1)
                 or (not page_level and chapterLocalAhead(local_position, remote_pos))

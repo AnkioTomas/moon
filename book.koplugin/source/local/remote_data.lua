@@ -25,6 +25,10 @@ function RemoteData.progressUploadGuardEnabled()
     return require("utils.settings").getSource(SOURCE_ID).webdav_check_progress_before_upload == true
 end
 
+function RemoteData.progressFractionTolerance()
+    return require("utils.settings").getSource(SOURCE_ID).webdav_ignore_small_progress_diff ~= false and 0.01 or 0
+end
+
 --- 同一份有效坐标可能因版式换算显示不同百分比。
 function RemoteData.isProgressAhead(remote, local_pos)
     return remote and not (remote.locator and remote.locator == local_pos.locator)

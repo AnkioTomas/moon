@@ -754,12 +754,35 @@ do
     local id = { source_id = "local", stable_id = "b1" }
     local whole = { identity = id, ui = ui }
     Session.current = function() return whole end
+    local remote_fraction = 0.0089
     id.source = { getProgressAsync = function(_, _, cb)
-        cb({ fraction = 0.0089 }, nil, { webdav_progress_marker = "seen-marker" })
+        cb({ fraction = remote_fraction }, nil, { webdav_progress_marker = "seen-marker" })
     end }
-    pending_row = { fraction = 0.0046, updated_at = 12, sync_status = 1, locator = "/body/p[1]/text().0" }
+    pending_row = { fraction = 0.0046, updated_at = 12, sync_status = 0, locator = "/body/p[1]/text().0" }
     local RemoteData = require("source.local.remote_data")
     local enabled = RemoteData.progressUploadGuardEnabled
+    local cfg = require("utils.settings").getSource("local")
+    local prior_tolerance = cfg.webdav_ignore_small_progress_diff
+    RemoteData.progressUploadGuardEnabled = function() return false end
+    cfg.webdav_ignore_small_progress_diff = nil
+    shown = {}
+    Progress.clearConflicts(id)
+    Progress.pull(whole)
+    Assert.len(shown, 0, "默认忽略小于一个百分点的差异")
+
+    cfg.webdav_ignore_small_progress_diff = false
+    Progress.clearConflicts(id)
+    Progress.pull(whole)
+    Assert.len(shown, 1, "关闭阈值后，小差额也按现有冲突流程处理")
+    pending_row.decision_pending = nil
+    remote_fraction = pending_row.fraction
+    shown = {}
+    Progress.clearConflicts(id)
+    Progress.pull(whole)
+    Assert.len(shown, 0, "关闭阈值后，相同百分比仍视为一致")
+
+    cfg.webdav_ignore_small_progress_diff = prior_tolerance
+    remote_fraction = 0.0089
     RemoteData.progressUploadGuardEnabled = function() return true end
     shown, upserted = {}, {}
     Progress.clearConflicts(id)

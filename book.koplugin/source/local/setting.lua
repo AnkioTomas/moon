@@ -148,11 +148,26 @@ function Setting.rows(plugin)
                 repaint()
             end })
     end
+    local function progressToleranceRow(iw)
+        local Settings = require("utils.settings")
+        local cfg = Settings.getSource(SOURCE_ID)
+        local on = cfg.webdav_ignore_small_progress_diff ~= false
+        return Row.widget({ width = iw, chevron = false, kind = "toggle", icon = "cloud_upload",
+            title = _("忽略小于 1% 的进度差"),
+            subtitle = _("关闭后，整本书进度只要有差异就参与同步比较"),
+            status = on and _("开") or _("关"), status_on = on,
+            callback = function()
+                cfg.webdav_ignore_small_progress_diff = not on
+                Settings.saveSource(SOURCE_ID, cfg)
+                repaint()
+            end })
+    end
     return {
         localPathRow,
         folderCategoryRow,
         uploadRow,
         progressGuardRow,
+        progressToleranceRow,
         row("webdav_url", _("WebDAV 地址"), false, "dns"),
         row("webdav_username", _("WebDAV 用户名"), false, "person"),
         row("webdav_password", _("WebDAV 密码"), true, "key"),

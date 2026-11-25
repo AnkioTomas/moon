@@ -88,6 +88,8 @@ return {
     ["只是给书分类的话，请留在当前书库目录下建文件夹（最多两层，并打开「按文件夹分类」）。换目录后，把同一本书移进新目录再扫描，阅读记录会跟过来。"] = "To organize books into categories, create folders under the current library folder (up to two levels, with “Categorize by folder” on). After you change this folder, move the same files into the new one and scan again — reading records will follow.",
     ["上传本地书到 WebDAV"] = "Upload local books to WebDAV",
     ["上传前检查云端进度"] = "Check cloud progress before uploading",
+    ["忽略小于 1% 的进度差"] = "Ignore progress differences below 1%",
+    ["关闭后，整本书进度只要有差异就参与同步比较"] = "When off, any difference in whole-book progress is considered during sync",
     ["开书时询问是否采用领先的云端进度，上传前再次检查"] = "Ask when cloud progress is ahead on opening a book, and check again before uploading",
     ["无法检查云端进度，已保留本地进度"] = "Could not check cloud progress. Local progress was kept.",
     ["云端进度领先，请打开本书选择阅读位置"] = "Cloud progress is ahead. Open this book to choose a reading position.",
