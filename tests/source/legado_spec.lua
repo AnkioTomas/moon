@@ -134,7 +134,7 @@ end
 -- 映射：bookUrl 是身份，封面走 /cover 代理，自定义封面优先；没有 bookUrl 的行丢弃。
 do
     local books = Mapper.shelfList(function(path) return "http://h:1122/cover?path=" .. require("utils.text").urlEncode(path) end, {
-        { bookUrl = "u1", name = "书", author = "作者", coverUrl = "http://img/a.jpg", kind = "玄幻" },
+        { bookUrl = "u1", name = "书", author = "作者", coverUrl = "http://img/a.jpg", kind = "玄幻", durChapterTime = 1700000000000 },
         { bookUrl = "u2", name = "二", customCoverUrl = "/local/b.jpg", coverUrl = "x" },
         { name = "无地址" },
     })
@@ -142,6 +142,8 @@ do
     Assert.eq(books[1].stable_id, "u1")
     Assert.eq(books[1].cover, "http://h:1122/cover?path=http%3A%2F%2Fimg%2Fa.jpg")
     Assert.eq(books[1].category, "玄幻")
+    Assert.eq(books[1].read_at, 1700000000)
+    Assert.is_true(books[1].inserted_at > books[2].inserted_at)
     Assert.eq(books[2].cover, "http://h:1122/cover?path=%2Flocal%2Fb.jpg")
 end
 
