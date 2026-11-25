@@ -196,6 +196,35 @@ Assert.eq(named_err, "not a koplugin archive")
 Assert.is_nil(lfs.attributes(extra .. "/.kamare.koplugin-update"))
 Assert.eq(assert(loadfile(extra .. "/kamare.koplugin/kamarecache.lua"))(), 42)
 
+-- zip 穿越：相对路径含 `..` 或绝对路径时必须在解压前失败，不得写出目标目录之外。
+local outside = tmp .. "/../marketplace-zip-slip-should-not-exist.lua"
+os.remove(outside)
+local before = assert(loadfile(current .. "/main.lua"))()
+entries = {
+    { path = "../marketplace-zip-slip-should-not-exist.lua", mode = "file", body = "pwned\n" },
+}
+local slip_ok, slip_err = Install.run(archive, tmp, digest, { name = "book.koplugin" })
+Assert.is_nil(slip_ok)
+Assert.eq(slip_err, "unsafe archive path")
+Assert.is_nil(lfs.attributes(outside), "zip 穿越不得写出暂存目录之外")
+Assert.eq(assert(loadfile(current .. "/main.lua"))(), before, "校验失败或解压拒绝不得改已装目录")
+
+entries = {
+    { path = "book.koplugin/../../marketplace-zip-slip-should-not-exist.lua", mode = "file", body = "pwned\n" },
+}
+slip_ok, slip_err = Install.run(archive, tmp, digest, { name = "book.koplugin" })
+Assert.is_nil(slip_ok)
+Assert.eq(slip_err, "unsafe archive path")
+Assert.is_nil(lfs.attributes(outside))
+
+entries = {
+    { path = "/tmp/marketplace-zip-slip-abs.lua", mode = "file", body = "pwned\n" },
+}
+slip_ok, slip_err = Install.run(archive, tmp, digest, { name = "book.koplugin" })
+Assert.is_nil(slip_ok)
+Assert.eq(slip_err, "unsafe archive path")
+Assert.is_nil(lfs.attributes("/tmp/marketplace-zip-slip-abs.lua"), "绝对路径条目不得解压")
+
 os.execute("rm -rf " .. tmp)
 
 return true

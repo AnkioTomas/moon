@@ -37,16 +37,40 @@ local function fileSha256(path)
     return hash()
 end
 
+--- 压缩包内相对路径必须落在暂存目录内：拒绝绝对路径、盘符和 `..` 段，防止 zip 穿越。
+---@param relative string
+---@return string|nil
+---@return string|nil err
+local function safeRelativePath(relative)
+    if type(relative) ~= "string" or relative == "" or relative:find("%z") then
+        return nil, "unsafe archive path"
+    end
+    local path = relative:gsub("\\", "/")
+    if path:sub(1, 1) == "/" or path:match("^%a:[/\\]") then
+        return nil, "unsafe archive path"
+    end
+    for seg in path:gmatch("[^/]+") do
+        if seg == ".." then return nil, "unsafe archive path" end
+    end
+    return path
+end
+
 local function extract(archive, staging)
     if not lfs.mkdir(staging) then return nil, "cannot create update staging directory" end
     local reader = require("ffi/archiver").Reader:new()
     if not reader:open(archive) then return nil, reader.err or "cannot open update archive" end
-    local ok = true
+    local ok, err = true, nil
     for entry in reader:iterate() do
-        ok = reader:extractToPath(entry.path, staging .. "/" .. entry.path)
+        local rel
+        rel, err = safeRelativePath(entry.path)
+        if not rel then
+            ok = nil
+            break
+        end
+        ok = reader:extractToPath(entry.path, staging .. "/" .. rel)
         if not ok then break end
     end
-    local err = reader.err
+    if not err then err = reader.err end
     reader:close()
     if not ok or err then return nil, err or "archive extraction failed" end
     return true
