@@ -549,8 +549,15 @@ local function pullProgress(self, run, done)
             run.active = self:getProgressAsync(remoteStableId(item.rel), function(pos, err)
                 if run.cancelled then return end
                 if pos then
-                    pos.updated_at = item.mtime
-                    ProgressDB.upsertRemote(SOURCE_ID, remoteStableId(item.rel), pos)
+                    local stable_id = remoteStableId(item.rel)
+                    local local_pos = ProgressDB.get(SOURCE_ID, stable_id)
+                    local RemoteData = require("source.local.remote_data")
+                    -- Keep the local position until the reader can ask which one to use.
+                    if not local_pos or not RemoteData.progressUploadGuardEnabled()
+                        or not RemoteData.isProgressAhead(pos, local_pos) then
+                        pos.updated_at = item.mtime
+                        ProgressDB.upsertRemote(SOURCE_ID, stable_id, pos)
+                    end
                 elseif err then
                     require("utils.log").warn("book webdav progress failed", item.rel, err)
                 end

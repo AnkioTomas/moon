@@ -21,6 +21,20 @@ local moonPath, progressRemotePath, notesRemotePath = Common.moonPath, Common.pr
 
 local RemoteData = {}
 
+function RemoteData.progressUploadGuardEnabled()
+    return require("utils.settings").getSource(SOURCE_ID).webdav_check_progress_before_upload == true
+end
+
+function RemoteData.progressFractionTolerance()
+    return require("utils.settings").getSource(SOURCE_ID).webdav_ignore_small_progress_diff ~= false and 0.01 or 0
+end
+
+--- 同一份有效坐标可能因版式换算显示不同百分比。
+function RemoteData.isProgressAhead(remote, local_pos)
+    return remote and not (remote.locator and remote.locator == local_pos.locator)
+        and (tonumber(remote.fraction) or 0) > (tonumber(local_pos.fraction) or 0)
+end
+
 --- 拉取单本进度（开书时由 book.progress 调用，冲突弹窗在那边）。
 ---@param stable_id string
 ---@param cb fun(pos: ProgressPosition|nil, err: string|nil, meta: table|nil)
@@ -39,18 +53,20 @@ function RemoteData.getProgressAsync(self, stable_id, cb, opts)
             if not raw then return cb(nil, err) end
             local pos = decodeProgress(raw)
             if not pos then return cb(nil, _("进度为空")) end
-            if opts and opts.metadata_present == false then return cb(pos) end
+            local meta = { webdav_progress_marker = raw }
+            if opts and opts.metadata_present == false then return cb(pos, nil, meta) end
             active = fetchText(self, remote .. ".json", self:webdavCacheRoot() .. "/.position.get",
                 function(metadata, meta_err, absent)
                     if cancelled then return end
-                    if absent then return cb(pos) end
+                    if absent then return cb(pos, nil, meta) end
                     if not metadata then return cb(nil, meta_err) end
                     local ok, data = pcall(require("json").decode, metadata)
                     if not ok or type(data) ~= "table" or type(data.position) ~= "table"
                         or type(data.position.fraction) ~= "number" then
                         return cb(nil, _("进度文件损坏"))
                     end
-                    cb(data.file == rel and data.marker == raw and data.position or pos)
+                    if data.file ~= rel or data.marker ~= raw then return cb(pos, nil, meta) end
+                    cb(data.position, nil, meta)
                 end)
         end)
     active = active or first
@@ -71,17 +87,46 @@ function RemoteData.putProgressAsync(self, stable_id, pos, cb)
     if not rel then return defer(cb, true) end
     local cancelled, active = false, nil
     local remote, raw = progressRemotePath(self, rel), encodeProgress(pos)
-    if pos.locator or pos.page then
-        -- .po 是发布标记，精确坐标先到位；任一步失败都不能确认本地脏行。
-        local first = putText(self, remote .. ".json", self:webdavCacheRoot() .. "/.position.upload",
-            require("json").encode({ file = rel, marker = raw, position = pos }), function(ok, err)
-                if cancelled then return end
-                if not ok then return cb(nil, err) end
-                active = putText(self, remote, self:webdavCacheRoot() .. "/.progress.upload", raw, cb)
-            end)
+    local confirmed = type(pos.extra) == "table" and pos.extra.webdav_overwrite_marker
+    local function upload()
+        if pos.locator or pos.page then
+            -- .po 是发布标记，精确坐标先到位；任一步失败都不能确认本地脏行。
+            local wire = {}
+            for k, v in pairs(pos) do wire[k] = v end
+            if confirmed then
+                wire.extra = {}
+                for k, v in pairs(pos.extra) do
+                    if k ~= "webdav_overwrite_marker" then wire.extra[k] = v end
+                end
+                if not next(wire.extra) then wire.extra = nil end
+            end
+            local first = putText(self, remote .. ".json", self:webdavCacheRoot() .. "/.position.upload",
+                require("json").encode({ file = rel, marker = raw, position = wire }), function(ok, err)
+                    if cancelled then return end
+                    if not ok then return cb(nil, err) end
+                    active = putText(self, remote, self:webdavCacheRoot() .. "/.progress.upload", raw, cb)
+                end)
+            active = active or first
+        else
+            active = putText(self, remote, self:webdavCacheRoot() .. "/.progress.upload", raw, cb)
+        end
+    end
+    if RemoteData.progressUploadGuardEnabled() then
+        local first = self:getProgressAsync(stable_id, function(cloud, err, meta)
+            if cancelled then return end
+            active = nil
+            if not cloud and (not meta or not meta.empty) then
+                return cb(nil, err or _("无法检查云端进度，已保留本地进度"))
+            end
+            if RemoteData.isProgressAhead(cloud, pos) and
+                (not confirmed or not meta or confirmed ~= meta.webdav_progress_marker) then
+                return cb(nil, _("云端进度领先，请打开本书选择阅读位置"))
+            end
+            upload()
+        end)
         active = active or first
     else
-        active = putText(self, remote, self:webdavCacheRoot() .. "/.progress.upload", raw, cb)
+        upload()
     end
     return { cancel = function()
         cancelled = true

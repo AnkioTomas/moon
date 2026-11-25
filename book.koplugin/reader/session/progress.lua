@@ -148,7 +148,7 @@ end
 --- 边车恢复出来的位置和 pending 不是同一处。真表示要回落。
 --- 书架同步只改 pending，不改这台设备的 `.sdr`。流式文档用 XPointer：相同就是同一处，
 --- 页码随屏幕和字号变，不能拿来判。固定版式总页数一致时比页码。
---- 都对不上时，全书比例差 ≥1% 才算不同，和开书冲突同一口径。
+--- 都对不上时，按全书比例比较；整本 WebDAV 书使用与开书拉取相同的容差。
 ---@param snapshot ReaderSessionSnapshot
 ---@param row ProgressPosition
 ---@return boolean
@@ -168,7 +168,14 @@ local function documentMissesPending(snapshot, row)
             return false
         end
     end
-    return math.abs(Progress.clampFraction(snapshot.doc_fraction) - Progress.clampFraction(row.fraction)) >= 0.01
+    local id = snapshot.identity
+    local tolerance = 0.01
+    if id.source_id == "local" and id.stable_id
+        and require("source.local.common").remoteRelativePath(id.stable_id) then
+        tolerance = require("source.local.remote_data").progressFractionTolerance()
+    end
+    local difference = math.abs(Progress.clampFraction(snapshot.doc_fraction) - Progress.clampFraction(row.fraction))
+    return difference > 0 and difference >= tolerance
 end
 
 --- 冷打开：用本地记录恢复阅读位置。
@@ -219,6 +226,10 @@ function ReaderProgress.save(snapshot, cb)
         -- position 只包含通用阅读坐标；同章时保留源侧不透明 extra，
         -- 避免保存本地进度时丢失远端桥接坐标。
         pos.extra = previous_extra
+    elseif id.source_id == "local" and previous_extra and previous.sync_status == 0
+        and type(previous_extra.webdav_overwrite_marker) == "string" then
+        -- WebDAV 覆盖确认属于整本书；上传失败后重新保存仍可重试同一个远端版本。
+        pos.extra = { webdav_overwrite_marker = previous_extra.webdav_overwrite_marker }
     end
     pos.updated_at = Progress.nextRevision()
     local ok = ProgressDB.upsert(id.source_id, id.stable_id, pos)
@@ -473,8 +484,9 @@ end
 ---@param id BookIdentity
 ---@param snapshot ReaderSessionSnapshot
 ---@param page_level boolean|nil 远端是页/spine 级：比例不参与比较
+---@param fraction_tolerance number|nil 整本书百分比比较阈值
 ---@return boolean
-local function progressDiffers(local_pos, remote_pos, id, snapshot, page_level)
+local function progressDiffers(local_pos, remote_pos, id, snapshot, page_level, fraction_tolerance)
     -- 精确坐标一致就是同一个位置，不必再拿会漂移的比例去比。
     local here = local_pos and local_pos.locator
     if here and here == remote_pos.locator then
@@ -523,7 +535,8 @@ local function progressDiffers(local_pos, remote_pos, id, snapshot, page_level)
         end
     end
     local local_frac = local_pos and local_pos.fraction or 0
-    return math.abs(local_frac - remote_pos.fraction) >= 0.01
+    local difference = math.abs(local_frac - remote_pos.fraction)
+    return difference > 0 and difference >= (fraction_tolerance or 0.01)
 end
 
 --- 采纳云端位置时的落库坐标：页级源的远端只有 spine 粒度，同 spine 时
@@ -582,7 +595,7 @@ end
 ---@param snapshot ReaderSessionSnapshot
 ---@param local_pos ProgressPosition
 ---@param remote_pos ProgressPosition
-local function askProgressConflict(id, snapshot, local_pos, remote_pos)
+local function askProgressConflict(id, snapshot, local_pos, remote_pos, webdav_marker)
     local state = Progress.decision(id)
     if state.resolved then return end
     state.phase = "choosing"
@@ -616,6 +629,11 @@ local function askProgressConflict(id, snapshot, local_pos, remote_pos)
             -- 可能比本地记录更靠前，那会把「保留本地」变成覆盖本地。
             local adopt = {}
             for k, v in pairs(local_pos) do adopt[k] = v end
+            if webdav_marker then
+                adopt.extra = {}
+                for k, v in pairs(local_pos.extra or {}) do adopt.extra[k] = v end
+                adopt.extra.webdav_overwrite_marker = webdav_marker
+            end
             adopt.updated_at = Progress.nextRevision()
             if not ProgressDB.upsert(id.source_id, id.stable_id, adopt) then
                 logger.warn("book.progress adopt local failed", id.stable_id)
@@ -727,11 +745,24 @@ function ReaderProgress.pull(snapshot, opts)
         end
         local local_position = localProgressForPull(id, snapshot)
         local row = ProgressDB.get(id.source_id, id.stable_id)
+        local webdav_marker = type(meta) == "table" and meta.webdav_progress_marker
+        local protect_upload = false
+        local fraction_tolerance
+        if type(webdav_marker) == "string" and id.source_id == "local" then
+            local RemoteData = require("source.local.remote_data")
+            fraction_tolerance = RemoteData.progressFractionTolerance()
+            protect_upload = RemoteData.progressUploadGuardEnabled()
+                and RemoteData.isProgressAhead(remote_pos, local_position)
+        end
+        if protect_upload then
+            askProgressConflict(id, snapshot, local_position, remote_pos, webdav_marker)
+            return
+        end
         local page_level = type(meta) == "table" and meta.page_level == true
-        if progressDiffers(local_position, remote_pos, id, snapshot, page_level) then
+        if progressDiffers(local_position, remote_pos, id, snapshot, page_level, fraction_tolerance) then
             -- 只有两边自上次同步后都动过才问；手动拉取是用户要看对比，照常问。
             local cloud_moved = not (row and row.synced)
-                or progressDiffers(row.synced, remote_pos, id, snapshot, page_level)
+                or progressDiffers(row.synced, remote_pos, id, snapshot, page_level, fraction_tolerance)
             -- 本地读得更靠后时不往回拽：页级源比 spine，按章书比章序号。
             local local_ahead = (page_level and spineCmp(local_position, remote_pos) == -1)
                 or (not page_level and chapterLocalAhead(local_position, remote_pos))
