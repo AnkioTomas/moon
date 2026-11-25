@@ -37,6 +37,7 @@ local Text = require("ui.themes.widgets.text")
 ---@class BookThemeSection
 ---@field title string|nil 省略则不画分组标题，只排行
 ---@field rows (fun(width: number): table)[]
+---@field row_height number|(fun(index: integer): number)|nil 已知物理行高（含分割线）时按高分页、只构造当前页行控件
 
 ---@class BookThemeSections
 local Sections = {}
@@ -66,13 +67,14 @@ local function head(t, section, width, first)
 end
 
 --- 按可用高度把块装进页；每页至少一块（超高的块独占一页）。
+--- 块可以是已构造的控件，也可以是惰性项 `{ h, build }`（只测高，最终只构造当前页）。
 ---@param blocks table[]
 ---@param avail number
 ---@return table[][]
 local function pack(blocks, avail)
     local pages, cur, used = {}, {}, 0
     for _idx, block in ipairs(blocks) do
-        local h = block:getSize().h
+        local h = block.h or block:getSize().h
         if #cur > 0 and used + h > avail then
             pages[#pages + 1], cur, used = cur, {}, 0
         end
@@ -83,6 +85,16 @@ local function pack(blocks, avail)
     return pages
 end
 
+---@param row_height number|fun(index: integer): number
+---@param index integer
+---@return number
+local function lazyHeight(row_height, index)
+    if type(row_height) == "function" then
+        return row_height(index)
+    end
+    return row_height
+end
+
 ---@param opts { width: number, height: number, sections: BookThemeSection[], page: integer|nil, on_page: fun(page: integer), range?: table, keys?: boolean }
 ---@return table widget
 ---@return integer page 夹进 [1, pages] 后的页码
@@ -91,16 +103,35 @@ function Sections.widget(opts)
     local t = Theme.current()
     local w, h = opts.width, opts.height
     local blocks = {}
+    local space_md = Theme.px(t.space.md)
+    local title_h = Theme.px(t.font.caption) + space_md * 2
     for i, section in ipairs(opts.sections) do
-        blocks[#blocks + 1] = head(t, section, w, i == 1)
-        for j = 2, #section.rows do blocks[#blocks + 1] = section.rows[j](w) end
+        local rh = section.row_height
+        if rh then
+            local first = i == 1
+            local head_h = (first and 0 or space_md)
+                + ((section.title and section.title ~= "") and title_h or 0)
+                + (section.rows[1] and lazyHeight(rh, 1) or 0)
+            blocks[#blocks + 1] = {
+                h = head_h,
+                build = function(width) return head(t, section, width, first) end,
+            }
+            for j = 2, #section.rows do
+                blocks[#blocks + 1] = { h = lazyHeight(rh, j), build = section.rows[j] }
+            end
+        else
+            blocks[#blocks + 1] = head(t, section, w, i == 1)
+            for j = 2, #section.rows do blocks[#blocks + 1] = section.rows[j](w) end
+        end
     end
     local pages = pack(blocks, h)
     local pager_h = Theme.px(t.control.height)
     if #pages > 1 then pages = pack(blocks, h - pager_h) end
     local page = math.max(1, math.min(#pages, opts.page or 1))
     local body = VerticalGroup:new{ align = "left" }
-    for _idx, block in ipairs(pages[page]) do body[#body + 1] = block end
+    for _idx, block in ipairs(pages[page]) do
+        body[#body + 1] = block.build and block.build(w) or block
+    end
     local bar_h = #pages > 1 and pager_h or 0
     local group = VerticalGroup:new{
         align = "left",

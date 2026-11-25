@@ -10,9 +10,16 @@
 @module koplugin.book.ui.themes.widgets.html
 --]]
 
+local ffi = require("ffi")
 local Device = require("device")
 local Geom = require("ui/geometry")
 local Theme = require("ui.themes")
+
+local TYPE_BB8 = 1
+local TYPE_BBRGB24 = 4
+local TYPE_BBRGB32 = 5
+local uint8_ro = ffi.typeof("const uint8_t*")
+local uint8_rw = ffi.typeof("uint8_t*")
 
 ---@class BookThemeHtml
 local Html = {}
@@ -78,8 +85,69 @@ function Html.isPaper(color)
     return r >= 0xF0 and g >= 0xF0 and b >= 0xF0
 end
 
+--- 真机 FFI BlitBuffer 扫描线直拷：跳过逐像素 getPixel / Color cdata / setPixelClamped 路径。
+---@param dest any
+---@param source any
+---@param x number
+---@param y number
+---@param w number
+---@param h number
+---@return boolean
+local function paintOverFFI(dest, source, x, y, w, h)
+    if type(dest) ~= "cdata" or type(source) ~= "cdata" then return false end
+    if not dest.getType or not source.getType then return false end
+    local bb_type = source:getType()
+    if bb_type ~= dest:getType() then return false end
+    if bb_type ~= TYPE_BB8 and bb_type ~= TYPE_BBRGB24 and bb_type ~= TYPE_BBRGB32 then return false end
+    if source:getRotation() ~= 0 or dest:getRotation() ~= 0 then return false end
+    if source:getInverse() ~= 0 or dest:getInverse() ~= 0 then return false end
+
+    local sw, sh = source:getWidth(), source:getHeight()
+    local dw, dh = dest:getWidth(), dest:getHeight()
+    w, h = math.min(w, sw), math.min(h, sh)
+    local ix, iy = math.floor(x), math.floor(y)
+    local sx0 = ix < 0 and -ix or 0
+    local sy0 = iy < 0 and -iy or 0
+    local dx0 = ix < 0 and 0 or ix
+    local dy0 = iy < 0 and 0 or iy
+    local cw = math.min(w - sx0, dw - dx0)
+    local ch = math.min(h - sy0, dh - dy0)
+    if cw <= 0 or ch <= 0 then return true end
+
+    local src_base = ffi.cast(uint8_ro, source.data)
+    local dst_base = ffi.cast(uint8_rw, dest.data)
+    local src_stride = tonumber(source.stride)
+    local dst_stride = tonumber(dest.stride)
+    if bb_type == TYPE_BB8 then
+        for row = 0, ch - 1 do
+            local sp = src_base + (sy0 + row) * src_stride + sx0
+            local dp = dst_base + (dy0 + row) * dst_stride + dx0
+            for col = 0, cw - 1 do
+                local v = sp[col]
+                if v < 0xF0 then dp[col] = v end
+            end
+        end
+        return true
+    end
+    local bpp = bb_type == TYPE_BBRGB32 and 4 or 3
+    for row = 0, ch - 1 do
+        local sp = src_base + (sy0 + row) * src_stride + sx0 * bpp
+        local dp = dst_base + (dy0 + row) * dst_stride + dx0 * bpp
+        for col = 0, (cw - 1) * bpp, bpp do
+            local r, g, b = sp[col], sp[col + 1], sp[col + 2]
+            if r < 0xF0 or g < 0xF0 or b < 0xF0 then
+                dp[col] = r
+                dp[col + 1] = g
+                dp[col + 2] = b
+                if bpp == 4 then dp[col + 3] = sp[col + 3] end
+            end
+        end
+    end
+    return true
+end
+
 --- 把 HtmlBox 位图叠到已有底上：纸白像素不写，下层壁纸或页面底得以保留。
---- 墨水屏常见灰阶 number 走快路径，避免每像素进 Color 分支。
+--- 真机同格式非旋转位图走 FFI 扫描线快路径；其余（旋转、反色、测试桩）退回逐像素路径。
 ---@param dest table BlitBuffer
 ---@param source table BlitBuffer
 ---@param x number
@@ -90,7 +158,9 @@ function Html.paintOver(dest, source, x, y, width, height)
     if not dest or not source then return end
     local w = width or (source.getWidth and source:getWidth()) or 0
     local h = height or (source.getHeight and source:getHeight()) or 0
-    if w <= 0 or h <= 0 or not source.getPixel or not dest.setPixelClamped then return end
+    if w <= 0 or h <= 0 then return end
+    if paintOverFFI(dest, source, x, y, w, h) then return end
+    if not source.getPixel or not dest.setPixelClamped then return end
     for row = 0, h - 1 do
         for col = 0, w - 1 do
             local color = source:getPixel(col, row)
@@ -130,7 +200,7 @@ function Html.fontPx()
     return Device.screen:scaleBySize(Theme.fontSize(Theme.current().font.body))
 end
 
----@param opts { width: integer, height: integer, html: string, css: string|nil, dir: string|nil, on_link: fun(link: table)|nil, transparent?: boolean }
+---@param opts { width: integer, height: integer, html: string, css: string|nil, dir: string|nil, on_link: fun(link: table)|nil, transparent?: boolean|(fun(): boolean) }
 ---@return table HtmlBoxWidget
 function Html.widget(opts)
     -- 用到才加载（MuPDF FFI），纯文字查词不付这份开销。
@@ -140,12 +210,17 @@ function Html.widget(opts)
     }
     box:setContent(opts.html, BASE_CSS .. (opts.css or ""), Html.fontPx(), nil, nil, opts.dir)
     if opts.transparent then
+        local transparent = opts.transparent
         function box:paintTo(bb, x, y)
             self.dimen.x = x
             self.dimen.y = y
             if self._render then self:_render() end
             local size = self.getSize and self:getSize() or self.dimen
-            if self.bb then
+            if not self.bb then return end
+            local use_alpha = type(transparent) == "function" and transparent() or transparent == true
+            if not use_alpha and bb.blitFrom then
+                bb:blitFrom(self.bb, x, y, 0, 0, size.w, size.h)
+            else
                 Html.paintOver(bb, self.bb, x, y, size.w, size.h)
             end
         end

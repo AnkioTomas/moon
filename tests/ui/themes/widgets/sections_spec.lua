@@ -80,3 +80,33 @@ local bare = Sections.widget({
 bare:paintTo(Kit.canvas(), 0, 0)
 Assert.eq(Kit.taps(bare)[1].dimen.y, 0)
 Assert.eq(Kit.texts(bare)[1], "solo")
+
+-- 惰性行高：100 行分页时只构造当前页可见行，不实例化其余页控件。
+local built_count = 0
+local many_rows = {}
+for i = 1, 100 do
+    many_rows[i] = function(width)
+        built_count = built_count + 1
+        return Row.widget({ width = width, title = "item-" .. i })
+    end
+end
+local row_h = Row.height(false) + require("ui.themes").px(require("ui.themes").current().row.divider)
+local lazy_p1, lp1, lpages = Sections.widget({
+    width = 600, height = 300,
+    sections = { { title = "长列表", rows = many_rows, row_height = row_h } },
+    page = 1, on_page = error,
+})
+Assert.eq(lp1, 1)
+Assert.is_true(lpages > 10)
+Assert.is_true(built_count <= 6, "第 1 页只应构造可见行数，实际构造: " .. tostring(built_count))
+Assert.contains(Kit.texts(lazy_p1), "item-1")
+
+built_count = 0
+local lazy_p5, lp5 = Sections.widget({
+    width = 600, height = 300,
+    sections = { { title = "长列表", rows = many_rows, row_height = row_h } },
+    page = 5, on_page = error,
+})
+Assert.eq(lp5, 5)
+Assert.is_true(built_count <= 6, "第 5 页只应构造可见行数，实际构造: " .. tostring(built_count))
+Assert.is_true(#Kit.texts(lazy_p5) > 0)

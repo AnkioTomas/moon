@@ -72,6 +72,61 @@ Assert.eq(wallpaper, 8 * 4 - 2)
 Assert.eq(dest:getPixel(0, 0), wall, "纸白不得盖住底层")
 Assert.eq(dest:getPixel(2, 1), ink)
 
+-- 真机 FFI BlitBuffer 扫描线快路径（TYPE_BB8 与 TYPE_BBRGB32 + 边界裁切）。
+do
+    local ffi = require("ffi")
+    pcall(ffi.cdef, [[
+        typedef struct TestHtmlBB {
+            unsigned int w;
+            unsigned int h;
+            size_t stride;
+            uint8_t *data;
+            int bb_type;
+        } TestHtmlBB;
+    ]])
+    local mt = {
+        __index = {
+            getType = function(self) return self.bb_type end,
+            getRotation = function() return 0 end,
+            getInverse = function() return 0 end,
+            getWidth = function(self) return tonumber(self.w) end,
+            getHeight = function(self) return tonumber(self.h) end,
+        },
+    }
+    pcall(ffi.metatype, "TestHtmlBB", mt)
+    local function newBB(w, h, bb_type, bpp)
+        local buf = ffi.new("uint8_t[?]", w * h * bpp)
+        local bb = ffi.new("TestHtmlBB", w, h, w * bpp, buf, bb_type)
+        return bb, buf
+    end
+    -- BB8: 保留底层 wall=0xCC，跳过 >=0xF0 纸白，只写墨色像素，并验证 x=-1 负偏移裁切。
+    local d8, d8_buf = newBB(4, 2, 1, 1)
+    local s8, s8_buf = newBB(4, 2, 1, 1)
+    ffi.fill(d8_buf, 8, 0xCC)
+    ffi.fill(s8_buf, 8, 0xFF)
+    s8_buf[0] = 0x10 -- 被 x=-1 裁掉
+    s8_buf[2] = 0x20 -- 落到 dest (1, 0)
+    s8_buf[5] = 0xEF -- 落到 dest (0, 1)，刚好 < 0xF0 应写入
+    s8_buf[6] = 0xF0 -- 纸白阈值，不得覆盖壁纸
+    Html.paintOver(d8, s8, -1, 0, 4, 2)
+    Assert.eq(d8_buf[0], 0xCC)
+    Assert.eq(d8_buf[1], 0x20)
+    Assert.eq(d8_buf[4], 0xEF)
+    Assert.eq(d8_buf[5], 0xCC)
+
+    -- BBRGB32: 4 字节/像素，彩色像素写入，纸白跳过。
+    local d32, d32_buf = newBB(2, 1, 5, 4)
+    local s32, s32_buf = newBB(2, 1, 5, 4)
+    ffi.fill(d32_buf, 8, 0xAA)
+    ffi.fill(s32_buf, 8, 0xFF)
+    s32_buf[4], s32_buf[5], s32_buf[6], s32_buf[7] = 0x10, 0x20, 0x30, 0xFF
+    Html.paintOver(d32, s32, 0, 0, 2, 1)
+    Assert.eq(d32_buf[0], 0xAA, "BBRGB32 纸白不得覆盖底层")
+    Assert.eq(d32_buf[4], 0x10)
+    Assert.eq(d32_buf[5], 0x20)
+    Assert.eq(d32_buf[6], 0x30)
+end
+
 -- 忠实复现 HtmlBoxWidget:_render 的位图缓存：只改 page_number 时仍画出旧页。
 local Fake = {}
 function Fake:new(o)
@@ -156,7 +211,9 @@ Assert.eq(col, 3)
 
 -- 接入 TextViewer：翻页走真实 Pager 点击，长文 1→2→4→3，页码和渲染来源一起变。
 package.loaded["ui/widget/htmlboxwidget"] = nil
+local set_content_calls = 0
 function Fake:setContent()
+    set_content_calls = set_content_calls + 1
     self.page_count = 4
     self.page_number = 1
     self.bb = nil
@@ -181,6 +238,7 @@ local viewer = TextViewer:new{
     },
 }
 Assert.is_true(viewer._html_mode)
+Assert.eq(set_content_calls, 1, "多页 HTML 只应排版一次，不再二次重复 setContent")
 Assert.eq(viewer.pages, 4)
 Assert.eq(viewer.page, 1)
 Assert.eq(viewer.body.page_count, 4)
@@ -282,6 +340,15 @@ do
     Assert.is_nil(seen.css:find("md%-table", 1))
     H.widget({ width = 10, height = 10, html = "<p>x</p>", css = "table.md-table{}" })
     Assert.is_true(seen.css:find("md%-table", 1) ~= nil)
+    -- transparent 回调返回 false 且目标画布支持 blitFrom 时，直接走原生 blitFrom 不逐像素扫。
+    local blitted = false
+    local fast_box = H.widget({
+        width = 8, height = 4, html = "<p>x</p>",
+        transparent = function() return false end,
+    })
+    fast_box.bb = BB.new(8, 4)
+    fast_box:paintTo({ blitFrom = function() blitted = true end }, 0, 0)
+    Assert.is_true(blitted, "非透明白底应直走 blitFrom 快路径")
     package.loaded["ui/widget/htmlboxwidget"] = nil
     package.preload["ui/widget/htmlboxwidget"] = nil
     package.loaded["ui.themes.widgets.html"] = nil

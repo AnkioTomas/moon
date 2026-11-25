@@ -113,6 +113,12 @@ function TextViewer:applyBody()
     self._html_mode = false
     if type(self.html) == "string" and self.html ~= "" then
         local css = type(self.css) == "string" and self.css or nil
+        -- 仅当底板被壁纸挖空或非纯白底时才逐像素扣白；普通纯白页直接走底层 blitFrom。
+        local is_transparent = function()
+            ---@type BookThemeBox|nil
+            local panel = self[1]
+            return not (panel and panel.style and panel.style.bg == 0xFF)
+        end
         local ok, box = pcall(function()
             return require("ui.themes.widgets.html").widget({
                 width = width,
@@ -120,33 +126,13 @@ function TextViewer:applyBody()
                 html = self.html,
                 css = css,
                 on_link = self.on_link,
-                transparent = true,
+                transparent = is_transparent,
             })
         end)
         if ok and box then
             self._html_mode = true
             self.body = box
-            local pages = math.max(1, tonumber(box.page_count) or 1)
-            if pages > 1 then
-                local shorter = math.max(1, height - self.pager_h)
-                local again, slim = pcall(function()
-                    return require("ui.themes.widgets.html").widget({
-                        width = width,
-                        height = shorter,
-                        html = self.html,
-                        css = css,
-                        on_link = self.on_link,
-                        transparent = true,
-                    })
-                end)
-                if again and slim then
-                    if box.free then box:free() end
-                    self.body = slim
-                    pages = math.max(1, tonumber(slim.page_count) or 1)
-                    height = shorter
-                end
-            end
-            self.pages = pages
+            self.pages = math.max(1, tonumber(box.page_count) or 1)
             self.page = math.min(math.max(1, self.page or 1), self.pages)
             if self.body.setPageNumber then
                 self.body:setPageNumber(self.page)
