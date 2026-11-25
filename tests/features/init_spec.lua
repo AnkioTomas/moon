@@ -86,7 +86,7 @@ require("support.modal_stub").install()
 local Features = require("features")
 
 -- 真实 list 的每个条目都能加载。不调用钩子：锁屏/远程的 onCreate 会拉起真实服务。
-Assert.eq(table.concat(Features.list, ","), "clock,nightmode,panel,azw3,fontmap,bars,sidebar,xray,ai,reviews,rare,translate,reflow,animation,dictionary,ocr,baike,lockscreen,wallpaper,bluetooth,passcode,ime,remote,update,storage,battery,subscribe,cookie,notes,share,extensions")
+Assert.eq(table.concat(Features.list, ","), "clock,nightmode,panel,azw3,fontmap,bars,sidebar,xray,ai,reviews,rare,translate,reflow,animation,dictionary,ocr,baike,lockscreen,wallpaper,bluetooth,passcode,ime,remote,update,marketplace,storage,battery,subscribe,cookie,notes,share,extensions")
 for _, name in ipairs(Features.list) do
     Assert.eq(type(require("features." .. name)), "table")
 end
@@ -103,7 +103,7 @@ do
     Assert.eq(type(Ext.last("topbar.light_percent")), "function")
     Assert.eq(type(Ext.last("highlight.fill_selection")), "function")
     Assert.len(Ext.list("highlight.relabel"), 1)
-    Assert.len(Ext.list("desktop.activated"), 2, "校时 + 更新检查")
+    Assert.len(Ext.list("desktop.activated"), 3, "校时 + 更新检查 + 插件市场自动刷新")
     Assert.len(Ext.list("desktop.opened"), 2, "订阅 + 存储告急")
     Assert.len(Ext.list("reader.doc_settings"), 1)
     Assert.len(Ext.list("reader.preferences"), 1)

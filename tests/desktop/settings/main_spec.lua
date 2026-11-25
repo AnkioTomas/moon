@@ -224,13 +224,14 @@ require("features").registerConventions()
 local settings = require("desktop.pages.setting"):new{ desktop = desktop }
 desktop.settings = settings
 settings:updateView()
--- 根页：搜索行没有分组标题；下面是设备分组（只有我的设备），再是分类。
+-- 根页：搜索行没有分组标题；下面是设备分组（我的设备、插件市场），再是分类。
 Assert.eq(table.concat(section_titles, ","), "设备,分类")
-Assert.len(built_rows, 9)
+Assert.len(built_rows, 10)
 Assert.eq(built_rows[1].title, "搜索设置")
 Assert.eq(built_rows[2].title, "我的设备")
+Assert.eq(built_rows[3].title, "插件市场")
 local root_groups = {}
-for i = 3, #built_rows do root_groups[#root_groups + 1] = built_rows[i].title end
+for i = 4, #built_rows do root_groups[#root_groups + 1] = built_rows[i].title end
 Assert.eq(table.concat(root_groups, ","), "书库,外观,桌面,阅读,系统,安全,维护")
 
 local function sectionTitles(page)

@@ -129,6 +129,7 @@ Features.list = {
     "ime",
     "remote",
     "update",
+    "marketplace",
     "storage",
     "battery", -- onSuspend/onResume/Charging：用法统计累计；设置页只靠约定文件也能出现，进 list 才有钩子
     "subscribe",
