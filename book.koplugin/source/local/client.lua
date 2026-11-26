@@ -4,7 +4,7 @@
 数据流：扫盘只把目录状态写进 books（增/改/删，文件名入库）；封面与引擎元数据另开补齐进程。
 书库/筛选/搜索/最近阅读/统计一律直查数据库，不做内存缓存。
 实现按职责拆在同目录：scan（本地目录扫盘 / 补齐 / 导入 / 移动 / 替换）、
-webdav（WebDAV 书目同步与远端书操作，传输在 dav）、remote_data（.Moon+ 进度 / 统计 / 笔记）、
+webdav（WebDAV 书目同步与远端书操作，传输在 http.webdav）、remote_data（.Moon+ 进度 / 统计 / 笔记）、
 common（共享原语）。子模块函数首参即 self，在这里装配为方法。
 
 @module koplugin.book.source.local.client
@@ -13,7 +13,7 @@ common（共享原语）。子模块函数首参即 self，在这里装配为方
 local lfs = require("libs/libkoreader-lfs")
 local Text = require("utils.text")
 local _ = require("l10n").get("source.local")
-local Webdav = require("source.local.dav")
+local Webdav = require("http.webdav")
 local Paths = require("utils.paths")
 local Common = require("source.local.common")
 local Scan = require("source.local.scan")
@@ -35,10 +35,16 @@ local remoteRelativePath, coverPath = Common.remoteRelativePath, Common.coverPat
 ---@field _stats_seen table<string, string>|nil 统计按书已入库版本（stats_index.json 的内存副本）
 local Client = {}
 
---- cfg 是 utils.settings 的共享表，设置页和远程配置会原地改它；dav 每次按 cfg 现造，不存快照。
+--- 连接字段在 conn（月读同步的配置表，会原地改）；没传 conn 时用 cfg，测试走这条。
+--- dav 每次按这张表现造，不存快照。
+---@return table
+function Client:connection()
+    return rawget(self, "conn") or rawget(self, "cfg")
+end
+
 Client.__index = function(self, key)
     if key == "dav" then
-        local cfg = rawget(self, "cfg")
+        local cfg = Client.connection(self)
         return Webdav.new{
             url = cfg.webdav_url,
             username = cfg.webdav_username,
@@ -49,20 +55,21 @@ Client.__index = function(self, key)
 end
 
 --- 从配置构造本地客户端。
----@param cfg table|nil
+---@param cfg table|nil 本地源配置（书库目录、上传开关）
+---@param conn table|nil WebDAV 连接；不传则连接字段也在 cfg 上
 ---@return LocalClient
-function Client.new(cfg)
-    return setmetatable({ cfg = cfg or {}, upload_failed = {} }, Client)
+function Client.new(cfg, conn)
+    return setmetatable({ cfg = cfg or {}, conn = conn, upload_failed = {} }, Client)
 end
 
 ---@return boolean
 function Client:isWebdav()
-    return Text.trim(self.cfg.webdav_url or "") ~= ""
+    return Text.trim(self:connection().webdav_url or "") ~= ""
 end
 
 ---@return string
 function Client:webdavPath()
-    local path = Text.trimSlashes(Text.trim(self.cfg.webdav_path or "Apps/Books"))
+    local path = Text.trimSlashes(Text.trim(self:connection().webdav_path or "Apps/Books"))
     return path ~= "" and path or "Apps/Books"
 end
 
@@ -94,7 +101,7 @@ end
 ---@return boolean, string|nil
 function Client:validatePath()
     if self:isWebdav() then
-        if not self.cfg.webdav_url:match("^https?://") then
+        if not self:connection().webdav_url:match("^https?://") then
             return false, _("WebDAV 地址必须以 http:// 或 https:// 开头")
         end
         return true
@@ -137,7 +144,6 @@ Client.scanWebdavAsync = LocalWebdav.scanWebdavAsync
 Client.openWebdavAsync = LocalWebdav.openWebdavAsync
 Client.pushBookAsync = LocalWebdav.pushBookAsync
 Client.importWebdavAsync = LocalWebdav.importWebdavAsync
-Client.testWebdavAsync = LocalWebdav.testWebdavAsync
 
 Client.getProgressAsync = RemoteData.getProgressAsync
 Client.putProgressAsync = RemoteData.putProgressAsync

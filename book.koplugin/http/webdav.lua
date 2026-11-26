@@ -1,7 +1,11 @@
 --[[--
 WebDAV 客户端（HTTP Basic，仅异步）。
 
-@module koplugin.book.source.local.dav
+PROPFIND / GET / PUT / MKCOL / DELETE。同一根地址上的读写串行，列目录最多四路并发。
+连通性探针也在这里：往目录写一个文件、读回比对、再删掉。
+业务（静读天下目录、进度文件）不在这里。
+
+@module koplugin.book.http.webdav
 --]]
 
 local util = require("util")
@@ -9,8 +13,10 @@ local ffiUtil = require("ffi/util")
 local Header = require("http.request.header")
 local Request = require("http.request")
 local Text = require("utils.text")
-local _ = require("l10n").get("source.local")
+local _ = require("gettext")
 local T = ffiUtil.template
+
+require("l10n").apply()
 
 --- PROPFIND 列表项
 ---@class WebdavEntry
@@ -518,6 +524,57 @@ function Webdav:deleteAsync(path, cb)
     return self:_request({ url = self:join(path, false), method = "DELETE" }, function(res, err, code)
         cb(res and true, err, code)
     end)
+end
+
+--- 连通性探针：在目录里写入、读回比对、再删除。临时文件用完即删。
+---@param path string 目录（相对根地址）
+---@param cb fun(ok: boolean, err: string|nil)
+---@return { cancel: fun() }
+function Webdav:probeAsync(path, cb)
+    local Paths = require("utils.paths")
+    local Fs = require("utils.fs")
+    local root = trimSlashes(path or "")
+    local remote = (root ~= "" and (root .. "/") or "") .. ".moon-webdav-test"
+    local upload = Paths.tmpname(".upload")
+    local download = Paths.tmpname(".download")
+    local token = "moon-webdav-test " .. os.time() .. " " .. math.random(1e9)
+    local file = io.open(upload, "wb")
+    local written = file and file:write(token)
+    local closed = file and file:close()
+    if not (written and closed) then
+        os.remove(upload)
+        cb(false, _("无法创建测试文件"))
+        return { cancel = function() end }
+    end
+    local cancelled, active = false, nil
+    local function finish(ok, stage, err)
+        os.remove(upload)
+        os.remove(download)
+        if cancelled then return end
+        cb(ok == true, not ok and (stage .. (err or "")) or nil)
+    end
+    local function verify()
+        if Fs.read(download) ~= token then finish(false, _("读回内容与写入不一致")); return end
+        active = self:deleteAsync(remote, function(ok, err)
+            finish(ok == true, _("删除失败："), err)
+        end)
+    end
+    active = self:ensurePathAsync(root, function(ok_dir, dir_err)
+        if not ok_dir then finish(false, _("创建目录失败："), dir_err); return end
+        active = self:putFileAsync(remote, upload, function(ok_put, put_err)
+            if not ok_put then finish(false, _("写入失败："), put_err); return end
+            active = self:getAsync(remote, download, nil, function(ok_get, get_err)
+                if not ok_get then finish(false, _("读取失败："), get_err); return end
+                verify()
+            end)
+        end)
+    end)
+    return { cancel = function()
+        cancelled = true
+        if active and active.cancel then active:cancel() end
+        os.remove(upload)
+        os.remove(download)
+    end }
 end
 
 return Webdav
