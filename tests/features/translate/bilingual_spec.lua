@@ -533,4 +533,87 @@ Assert.eq(Bilingual._originalXPointer(document, "/body/DocFragment[2]/body/p[5]/
 Assert.eq(Bilingual._originalXPointer(document, "/body/DocFragment[2]/body/p[6]/text().0"),
     "/body/DocFragment[2]/body/p[6]/text().0")
 
+-- 章节源：按段落默认打开书中译文。清除之后再选 Edge，才入队翻译。
+do
+    local Themed = require("support.theme_stubs")
+    local translate_settings = { bilingual_color = "", bilingual_scale = 0 }
+    package.preload["utils.settings"] = function()
+        return { get = function() return translate_settings end, save = function() end }
+    end
+    package.loaded["utils.settings"] = nil
+    package.loaded["features.translate.chapter"] = nil
+    local started, switched
+    package.preload["workers.ui.task_dialog"] = function()
+        return { start = function(spec) started = spec end, follow = function() end }
+    end
+    package.loaded["workers.ui.task_dialog"] = nil
+    package.preload["workers.tasks"] = function() return { get = function() return nil end } end
+    package.loaded["workers.tasks"] = nil
+    package.preload["docsettings"] = function()
+        return { open = function()
+            return { saveSetting = function() end, readSetting = function() end, flush = function() end }
+        end }
+    end
+    package.loaded["docsettings"] = nil
+    package.preload["reader.prefs"] = function() return { capture = function() return nil end } end
+    package.loaded["reader.prefs"] = nil
+    package.preload["book.store"] = function()
+        return { touch = function() switched = true; return true end }
+    end
+    package.loaded["book.store"] = nil
+
+    local ChapterBi = require("features.translate.chapter")
+    local Paths = require("utils.paths")
+    local identity = { source_id = "wechat", stable_id = "bilingual-clear", source = { type = "chapter" },
+        chapter_idx = 2, book = { title = "书" } }
+    local work = Paths.bookWorkDir(identity.stable_id, identity.source_id)
+    assert(Paths.ensureDir(work))
+    local origin = Paths.chapterPath(identity.stable_id, 2, identity.source_id)
+    local f = assert(io.open(origin, "wb"))
+    f:write("<p>Hello</p>")
+    f:close()
+    f = assert(io.open(Paths.embedChapterPath(origin), "wb"))
+    f:write("<p>Hello</p><span>你好</span>")
+    f:close()
+    session = { identity = identity }
+    local ui = { rolling = {}, doc_settings = { readSetting = function() return nil end }, document = {
+        file = origin,
+        getXPointer = function() return "/body/p[1]" end,
+        getHTMLFromXPointer = function() return nil end,
+    }, switchDocument = function(_self, path) switched = path end }
+
+    local function engineField(form)
+        for _idx, item in ipairs(form.items(form)) do
+            if item.title == "翻译引擎" then return item end
+        end
+    end
+    local function button(form, text)
+        for _idx, item in ipairs(form.buttons(form)) do
+            if item.text == text then return item end
+        end
+    end
+
+    Bilingual.show(ui)
+    local form = Themed.last("settings")
+    Assert.not_nil(button(form, "清除译文"))
+    engineField(form).on_select("edge")
+    button(form, "开始").callback()
+    Assert.is_nil(started, "没清除时按段落打开书中译文，不翻译")
+    Assert.eq(switched, Paths.embedChapterPath(origin))
+
+    Bilingual.show(ui)
+    form = Themed.last("settings")
+    button(form, "清除译文").callback()
+    Assert.eq(Themed.last("toast").text, "译文已清除")
+    Assert.is_true(ChapterBi.embedSuppressed(identity))
+    Assert.is_nil(ChapterBi.get(identity))
+    Assert.is_nil(button(form, "清除译文"), "清完就没有可清的了")
+    started, switched = nil, nil
+    engineField(form).on_select("edge")
+    button(form, "开始").callback()
+    Assert.eq(started.key, "bilingual\0wechat\0bilingual-clear")
+    Assert.is_nil(switched, "清除后按段落走 Edge")
+    require("ffi/util").purgeDir(work)
+end
+
 os.execute("rm -rf '" .. dir .. "'")

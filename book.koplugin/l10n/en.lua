@@ -1898,6 +1898,8 @@ return {
     ["书中译文"] = "Translation in the book",
     ["按段落"] = "By paragraph",
     ["按句子"] = "By sentence",
+    ["清除译文"] = "Clear translations",
+    ["译文已清除"] = "Translations cleared",
     ["双语译文颜色"] = "Bilingual translation color",
     ["双语译文字号"] = "Bilingual translation size",
     ["跟随原文"] = "Same as original",

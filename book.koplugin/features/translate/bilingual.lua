@@ -719,7 +719,7 @@ function Bilingual.available(ui)
 end
 
 --- 翻译前的表单：语言、对照方式、引擎当场选，点「开始」才翻。对照方式不进设置。
----@param opts { lang: string, translator: table, languages: table, embed: boolean|nil, on_open: fun()|nil, on_close: fun()|nil, on_start: fun(engine: string, lang: string, unit: string) }
+---@param opts { lang: string, translator: table, languages: table, embed: boolean|nil, can_clear: fun(): boolean|nil, on_clear: fun(page: table)|nil, on_open: fun()|nil, on_close: fun()|nil, on_start: fun(engine: string, lang: string, unit: string) }
 local function openForm(opts)
     local lang = opts.lang
     local unit = "paragraph"
@@ -786,6 +786,11 @@ local function openForm(opts)
                     opts.on_close()
                 end }
             end
+            if opts.on_clear and opts.can_clear() then
+                buttons[#buttons + 1] = { text = _("清除译文"), callback = function()
+                    opts.on_clear(page)
+                end }
+            end
             buttons[#buttons + 1] = { text = _("开始"), variant = "primary", callback = function()
                 page:close()
                 opts.on_start(engine, lang, unit)
@@ -795,7 +800,8 @@ local function openForm(opts)
     }:show()
 end
 
---- 章节源：按书开关。按段落且本章已有双语稿就直接打开；按句子则按所选粒度翻译。
+--- 章节源：按书开关。按段落且本章已有生成稿就直接打开；按句子则按所选粒度翻译。
+--- 没生成稿时默认打开书中译文。点「清除译文」之后，Edge / AI 才按用户选的引擎和粒度现译。
 ---@param ui table
 ---@param identity BookIdentity
 local function showChapter(ui, identity)
@@ -820,6 +826,18 @@ local function showChapter(ui, identity)
     openForm{
         lang = lang, translator = translator, languages = Languages,
         embed = ChapterBi.embedFile(origin) ~= nil,
+        can_clear = function()
+            if ChapterBi.get(identity) ~= nil or ChapterBi.hasGenerated(identity) then return true end
+            return not ChapterBi.embedSuppressed(identity) and ChapterBi.embedFile(origin) ~= nil
+        end,
+        on_clear = function(page)
+            ChapterBi.suppressEmbed(identity)
+            ChapterBi.clearGenerated(identity)
+            ChapterBi.set(identity, nil)
+            if ui.document.file ~= origin then openAt(origin) end
+            require("ui.themes.widgets.toast"):new{ text = _("译文已清除") }:show()
+            page:updateView()
+        end,
         on_close = current and function()
             ChapterBi.set(identity, nil)
             ChapterBi.materialize(origin)

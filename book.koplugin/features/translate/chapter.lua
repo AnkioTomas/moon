@@ -4,6 +4,7 @@
 - 开关存 settings/translate.lua 的 `chapter_bilingual["<source_id>:<stable_id>"] = { engine, lang, unit? }`。
   engine 为 `embed` 时用章节里自带的译文节点，不请求 Edge / AI。
   unit 只在这次翻译选了按句子时写入；缺省按段落。不在设置页里。
+  `chapter_embed_off[同一键] = true` 表示用户清过译文：Edge / AI 不再自动打开书中译文，只有点「书中译文」才读它。
 - 双语章与整本一样在 `bilingual/<idx>.html`，随清缓存 / 删书一起删；原章更新（mtime 更新）后作废。
   图片和样式表在工作目录，生成时把相对路径改成 `../`。旧的 `<idx>.bi-<engine>-<lang>.html` 只读、不新建。
 - 源站嵌在正文里的译文（class `wr-translation`）默认从原章去掉。
@@ -49,6 +50,57 @@ function ChapterBi.set(identity, conf)
     settings.chapter_bilingual = settings.chapter_bilingual or {}
     settings.chapter_bilingual[key(identity)] = conf
     MoonSettings.save(OWNER)
+end
+
+--- 用户点过「清除译文」。Edge / AI 不再把书中译文当成已完成的双语稿。
+---@param identity BookIdentity
+---@return boolean
+function ChapterBi.embedSuppressed(identity)
+    local map = MoonSettings.get(OWNER).chapter_embed_off
+    return map ~= nil and map[key(identity)] == true
+end
+
+---@param identity BookIdentity
+function ChapterBi.suppressEmbed(identity)
+    local settings = MoonSettings.get(OWNER)
+    settings.chapter_embed_off = settings.chapter_embed_off or {}
+    settings.chapter_embed_off[key(identity)] = true
+    MoonSettings.save(OWNER)
+end
+
+---@param dir string
+---@param fn fun(name: string)
+local function eachFile(dir, fn)
+    if lfs.attributes(dir, "mode") ~= "directory" then return end
+    for name in lfs.dir(dir) do
+        if name ~= "." and name ~= ".." then fn(name) end
+    end
+end
+
+--- 这本书有没有 Edge / AI 生成的双语稿或译文缓存。书中译文副本不算。
+---@param identity BookIdentity
+---@return boolean
+function ChapterBi.hasGenerated(identity)
+    local work = Paths.bookWorkDir(identity.stable_id, identity.source_id)
+    local found = false
+    eachFile(work .. "/bilingual", function() found = true end)
+    if found then return true end
+    eachFile(work, function(name)
+        if name:match("%.bi%-.*%.html$") then found = true end
+    end)
+    return found
+end
+
+--- 删掉这本书 Edge / AI 的生成稿和译文缓存。书中译文副本留着，给「书中译文」用。
+---@param identity BookIdentity
+function ChapterBi.clearGenerated(identity)
+    local work = Paths.bookWorkDir(identity.stable_id, identity.source_id)
+    eachFile(work .. "/bilingual", function(name)
+        os.remove(work .. "/bilingual/" .. name)
+    end)
+    eachFile(work, function(name)
+        if name:match("%.bi%-.*%.html$") then os.remove(work .. "/" .. name) end
+    end)
 end
 
 --- 旧文件。当前引擎和语言拼出一个路径，调用方再看它在不在。
@@ -147,8 +199,9 @@ function ChapterBi.resolve(identity, _idx, path)
     end
     local keep = Paths.embedChapterPath(origin)
     if lfs.attributes(keep, "mode") ~= "file" then ChapterBi.materialize(origin) end
-    if lfs.attributes(keep, "mode") == "file" then return keep end
-    return nil
+    if lfs.attributes(keep, "mode") ~= "file" then return nil end
+    if conf.engine ~= "embed" and ChapterBi.embedSuppressed(identity) then return nil end
+    return keep
 end
 
 return ChapterBi
