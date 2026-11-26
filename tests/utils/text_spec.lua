@@ -247,3 +247,25 @@ do
     for _ch in ("abc中文"):gmatch(Text.UTF8_CHAR) do n = n + 1 end
     Assert.eq(n, 5)
 end
+
+-- ── len ─────────────────────────────
+do
+    Assert.eq(Text.len(""), 0)
+    Assert.eq(Text.len("abc中文"), 5)
+    Assert.eq(Text.len("😀"), 1, "四字节字符算一个")
+    Assert.eq(Text.len("a\128b"), 2, "孤立的续字节不计")
+end
+
+-- ── parseHttpDate ─────────────────────────────
+do
+    Assert.eq(Text.parseHttpDate("Wed, 21 Oct 2015 07:28:00 GMT"), 1445412480)
+    Assert.eq(Text.parseHttpDate("Sun, 06 Nov 1994 08:49:37 GMT"), 784111777)
+    Assert.eq(Text.parseHttpDate("Sunday, 06-Nov-94 08:49:37 GMT"), 784111777, "RFC 850 两位年份")
+    Assert.eq(Text.parseHttpDate("Sat, 01-Jan-05 00:00:00 GMT"), 1104537600, "两位年份 < 70 归 20xx")
+    Assert.eq(Text.parseHttpDate("Thu, 01 Jan 1970 00:00:00 GMT"), 0)
+    Assert.eq(Text.parseHttpDate("Thu, 29 Feb 2024 12:00:00 GMT"), 1709208000, "闰日")
+    Assert.eq(Text.parseHttpDate("Wed, 01 Mar 2000 00:00:00 GMT"), 951868800, "400 年闰年之后")
+    Assert.is_nil(Text.parseHttpDate(""))
+    Assert.is_nil(Text.parseHttpDate("Sun, 06 Foo 1994 08:49:37 GMT"))
+    Assert.is_nil(Text.parseHttpDate("Sun Nov  6 08:49:37 1994"), "asctime 是月日顺序，不认")
+end

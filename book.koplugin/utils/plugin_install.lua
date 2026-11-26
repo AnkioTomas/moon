@@ -10,21 +10,9 @@
 --]]
 
 local lfs = require("libs/libkoreader-lfs")
+local removeTree = require("utils.fs").removeTree
 
 local Install = {}
-
-local function removeTree(path)
-    local attr = lfs.symlinkattributes(path)
-    if not attr then return true end
-    if attr.mode ~= "directory" then return os.remove(path) end
-    for name in lfs.dir(path) do
-        if name ~= "." and name ~= ".." then
-            local ok, err = removeTree(path .. "/" .. name)
-            if not ok then return nil, err end
-        end
-    end
-    return lfs.rmdir(path)
-end
 
 local function fileSha256(path)
     local file, err = io.open(path, "rb")

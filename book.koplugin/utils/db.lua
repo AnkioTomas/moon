@@ -10,7 +10,7 @@
 
 约定：
 - 参数一律 `?` 绑定，禁止把用户值拼进 SQL 文本。
-- 多语句写入走 `DB.transaction`，禁止手写 BEGIN/COMMIT/ROLLBACK；事务不可嵌套。
+- 多语句写入走 `DB.transaction`，禁止手写 BEGIN/COMMIT/ROLLBACK；嵌套调用自动降为 SAVEPOINT。
 - 需要「是否真的命中行」时，同一连接上紧接着读 `SELECT changes();`。
 
 @module koplugin.book.utils.db
@@ -109,17 +109,25 @@ function DB.exec(sql, ...)
 end
 
 --- 在 BEGIN IMMEDIATE 事务里执行 fn：返回真值才提交，否则回滚。
+--- 已在事务里时改用 SAVEPOINT：内层失败只撤回自己那段，由外层 fn 决定整体去留。
 --- fn 抛错时先回滚再原样抛出，不让连接停在未结束的事务里（之后的 BEGIN 会全部失败）。
 ---@generic T
 ---@param fn fun(): T
 ---@return T|nil result 提交成功时为 fn 的返回值
 function DB.transaction(fn)
-    if not DB.exec("BEGIN IMMEDIATE;") then return nil end
+    local sp = "tx" .. tx_depth
+    local nested = tx_depth > 0
+    if not DB.exec(nested and "SAVEPOINT " .. sp .. ";" or "BEGIN IMMEDIATE;") then return nil end
     tx_depth = tx_depth + 1
     local ok, result = pcall(fn)
     tx_depth = tx_depth - 1
-    if ok and result and DB.exec("COMMIT;") then return result end
-    DB.exec("ROLLBACK;")
+    if ok and result and DB.exec(nested and "RELEASE " .. sp .. ";" or "COMMIT;") then return result end
+    if nested then
+        DB.exec("ROLLBACK TO " .. sp .. ";")
+        DB.exec("RELEASE " .. sp .. ";")
+    else
+        DB.exec("ROLLBACK;")
+    end
     if not ok then error(result, 0) end
     return nil
 end

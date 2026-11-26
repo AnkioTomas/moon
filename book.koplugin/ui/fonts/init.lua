@@ -212,12 +212,11 @@ function Fonts.deleteUserFont(filename)
         MoonSettings.save("ui")
         Fonts.applyCurrent()
     end
-    local ok_reader, reader_conf = pcall(MoonSettings.get, "reader")
-    if ok_reader and type(reader_conf) == "table"
-        and (reader_conf.western_font_id == filename or reader_conf.western_font_id == stem) then
+    local reader_conf = MoonSettings.get("reader")
+    if reader_conf.western_font_id == filename or reader_conf.western_font_id == stem then
         reader_conf.western_font_id = ""
         reader_conf.western_font_name = ""
-        pcall(MoonSettings.save, "reader")
+        MoonSettings.save("reader")
     end
     logger.info("book.font deleted user font", filename, path)
     return true
@@ -404,15 +403,10 @@ end
 function Fonts.getFace(font, size, faceindex)
     if type(font) ~= "string" or font == "" then return nil end
     local orig_size = size or (Font.sizemap and Font.sizemap[font]) or 16
-    local scaled = orig_size
-    local device = require("device")
-    if device.screen and type(device.screen.scaleBySize) == "function" then
-        scaled = device.screen:scaleBySize(orig_size)
-    end
+    local scaled = require("device").screen:scaleBySize(orig_size)
     local realname = (Font.fontmap and Font.fontmap[font]) or font
     local hash = realname .. scaled
     if faceindex then hash = hash .. "/" .. faceindex end
-    if type(Font.faces) ~= "table" then Font.faces = {} end
     local cached = Font.faces[hash]
     if cached then
         if cached.orig_size ~= orig_size then cached.orig_size = orig_size end
@@ -463,7 +457,7 @@ local _getface_patched = false
 --- 若界面 fontmap 指向的字体已被删或损坏，自动兜底到 SAFE_UI 内置字体，避免 KOReader UI 闪退。
 --- 不再调用宿主里会因 `%1` 等抛 invalid capture index 的 :find 回落。
 function Fonts.patchGetFace()
-    if _getface_patched or type(Font.getFace) ~= "function" then return end
+    if _getface_patched then return end
     _getface_patched = true
     local orig = Font.getFace
     Font.getFace = function(self, font, size, faceindex)
@@ -499,9 +493,7 @@ function Fonts.canOpen(path)
     end)
     if not ok or not size then return false end
     -- newFaceSize 的 face 进弱缓存；size 用完立刻释放，避免无意义占坑。
-    if type(size) == "table" or type(size) == "cdata" then
-        pcall(function() size:done() end)
-    end
+    size:done()
     return true
 end
 
@@ -521,9 +513,8 @@ end
 
 --- 清掉 KOReader 持久化的 fontmap（reader.lua 启动时会灌进 Font.fontmap，早于插件）。
 local function clearPersistedFontmap()
-    local settings = rawget(_G, "G_reader_settings")
-    if settings and settings.has and settings:has("fontmap") then
-        settings:delSetting("fontmap")
+    if G_reader_settings:has("fontmap") then
+        G_reader_settings:delSetting("fontmap")
         logger.warn("book.font cleared persisted fontmap")
     end
 end
@@ -582,9 +573,12 @@ function Fonts.applyCurrent()
     if not _defaults then
         _defaults = {}
         local healed = false
+        -- 十几个界面字型多半映射到同几个文件；每次 canOpen 都要 FreeType 开一遍字体。
+        local openable = {}
         for _idx, key in ipairs(UI_FACES) do
-            local cur = Font.fontmap[key]
-            if canOpenMapped(cur) then
+            local cur = Font.fontmap[key] or ""
+            if openable[cur] == nil then openable[cur] = canOpenMapped(cur) end
+            if openable[cur] then
                 _defaults[key] = cur
             else
                 _defaults[key] = SAFE_UI[key] or "NotoSans-Regular.ttf"
@@ -663,15 +657,11 @@ function Fonts.migrateLegacy()
     local legacy_dir = Paths.fontsDir()
     local user_dir = Fonts.settingsFontsDir()
     if lfs.attributes(legacy_dir, "mode") == "directory" then
-        if type(Paths.ensureDir) == "function" then
-            Paths.ensureDir(user_dir)
-        elseif type(lfs.mkdir) == "function" then
-            lfs.mkdir(user_dir)
-        end
+        Paths.ensureDir(user_dir)
         local ok_dir, iter, state = pcall(lfs.dir, legacy_dir)
-        if ok_dir and type(iter) == "function" then
+        if ok_dir then
             for name in iter, state do
-                if type(name) == "string" and name ~= "." and name ~= ".." then
+                if name ~= "." and name ~= ".." then
                     local src = legacy_dir .. "/" .. name
                     local low = name:lower()
                     if lfs.attributes(src, "mode") == "file" then
@@ -720,9 +710,8 @@ function Fonts.migrateLegacy()
     end
 
     -- 迁移并兜底西文字体
-    local ok_reader, reader_conf = pcall(MoonSettings.get, "reader")
-    if ok_reader and type(reader_conf) == "table" and type(reader_conf.western_font_id) == "string"
-        and reader_conf.western_font_id ~= "" then
+    local reader_conf = MoonSettings.get("reader")
+    if type(reader_conf.western_font_id) == "string" and reader_conf.western_font_id ~= "" then
         local wid = reader_conf.western_font_id
         local changed = false
         if moved[wid] then wid = moved[wid]; reader_conf.western_font_id = wid; changed = true end
@@ -733,16 +722,13 @@ function Fonts.migrateLegacy()
             reader_conf.western_font_name = ""
             changed = true
         end
-        if changed then pcall(MoonSettings.save, "reader") end
+        if changed then MoonSettings.save("reader") end
     end
 
     -- 迁移全局默认阅读字体 id
-    local gs = rawget(_G, "G_reader_settings")
-    if gs and type(gs.readSetting) == "function" and type(gs.saveSetting) == "function" then
-        local def_id = gs:readSetting("book_reader_default_font_id")
-        if type(def_id) == "string" and moved[def_id] then
-            gs:saveSetting("book_reader_default_font_id", moved[def_id])
-        end
+    local def_id = G_reader_settings:readSetting("book_reader_default_font_id")
+    if moved[def_id] then
+        G_reader_settings:saveSetting("book_reader_default_font_id", moved[def_id])
     end
 
     ui_conf.fonts_migrated_ver = Fonts.MIGRATION_VER

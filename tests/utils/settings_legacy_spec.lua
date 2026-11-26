@@ -16,6 +16,13 @@ end
 
 local files = {}
 local flushed = 0
+local probed = {}
+package.loaded["libs/libkoreader-lfs"] = {
+    attributes = function(path, name)
+        probed[#probed + 1] = path
+        return name == "mode" and files[path] and "file" or nil
+    end,
+}
 local function open(path)
     files[path] = files[path] or { data = {}, flush = function() flushed = flushed + 1 end }
     return files[path]
@@ -68,3 +75,8 @@ Assert.is_nil(files["settings/local.lua"].data.webdav_url)
 Assert.eq(files["settings/local.lua"].data.path, "/books", "没点名的键留在源配置")
 Assert.is_nil(files.common.data.webdav_url, "旧分区里的同名键也删掉")
 Assert.eq(#touched, 2)
+
+-- 不存在的旧分区不打开（新装用户每个拥有者都会走一遍迁移，别为它们开 8 个文件）
+Legacy.migrate({ data = {} }, { "anything" }, open)
+Assert.is_nil(files.reader, "没有的旧分区不会被打开")
+Assert.is_true(#probed > 0)

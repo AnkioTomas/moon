@@ -5,6 +5,7 @@
 @module koplugin.book.utils.settings_legacy
 --]]
 
+local lfs = require("libs/libkoreader-lfs")
 local Paths = require("utils.paths")
 
 local Legacy = {}
@@ -27,16 +28,20 @@ local RENAMED = {
 ---@return table[] touched 删过键的旧分区
 function Legacy.migrate(file, keys, open, extras)
     local touched = {}
+    -- 每个进程每个拥有者都会走到这里；装机以后才有的用户根本没有旧分区，别为它们挨个开文件。
+    local function openExisting(path)
+        if lfs.attributes(path, "mode") == "file" then return open(path) end
+    end
     --- 旧分区 legacy 的 old_key 搬到 file 的 key。
     ---@return boolean moved
     local function move(legacy, old_key, key)
-        if legacy == file or legacy.data[old_key] == nil then return false end
+        if not legacy or legacy == file or legacy.data[old_key] == nil then return false end
         if file.data[key] == nil then file.data[key] = legacy.data[old_key] end
         legacy.data[old_key] = nil
         return true
     end
     for _idx, path in ipairs(extras or {}) do
-        local legacy = open(path)
+        local legacy = openExisting(path)
         local dirty = false
         for _i, key in ipairs(keys) do
             dirty = move(legacy, key, key) or dirty
@@ -44,7 +49,7 @@ function Legacy.migrate(file, keys, open, extras)
         if dirty then touched[#touched + 1] = legacy end
     end
     for _idx, section in ipairs(SECTIONS) do
-        local legacy = open(section == "common" and Paths.commonPath() or Paths.sectionPath(section))
+        local legacy = openExisting(section == "common" and Paths.commonPath() or Paths.sectionPath(section))
         local dirty = false
         for _i, key in ipairs(keys) do
             dirty = move(legacy, key, key) or dirty
@@ -54,7 +59,7 @@ function Legacy.migrate(file, keys, open, extras)
     for _i, key in ipairs(keys) do
         local renamed = RENAMED[key]
         if renamed then
-            local legacy = open(Paths.sectionPath(renamed.section))
+            local legacy = openExisting(Paths.sectionPath(renamed.section))
             if move(legacy, renamed.key, key) then touched[#touched + 1] = legacy end
         end
     end

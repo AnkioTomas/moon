@@ -53,6 +53,8 @@ function Job.inSubProcess()
 end
 
 local READ_CHUNK = 64 * 1024
+-- 主循环单线程，读完立刻 ffi.string 拷走，全部 Job 共用一块。
+local read_buffer = ffi.new("char[?]", READ_CHUNK)
 local KINDS = {
     instant = 0,
     light = 0.5,
@@ -148,13 +150,12 @@ function Job:_read()
         local available = ffiUtil.getNonBlockingReadSize(self.read_fd)
         if not available or available <= 0 then return end
         local size = math.min(available, READ_CHUNK)
-        local buffer = ffi.new("char[?]", size)
-        local ok, count = pcall(Posix.read, self.read_fd, buffer, size, false)
+        local ok, count = pcall(Posix.read, self.read_fd, read_buffer, size, false)
         if not ok then
             self:_finish("failed", nil, "job pipe read failed: " .. tostring(count))
             return
         end
-        local messages, err = Protocol.feed(self.decoder, ffi.string(buffer, count))
+        local messages, err = Protocol.feed(self.decoder, ffi.string(read_buffer, count))
         if not messages then
             self:_finish("failed", nil, err or "worker protocol failed")
             return
@@ -195,7 +196,7 @@ function Job:_poll()
         local ok, err = Protocol.finish(self.decoder)
         local mem = require("workers.system"):memAvailableMB()
         logger.warn("book.worker exited without result", self.name, "pid=" .. tostring(self.pid),
-            self.exit_status, "buffer=" .. #self.decoder.buffer,
+            self.exit_status, "buffer=" .. (#self.decoder.buffer + self.decoder.pending),
             mem and ("MemAvailable " .. math.floor(mem) .. "MB") or "")
         logger.flushSync()
         self:_finish("failed", nil, (ok and "job exited without result" or err) .. " (" .. self.exit_status .. ")")

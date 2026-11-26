@@ -19,11 +19,11 @@ M.exiting = false
 ---@return integer 关掉的窗口数
 function M.close()
     local UIManager = require("ui/uimanager")
-    local stack = UIManager._window_stack or {}
+    local stack = UIManager._window_stack
     local leftovers = {}
     for i = #stack, 1, -1 do
-        local w = stack[i] and stack[i].widget
-        if type(w) == "table" and w.book_window then
+        local w = stack[i].widget
+        if w.book_window then
             leftovers[#leftovers + 1] = w
         end
     end

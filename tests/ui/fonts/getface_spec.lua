@@ -17,7 +17,7 @@ local opened = {}
 package.preload["gettext"] = function() return function(s) return s end end
 package.preload["utils.log"] = function() return { info = function() end, warn = function() end, dbg = function() end } end
 package.preload["utils.paths"] = function()
-    return { fontsDir = function() return "/tmp/fonts" end, ensureFonts = function() end, slugFor = function(v) return v end }
+    return { fontsDir = function() return "/tmp/fonts" end, slugFor = function(v) return v end }
 end
 package.preload["utils.settings"] = function()
     return { get = function() return { ui_font = "", ui_font_name = "" } end, save = function() end }

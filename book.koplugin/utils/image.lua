@@ -246,10 +246,4 @@ function Image.ok(path)
     return Image.file(path) ~= nil
 end
 
----@param ext string|nil
----@return string|nil
-function Image.mime(ext)
-    return MIME[ext]
-end
-
 return Image

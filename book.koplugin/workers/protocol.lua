@@ -19,16 +19,22 @@ function Protocol.encode(value)
     return string.format("%08x", #payload) .. payload
 end
 
----@return { buffer: string }
+--- 半包先攒成块，凑够一整帧才拼一次：逐块 `..` 拼 4MB 帧是 O(n²) 的临时字符串。
+---@return { buffer: string, parts: string[], pending: integer, need: integer }
 function Protocol.newDecoder()
-    return { buffer = "" }
+    return { buffer = "", parts = {}, pending = 0, need = 8 }
 end
 
----@param decoder { buffer: string }
+---@param decoder { buffer: string, parts: string[], pending: integer, need: integer }
 ---@param bytes string
 ---@return table[]|nil messages, string|nil err
 function Protocol.feed(decoder, bytes)
-    decoder.buffer = decoder.buffer .. bytes
+    local parts = decoder.parts
+    parts[#parts + 1] = bytes
+    decoder.pending = decoder.pending + #bytes
+    if #decoder.buffer + decoder.pending < decoder.need then return {} end
+    decoder.buffer = decoder.buffer .. table.concat(parts)
+    decoder.parts, decoder.pending, decoder.need = {}, 0, 8
     local out = {}
     while #decoder.buffer >= 8 do
         local size = tonumber(decoder.buffer:sub(1, 8), 16)
@@ -36,6 +42,7 @@ function Protocol.feed(decoder, bytes)
             return nil, "worker protocol: invalid frame length"
         end
         if #decoder.buffer < size + 8 then
+            decoder.need = size + 8
             break
         end
         local payload = decoder.buffer:sub(9, size + 8)
@@ -49,10 +56,10 @@ function Protocol.feed(decoder, bytes)
     return out
 end
 
----@param decoder { buffer: string }
+---@param decoder { buffer: string, pending: integer }
 ---@return boolean, string|nil
 function Protocol.finish(decoder)
-    if decoder.buffer ~= "" then
+    if decoder.buffer ~= "" or decoder.pending > 0 then
         return false, "worker protocol: incomplete frame"
     end
     return true

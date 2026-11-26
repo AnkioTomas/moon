@@ -3,6 +3,7 @@ utils.mem：重书提醒阈值随可用内存伸缩。
 
 @module tests.utils.mem_spec
 --]]
+---@diagnostic disable: undefined-field
 
 local Assert = require("support.assert")
 

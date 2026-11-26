@@ -60,7 +60,6 @@ end
 package.preload["utils.paths"] = function()
     return {
         fontsDir = function() return Config.dir() .. "/font_legacy_absent" end,
-        ensureFonts = function() end,
         ensureDir = function(dir) os.execute("mkdir -p '" .. dir .. "'") end,
     }
 end

@@ -48,8 +48,8 @@ Assert.contains(texts, "选择图标")
 Assert.contains(texts, "共 " .. #NAMES .. " 个")
 Assert.contains(texts, "home")
 
--- 当前图标：取 selected 令牌，paper 的 mark = 2 在格底画 1/3 宽的 ink 指示条，其余格同位置画页面色。
-local marks = Kit.find(picker, function(w) return w.dimen and w.dimen.w == 33 and w.dimen.h == 2 end)
+-- 当前图标：取 selected 令牌，paper 的 mark = 3 在格底画 1/3 宽的 ink 指示条，其余格同位置画页面色。
+local marks = Kit.find(picker, function(w) return w.dimen and w.dimen.w == 33 and w.dimen.h == 3 end)
 Assert.len(marks, 42)
 local inked = 0
 for _idx, m in ipairs(marks) do
@@ -127,7 +127,7 @@ Assert.is_true(#Kit.taps(picker) >= 1)
 Kit.color_enabled = true
 picker = IconPicker:new{ current = "home" }
 local cell = picker:cellWidget("home")
-local mark = Kit.find(cell, function(w) return w.style and w.box_w == 33 and w.box_h == 2 end)[1]
+local mark = Kit.find(cell, function(w) return w.style and w.box_w == 33 and w.box_h == 3 end)[1]
 Assert.eq(mark.style.bg, require("ui.themes").current().color.accent,
     "选中指示条位于白底上，不能误用反白文字色")
 local canvas = Kit.canvas()

@@ -31,6 +31,7 @@ stub("ui/uimanager", {
     end,
     setDirty = function() end,
     close = function() end,
+    _window_stack = {},
 })
 stub("utils.wake", {
     GRACE = 0, boot = function() end, suspend = function() end, resume = function() end, exit = function() end,
@@ -54,6 +55,9 @@ stub("utils.log", {
     warn = function() end,
     flush = function() end,
 })
+-- 直达加载器会替换全局 require、对本插件模块绕过 package.preload，上面这些桩就全失效了；
+-- 加载器自己由 tests/utils/modules_spec 覆盖，这里只测接线。
+stub("utils.modules", { install = function() return {} end })
 stub("l10n", {})
 stub("gettext", setmetatable({}, { __call = function(_, text) return text end }))
 local current_source
@@ -426,10 +430,13 @@ require("menu").setOpenOnStart(false)
 Assert.eq(reader_settings.start_with, "filemanager", "取消即回到文件管理器")
 
 -- 宿主入口与生命周期各步都经 guard
+plugin:onSetRotationMode(1)
+plugin:onSetDimensions()
 for _, label in ipairs({
     "init", "onShow", "addToMainMenu", "openShelf",
     "tasks.onSuspend", "session.onSuspend", "tasks.onResume", "session.onResume",
     "tasks.onNetworkConnected", "session.onNetworkConnected", "sources.pushDirty",
+    "onSetRotationMode", "onSetDimensions",
 }) do
     Assert.is_true(guard_labels[label] or false, label .. " 经 guard")
 end

@@ -141,7 +141,7 @@ end
 ---@param path string|nil
 function Download:_complete(path, err)
     if not path then
-        pcall(os.remove, self.tmp)
+        if self.tmp then os.remove(self.tmp) end
     end
     Queue:release(self)
     Queue:pump()
@@ -219,7 +219,7 @@ function Download:cancel()
     if self.running and self.request then
         self.request:cancel()
     end
-    pcall(os.remove, self.tmp)
+    if self.tmp then os.remove(self.tmp) end
     Queue:release(self)
     Queue:pump()
 end

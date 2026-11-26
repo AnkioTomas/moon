@@ -22,11 +22,16 @@ local function locked()
 end
 
 --- 记住当前（或指定）旋转，立刻落盘，杀进程也不丢。
+--- 三个键都已是这个值就不写：一次转屏会经事件和 follow 进来两次，flush 是整文件序列化 + fsync。
 ---@param mode number|nil
 function Rotation.remember(mode)
     if locked() then return end
     if mode == nil then mode = Screen:getRotationMode() end
     if type(mode) ~= "number" then return end
+    if G_reader_settings:readSetting(FM_KEY) == mode and G_reader_settings:readSetting(CRE_KEY) == mode
+        and G_reader_settings:readSetting(KOPT_KEY) == mode then
+        return
+    end
     G_reader_settings:saveSetting(FM_KEY, mode)
     G_reader_settings:saveSetting(CRE_KEY, mode)
     G_reader_settings:saveSetting(KOPT_KEY, mode)

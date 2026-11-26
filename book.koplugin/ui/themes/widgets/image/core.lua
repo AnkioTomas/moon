@@ -256,6 +256,8 @@ local YIELD_S = 0.1
 
 local wait = {}
 local pumping = false
+-- 调度入口：回调（on_ready 写库、锁屏写 PNG）抛错不能带崩 KOReader。
+local tick
 
 --- 按目标像素数和文件体积判断图片能否立即解码。
 ---@param path string 图片或书籍的本地文件路径
@@ -284,11 +286,12 @@ local function pump()
         box:_settle()
         if wait[1] and Perf.now() - started >= BUDGET_MS then
             pumping = true
-            UIManager:scheduleIn(YIELD_S, pump)
+            UIManager:scheduleIn(YIELD_S, tick)
             return
         end
     end
 end
+tick = require("ui.guard").wrap("image pump", pump)
 
 --- 将图片解码加入队列，尚未调度时安排下一个 UI tick。
 ---@param box table 持有图片状态与取消句柄的占位容器
@@ -299,7 +302,7 @@ local function enqueue(box, path)
         return
     end
     pumping = true
-    UIManager:nextTick(pump)
+    UIManager:nextTick(tick)
 end
 
 --- 图片已换进占位后请求局部刷新。没上过屏、或已不在显示中的控件树里（关窗 / 翻页换掉）

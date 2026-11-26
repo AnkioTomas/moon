@@ -160,7 +160,7 @@ do
         if mode == "wb" and path:sub(1, #paths.patches) == paths.patches then
             return nil, "patches dir denied"
         end
-        if mode == "wb" and path == paths.target .. ".tmp" then
+        if mode == "wb" and path == paths.target .. ".part" then
             target_writes = target_writes + 1
             if target_writes > 1 then return nil, "target denied" end
         end

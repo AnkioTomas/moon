@@ -93,7 +93,7 @@ end
 package.preload["utils.paths"] = function()
     return {
         fontsDir = function() return "/tmp/fonts" end,
-        ensureFonts = function() end,
+        ensureDir = function() end,
         slugFor = function(v) return v end,
     }
 end
@@ -159,6 +159,7 @@ end
 for _, name in ipairs({ "ui.fonts", "ui.fonts.reader" }) do
     package.loaded[name] = nil
 end
+_G.G_reader_settings = { has = function() return false end, readSetting = function() end }
 local Fonts = require("ui.fonts")
 local FontReader = require("ui.fonts.reader")
 
@@ -354,7 +355,7 @@ Fonts2.applyCurrent()
 Assert.eq(Font2.fontmap.cfont, "NotoSans-Regular.ttf", "污染的 fontmap 被 SAFE_UI 覆盖")
 Assert.eq(Font2.fontmap.smallinfofont, "NotoSans-Regular.ttf")
 Assert.is_true(deleted_fontmap, "清掉持久化 fontmap，避免下次 reader.lua 再灌入")
-_G.G_reader_settings = nil
+_G.G_reader_settings = { has = function() return false end, readSetting = function() end }
 os.remove = function(path) files[path] = nil return true end
 Fonts2.applyCurrent() -- 仍无用户字体
 os.remove = real_os_remove

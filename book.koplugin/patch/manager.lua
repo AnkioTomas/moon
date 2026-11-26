@@ -12,6 +12,8 @@
 @module koplugin.book.patch.manager
 --]]
 
+local Fs = require("utils.fs")
+
 local Manager = {}
 
 local _install_dir
@@ -30,58 +32,20 @@ local function paths()
     return require("utils.paths")
 end
 
----@param path string
----@return string|nil content
----@return string|nil err
-local function readFile(path)
-    local fh, err = io.open(path, "rb")
-    if not fh then return nil, err or ("cannot open " .. path) end
-    local content = fh:read("*a")
-    fh:close()
-    return content
-end
-
---- 写临时文件后 rename，避免半写留下损坏文件。
+--- 父目录可能还没建（备份目录按 f.path 分层）。
 ---@param path string
 ---@param content string
 ---@return boolean|nil ok
 ---@return string|nil err
 local function writeFile(path, content)
-    local dir = path:match("(.+)/[^/]+$")
-    if dir then paths().ensureDir(dir) end
-    local tmp = path .. ".tmp"
-    local fh, err = io.open(tmp, "wb")
-    if not fh then return nil, err or ("cannot open " .. tmp) end
-    local ok, werr = fh:write(content)
-    -- close 也要判：写入走缓冲，磁盘满 / 断电前的 flush 失败只在 close 时报出来。
-    -- 不判就会把半截文件 rename 成正式补丁，KOReader 下次启动直接加载坏文件。
-    local cok, cerr = fh:close()
-    if not ok or not cok then
-        os.remove(tmp)
-        return nil, werr or cerr or "write failed"
-    end
-    local rok, rerr = os.rename(tmp, path)
-    if not rok then
-        os.remove(tmp)
-        return nil, rerr
-    end
-    return true
+    paths().ensureDir(path:match("(.+)/[^/]+$"))
+    return Fs.write(path, content)
 end
 
 ---@param path string
 ---@return boolean
 local function fileExists(path)
     return lfs().attributes(path, "mode") == "file"
-end
-
----@param src string
----@param dst string
----@return boolean|nil ok
----@return string|nil err
-local function copyFile(src, dst)
-    local content, err = readFile(src)
-    if content == nil then return nil, err end
-    return writeFile(dst, content)
 end
 
 --- 覆盖默认路径，仅供测试注入临时目录隔离副作用；生产环境不调用。
@@ -169,9 +133,9 @@ function Manager.install(dir)
     local changed = false
     for _idx, f in ipairs(def.files) do
         local path = installDir() .. "/" .. f.path
-        local content, rerr = readFile(path)
+        local content = Fs.read(path)
         if content == nil then
-            return { ok = false, err = "cannot read " .. path .. ": " .. tostring(rerr) }
+            return { ok = false, err = "cannot read " .. path }
         end
         local needs = not content:find(f.sentinel, 1, true)
         if needs then
@@ -189,7 +153,7 @@ function Manager.install(dir)
             return { ok = false, err = "missing patch payload: " .. dir .. "/" .. name }
         end
         -- 只看存在会把旧负载冻死：源文件改过也永远不重拷。
-        if readFile(src) ~= readFile(patchesDir() .. "/" .. name) then
+        if Fs.read(src) ~= Fs.read(patchesDir() .. "/" .. name) then
             changed = true
         end
     end
@@ -224,7 +188,10 @@ function Manager.install(dir)
     end
 
     for _idx, name in ipairs(def.patches) do
-        local ok, cerr = copyFile(dir .. "/" .. name, patchesDir() .. "/" .. name)
+        local src = dir .. "/" .. name
+        local content = Fs.read(src)
+        local ok, cerr = false, "cannot read " .. src
+        if content then ok, cerr = writeFile(patchesDir() .. "/" .. name, content) end
         if not ok then
             return { ok = false, err = "copy failed: " .. tostring(cerr)
                 .. Manager._rollbackInstall(def, targets) }
@@ -242,7 +209,7 @@ function Manager._rollbackInstall(def, targets)
     local failed = {}
     for _idx, t in ipairs(targets) do
         if t.needs then
-            local backup = readFile(backupDir(def.name) .. "/" .. t.f.path)
+            local backup = Fs.read(backupDir(def.name) .. "/" .. t.f.path)
             local ok, werr = backup ~= nil, "backup missing"
             if ok then ok, werr = writeFile(t.path, backup) end
             if not ok then failed[#failed + 1] = t.f.path .. " (" .. tostring(werr) .. ")" end
@@ -280,14 +247,14 @@ function Manager.restore(dir)
     local bdir = backupDir(def.name)
     for _idx, f in ipairs(def.files) do
         local path = installDir() .. "/" .. f.path
-        local content, rerr = readFile(path)
+        local content = Fs.read(path)
         if content == nil then
-            return { ok = false, err = "cannot read " .. path .. ": " .. tostring(rerr) }
+            return { ok = false, err = "cannot read " .. path }
         end
         if content:find(f.sentinel, 1, true) then
             -- 备份是整文件基线。没有备份时，插入段还和定义逐字节一致就能摘掉，
             -- 否则关掉开关会永远失败（.moon/backups 被清掉、或文件早已打过补丁再装一次）。
-            local restored = readFile(bdir .. "/" .. f.path) or withoutInserted(content, f)
+            local restored = Fs.read(bdir .. "/" .. f.path) or withoutInserted(content, f)
             if restored == nil then
                 return { ok = false, err = "no backup for " .. path }
             end
@@ -312,7 +279,7 @@ function Manager.isApplied(dir)
     local def = Manager.loadDefinition(dir)
     if not def then return false end
     for _idx, f in ipairs(def.files) do
-        local content = readFile(installDir() .. "/" .. f.path)
+        local content = Fs.read(installDir() .. "/" .. f.path)
         if content == nil or not content:find(f.sentinel, 1, true) then
             return false
         end

@@ -71,12 +71,7 @@ function Mem.startupMode()
     if os.getenv("STOP_FRAMEWORK") == "yes" then
         return "no-framework"
     end
-    local ok, Device = pcall(require, "device")
-    if ok and type(Device) == "table" then
-        local ok_k, is_kindle = pcall(function() return Device:isKindle() end)
-        if ok_k and is_kindle then return "framework" end
-    end
-    return "not-applicable"
+    return require("device"):isKindle() and "framework" or "not-applicable"
 end
 
 --- 以 no-framework 重启能否腾出 Kindle 系统界面占用的内存。

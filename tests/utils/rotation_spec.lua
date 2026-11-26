@@ -38,6 +38,12 @@ do
     Assert.eq(saved.copt_rotation_mode, 2)
     Assert.eq(saved.kopt_rotation_mode, 2)
     Assert.eq(flushed, 1)
+    Rotation.remember(2)
+    Assert.eq(flushed, 1, "三键已是这个方向：不再 flush")
+    saved.copt_rotation_mode = 0
+    Rotation.remember(2)
+    Assert.eq(saved.copt_rotation_mode, 2, "有一个键不同就整组重写")
+    Assert.eq(flushed, 2)
 end
 
 -- 省略参数时用当前屏幕方向

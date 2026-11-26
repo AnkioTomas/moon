@@ -17,7 +17,6 @@ local Paths = require("utils.paths")
 local Job = require("workers.job")
 local Text = require("utils.text")
 local Fonts = require("ui.fonts")
-local Mem = require("utils.mem")
 local Sfnt = require("ui.fonts.sfnt")
 local _ = require("gettext")
 
@@ -355,19 +354,6 @@ local function installDownloadedFont(dl_path, dest)
     return nil
 end
 
---- UI 线程：内存不够则记日志、弹窗（Kindle 可提供 no-framework 重启），再回调失败。
-local function refuseMemory(item, dest, what, detail, cb)
-    logger.warn("book.font skipped", what, item.id, dest,
-        "need=" .. tostring(Mem.mb(detail.needed) or "?") .. "MB",
-        "avail=" .. tostring(Mem.mb(detail.available) or "?") .. "MB")
-    logger.flushSync()
-    Mem.promptInsufficient({
-        what = what, needed = detail.needed, available = detail.available,
-        id = item.id, dest = dest,
-    })
-    cb(nil, _("内存不足"))
-end
-
 --- 下载在线字体到本地用户字体目录（$DATA/fonts/<filename>）。
 --- 成功回调 cb(true, filename)；失败回调 cb(nil, err)。
 ---@param item MoonFontItem
@@ -382,11 +368,7 @@ function Catalog.downloadToUserAsync(item, on_progress, cb)
         cb(nil, _("无效字体项"))
         return noop
     end
-    if type(Paths.ensureDir) == "function" then
-        Paths.ensureDir(Fonts.settingsFontsDir())
-    else
-        require("libs/libkoreader-lfs").mkdir(Fonts.settingsFontsDir())
-    end
+    Paths.ensureDir(Fonts.settingsFontsDir())
     local dl_path = dest .. ".dl"
     local cancelled = false
     local install_job
@@ -433,72 +415,6 @@ function Catalog.downloadToUserAsync(item, on_progress, cb)
         download_job.cancel()
         if install_job then install_job:cancel() end
     end }
-end
-
---- 兼容旧调用：确保在线字体已落到本地用户字体目录（含旧版 .woff 迁移）。
----@param item MoonFontItem
----@param on_progress fun(bytes: number)|nil
----@param cb fun(ok: boolean|nil, err: string|nil)
----@return { cancel: fun() }
-function Catalog.ensureInstalledAsync(item, on_progress, cb)
-    local noop = { cancel = function() end }
-    if not isOnlineKind(item.kind) then
-        cb(true)
-        return noop
-    end
-    local filename = Catalog.targetFilename(item)
-    local dest = filename and Fonts.userFontPath(filename)
-    if not dest then
-        cb(nil, _("无效字体项"))
-        return noop
-    end
-    local installed = Fonts.isFile(dest) and dest or Fonts.downloadedPath(item.id)
-    if installed then
-        local cancelled = false
-        local function done(err)
-            if cancelled then return end
-            if err then
-                logger.warn("book.font prepare failed", item.id, "src=" .. installed, "dest=" .. dest, err)
-                logger.flushSync()
-                cb(nil, _("应用字体失败"))
-            else
-                Catalog.invalidateLocalScan()
-                cb(true, filename)
-            end
-        end
-        if installed:match("%.woff$") then
-            local src = io.open(installed, "rb")
-            local src_size = src and src:seek("end")
-            if src then src:close() end
-            local affordable, _mem_err, detail = Mem.canAfford(Mem.estimateWoffToSfnt(src_size))
-            if not affordable then
-                return refuseMemory(item, dest, _("字体转换"), detail, cb)
-            end
-        end
-        if type(Paths.ensureDir) == "function" then
-            Paths.ensureDir(Fonts.settingsFontsDir())
-        else
-            require("libs/libkoreader-lfs").mkdir(Fonts.settingsFontsDir())
-        end
-        local job = Job.run(function()
-            if installed:match("%.woff$") then
-                local ok, err = require("ui.fonts.woff").toSfnt(installed, dest)
-                if not ok then return err end
-                os.remove(installed)
-            elseif installed ~= dest then
-                if not os.rename(installed, dest) then
-                    return "rename failed"
-                end
-            end
-            local _changed, err = Sfnt.ensureSpace(dest)
-            return err
-        end, { name = "font.prepare", kind = "medium", on_done = done, on_failed = done })
-        return { cancel = function()
-            cancelled = true
-            job:cancel()
-        end }
-    end
-    return Catalog.downloadToUserAsync(item, on_progress, cb)
 end
 
 return Catalog

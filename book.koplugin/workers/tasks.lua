@@ -45,6 +45,7 @@ sync / online / ai / convert 不拦。只剩 waiting 时撤回。未结束任务
 local Guard = require("ui.guard")
 local logger = require("utils.log")
 local Awake = require("utils.awake")
+local External = require("utils.external")
 
 local Tasks = {}
 
@@ -106,7 +107,8 @@ local function syncAwake()
         local long = task.kind == "cache" or task.kind == "download"
         local running = (task.kind == "ai" or task.kind == "convert" or task.kind == "sync") and task.state == "running"
         if (long and task.state ~= "waiting") or running then
-            if not task.hold or task.hold() then
+            -- syncAwake 跑在 flushChanged 等调度回调里，hold 抛错会带崩 KOReader；抛错按「不撑」处理。
+            if not task.hold or External.try("task hold", task.hold) then
                 busy = true
                 break
             end

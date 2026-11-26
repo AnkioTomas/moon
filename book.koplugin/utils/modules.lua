@@ -78,13 +78,15 @@ function Modules.install(root)
     -- `return require(x)` 尾调用会抹掉发起方栈帧，认不出时退回标准 require（与 loader 同一约定）。
     local real_require = require
     _G.require = function(name)
+        -- 已加载且没被别人顶掉：结果与标准 require 相同，省掉每次的 gsub + debug.getinfo。
+        local cached = ours[name]
+        if cached ~= nil and package.loaded[name] == cached then return cached end
         local path = index[name:gsub("%.", "/")]
         if not path then return real_require(name) end
         local caller = debug.getinfo(2, "S")
         if not (caller and caller.source:sub(1, #mine) == mine) then
             return real_require(name)
         end
-        local cached = ours[name]
         if cached ~= nil then
             package.loaded[name] = cached
             return cached

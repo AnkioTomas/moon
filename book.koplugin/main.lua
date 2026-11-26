@@ -146,24 +146,23 @@ function BookPlugin:onNetworkConnected()
 end
 
 --- 转屏：记下全局方向（桌面 / 阅读共用），下次进桌面或开书接着用。
-function BookPlugin:onSetRotationMode(mode)
+BookPlugin.onSetRotationMode = Guard.wrap("onSetRotationMode", function(_self, mode)
     require("utils.rotation").remember(mode)
-end
+end)
 
 --- 转屏后尺寸变化：KOReader 的 IterateRotation 等只把 SetDimensions 送给 FileManager / ReaderUI，
 --- 桌面和弹窗是独立窗口收不到，这里转给窗口栈上要重排的窗口。
-function BookPlugin:onSetDimensions()
+BookPlugin.onSetDimensions = Guard.wrap("onSetDimensions", function()
     for _idx, win in ipairs(require("ui/uimanager")._window_stack) do
         local widget = win.widget
         if widget.relayout or widget.name == "book_desktop" then widget:onScreenResize() end
     end
-end
+end)
 
 --- 退出：停更新任务、远程服务；桌面在窗口栈上时自行收 Exit（销毁并关窗），这里再兜底清残留。
 function BookPlugin:onExit()
     logger.info("book plugin exit")
     require("ui.exit_windows").exiting = true
-    Guard.call("page_diag.uninstall", require("reader.page_diag").uninstall)
     Features.emit("onExit", self)
     Guard.call("exit.closeWindows", require("ui.exit_windows").close)
     logger.info("book plugin exit done")

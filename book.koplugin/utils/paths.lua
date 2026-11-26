@@ -325,11 +325,6 @@ function P.patchBackupDir(feature)
     return P.root() .. "/backups/patches/" .. feature
 end
 
---- 保证 fonts 目录存在
-function P.ensureFonts()
-    P.ensureDir(P.fontsDir())
-end
-
 --- 只保证共享缓存根存在；清理流程不能凭空猜测活跃 source_id。
 function P.ensureCacheRoot()
     P.ensureDir(P.cacheDir())
