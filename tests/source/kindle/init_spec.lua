@@ -263,6 +263,11 @@ package.loaded["workers.tasks"], package.loaded["workers.ui.task_dialog"] = nil,
 
 -- 编辑元信息：能力开启，保存后标脏防止被下一轮 cc.db 快照覆盖
 Assert.is_true(source:capabilities().edit)
+Assert.is_nil(source.putProgressAsync)
+Assert.is_nil(source.pushNotesAsync)
+Assert.is_nil(source.pushStatsAsync)
+Assert.eq(type(source.captureProgress), "function")
+Assert.eq(type(source.refinePosition), "function")
 source:onEvent("book_meta_changed", { identity = { source_id = "kindle", stable_id = "u1" } })
 Assert.eq(dirtied[2], "u1")
 Assert.is_true(dirtied[3])

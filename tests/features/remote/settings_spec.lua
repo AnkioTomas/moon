@@ -14,6 +14,7 @@ local store = {
     opds = {},
     copymanga = {},
     ["local"] = { path = "/mnt/books", webdav_url = "", webdav_path = "", webdav_username = "" },
+    moon_sync = {},
 }
 local invalidated = 0
 local reloads = 0
@@ -266,6 +267,11 @@ do
 
     result = SettingsApi.apply({ ["local"] = { webdav_password = SettingsApi.MASK, webdav_path = "" } })
     Assert.eq(cfg.webdav_password, "dav-secret")
+    Assert.eq(cfg.webdav_path, "")
+    Assert.eq(invalidated, 2)
+
+    result = SettingsApi.apply({ ["local"] = { webdav_path = "Apps/Books" } })
+    Assert.is_false(result.changed, "默认目录和空目录是同一条路径")
     Assert.eq(cfg.webdav_path, "")
     Assert.eq(invalidated, 2)
 

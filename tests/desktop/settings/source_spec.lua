@@ -125,7 +125,9 @@ Assert.eq(set_active, "moon")
 Assert.is_false(source_cfg.library_mixed)
 
 package.loaded["desktop.pages.setting.overlay"] = {
-    push = function(d, spec) d.settings_overlay = { spec = spec } end,
+    push = function(d, spec)
+        d.settings_overlay = { spec = spec, updateView = function() end }
+    end,
 }
 local config = src:configSections{
     desktop = desktop,
@@ -209,5 +211,6 @@ for _idx, row in ipairs(with_ext[1].rows) do
 end
 Assert.is_true(found)
 enabled[#enabled] = nil
+enabled_map["ext.demo"] = nil
 
 return true

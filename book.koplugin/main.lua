@@ -85,6 +85,7 @@ local function pushDirty()
         local source = SourceBase.hasDirty(meta.id) and SourceRegistry.resolve(meta.id)
         if source and source:configured() then source:pushDirty() end
     end
+    require("moon_sync").kick()
 end
 
 --- 插件初始化：挂接 KOReader 宿主（菜单 / 开机打开等）与各增强模块。
