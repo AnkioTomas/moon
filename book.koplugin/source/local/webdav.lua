@@ -531,17 +531,15 @@ local function pullProgress(self, run, done)
             require("utils.log").warn("book webdav progress list failed", err)
             return done()
         end
-        local by_key, metadata = {}, {}
+        local by_key = {}
         for _idx, rel in ipairs(run.files) do by_key[sidecarKey(rel)] = rel end
-        for _idx, entry in ipairs(entries) do metadata[entry.name] = true end
         local pending = {}
         for _idx, entry in ipairs(entries) do
             local rel = by_key[entry.name:match("^(.+)%.po$") or ""]
             local pos = rel and ProgressDB.get(SOURCE_ID, remoteStableId(rel))
             if rel and entry.mtime and (not pos or pos.sync_status ~= 0
                 and entry.mtime > (tonumber(pos.updated_at) or 0)) then
-                pending[#pending + 1] = { rel = rel, mtime = entry.mtime,
-                    metadata_present = metadata[entry.name .. ".json"] == true }
+                pending[#pending + 1] = { rel = rel, mtime = entry.mtime }
             end
         end
         eachAsync(pending, function(item, next_item, i)
@@ -549,20 +547,13 @@ local function pullProgress(self, run, done)
             run.active = self:getProgressAsync(remoteStableId(item.rel), function(pos, err)
                 if run.cancelled then return end
                 if pos then
-                    local stable_id = remoteStableId(item.rel)
-                    local local_pos = ProgressDB.get(SOURCE_ID, stable_id)
-                    local RemoteData = require("source.local.remote_data")
-                    -- Keep the local position until the reader can ask which one to use.
-                    if not local_pos or not RemoteData.progressUploadGuardEnabled()
-                        or not RemoteData.isProgressAhead(pos, local_pos) then
-                        pos.updated_at = item.mtime
-                        ProgressDB.upsertRemote(SOURCE_ID, stable_id, pos)
-                    end
+                    pos.updated_at = item.mtime
+                    ProgressDB.upsertRemote(SOURCE_ID, remoteStableId(item.rel), pos)
                 elseif err then
                     require("utils.log").warn("book webdav progress failed", item.rel, err)
                 end
                 next_item()
-            end, { metadata_present = item.metadata_present })
+            end)
         end, done)
     end)
 end
@@ -1138,7 +1129,7 @@ end
 ---   <根>/[分类/]书文件                正文
 ---   <根>/.Moon+/books.sync            书目（zlib 压缩 JSON）；书架成员只以它为准
 ---   <根>/.Moon+/Cover/<文件名>_2.png   封面
----   <根>/.Moon+/Cache/<文件名>.po      进度
+---   <根>/.Moon+/Cache/<文件名>.po      进度（只这一份，不另写 .po.json）
 ---   <根>/.Moon+/Stats/                 阅读统计：index.json 总表 + books/<md5>.json 按书（本插件私有，见 remote_data）
 --- 正文不下载，openWebdavAsync 按需拉到本地书库目录。
 --- 与单本上行同经 serial 排队：桌面同步、推脏、编辑上行不会交错读改写 books.sync。

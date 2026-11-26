@@ -194,6 +194,17 @@ function Source:putProgressAsync(identity, pos, cb)
     return self._client:putProgressAsync(identity.stable_id, pos, cb)
 end
 
+--- 关书：流式书补上静读天下要的章内字符数。没有 WebDAV 时不写这份私有坐标。
+function Source:captureProgress(pos, ui)
+    if not self._client:isWebdav() then return pos end
+    return require("source.local.common").captureProgress(pos, ui)
+end
+
+--- 开书：页码或字符偏移比百分比精确时换成可落地的坐标。
+function Source:refinePosition(pos, ui)
+    return require("source.local.common").refinePosition(pos, ui)
+end
+
 --- 纯本地目录没有远端：统计域直接 skipped；WebDAV 走通用 book.stats。
 function Source:syncStatsAsync(opts, cb)
     if not self._client:isWebdav() then return skipped(cb, "local source") end

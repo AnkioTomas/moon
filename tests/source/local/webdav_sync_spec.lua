@@ -757,10 +757,11 @@ do
     Assert.is_true(scan(client(dav)))
     Assert.eq(progress["webdav://new.epub"].fraction, 0.111)
     Assert.eq(progress["webdav://new.epub"].chapter_idx, 21)
+    Assert.eq(progress["webdav://new.epub"].extra.offset, 4826)
     Assert.eq(progress["webdav://new.epub"].updated_at, 1800000000)
     Assert.eq(dav:count("GET " .. ROOT .. "/.Moon+/Cache/old.epub.po"), 0, "远端不比本地新就不下载")
     Assert.eq(dav:count("GET " .. ROOT .. "/.Moon+/Cache/dirty.epub.po"), 0, "本地脏行不下载会被丢弃的远端进度")
-    Assert.eq(dav:count("GET " .. ROOT .. "/.Moon+/Cache/new.epub.po.json"), 0, "目录里没有精确坐标就不发 404 请求")
+    Assert.eq(dav:count("GET " .. ROOT .. "/.Moon+/Cache/new.epub.po.json"), 0, "进度不读 .po.json")
     Assert.eq(progress["webdav://old.epub"].fraction, 0.5)
     Assert.eq(progress["webdav://dirty.epub"].fraction, 0.9)
     books, progress = {}, {}
@@ -782,8 +783,9 @@ do
         function(v) ok = v end)
     Stubs.flush()
     Assert.is_true(ok)
-    Assert.eq(dav.files[ROOT .. "/.Moon+/Cache/real.epub.po"].data, "1700000123000*4@0#0:45.7%",
-        "边车按 basename 寻址")
+    Assert.eq(dav.files[ROOT .. "/.Moon+/Cache/real.epub.po"].data, "1700000123000*4:45.7%",
+        "没有字符偏移就不写 #0，避免静读天下跳到章首")
+    Assert.is_nil(dav.files[ROOT .. "/.Moon+/Cache/real.epub.po.json"], "进度不另写 .po.json")
 
     c:getProgressAsync("webdav://分类/real.epub", function(p) pos = p end)
     Stubs.flush()
@@ -847,75 +849,7 @@ do
     dav.getAsync = get
 end
 
--- 上传前复查。确认只允许覆盖弹窗中看到的那一版。
-do
-    local RemoteData = require("source.local.remote_data")
-    local enabled = RemoteData.progressUploadGuardEnabled
-    RemoteData.progressUploadGuardEnabled = function() return true end
-    local dav = fakeDav()
-    local c = client(dav)
-    local id = "webdav://guarded.epub"
-    local remote = ROOT .. "/.Moon+/Cache/guarded.epub.po"
-    local seen = "1700000200000*4@0#0:0.9%"
-    local changed = "1700000201000*4@0#0:1.1%"
-    local pos = { updated_at = 1700000202, fraction = 0.0046, locator = "/body/p[1]/text().0" }
-    local function push()
-        local ok, err
-        c:putProgressAsync(id, pos, function(v, e) ok, err = v, e end)
-        Stubs.flush()
-        return ok, err
-    end
-    dav:put(remote, seen)
-    putSync(dav, { { filename = "guarded.epub" } })
-    progress[id] = { fraction = 0.0046, updated_at = 1700000000, sync_status = 1 }
-    Assert.is_true(scan(c))
-    Assert.eq(progress[id].fraction, 0.0046, "书架刷新不能在开书询问前采用远端")
-    Assert.is_nil(push(), "小于一个百分点也不允许自动覆盖")
-    Assert.eq(dav.files[remote].data, seen)
-    pos.extra = { webdav_overwrite_marker = seen }
-    dav:put(remote, changed)
-    Assert.is_nil(push(), "新版本需要重新确认")
-    Assert.eq(dav.files[remote].data, changed)
-    pos.extra.webdav_overwrite_marker = changed
-    local ProgressDB = require("book.progress_db")
-    Assert.is_true(ProgressDB.upsert("local", id, pos))
-    local put_file = dav.putFileAsync
-    function dav:putFileAsync(path, local_path, cb, timeout)
-        if path == remote .. ".json" then return cb(nil, "offline") end
-        return put_file(self, path, local_path, cb, timeout)
-    end
-    local failed, failure = push()
-    Assert.is_nil(failed)
-    Assert.eq(failure, "offline")
-    Assert.eq(dav.files[remote].data, changed)
-    local snapshot = {
-        identity = { source_id = "local", stable_id = id },
-        doc_fraction = pos.fraction,
-        ui = { rolling = { xpointer = pos.locator } },
-    }
-    require("reader.session.progress").save(snapshot, function(saved)
-        Assert.is_true(saved)
-    end)
-    pos = ProgressDB.get("local", id)
-    dav.putFileAsync = put_file
-    Assert.eq(pos.extra and pos.extra.webdav_overwrite_marker, changed, "重新保存保留待重试的确认")
-    Assert.is_true(push())
-    Assert.is_nil(Json.decode(dav.files[remote .. ".json"].data).position.extra)
-    local get = dav.getAsync
-    function dav:getAsync(path, dest, opts, cb)
-        if path == remote then return cb(nil, "offline") end
-        return get(self, path, dest, opts, cb)
-    end
-    local published = dav.files[remote].data
-    local ok, err = push()
-    Assert.is_nil(ok)
-    Assert.eq(err, "offline")
-    Assert.eq(dav.files[remote].data, published)
-    books, progress = {}, {}
-    RemoteData.progressUploadGuardEnabled = enabled
-end
-
---- 精确进度跨设备保留正文坐标与未舍入比例；其它客户端改写 .po 后不能复用旧坐标。
+--- 进度跨设备只走 .po：字符偏移和百分比；旁边的 .po.json 不读不写。
 do
     local dav = fakeDav()
     local a, b = client(dav), client(dav)
@@ -924,87 +858,53 @@ do
     local sent = {
         updated_at = 1700000200, chapter_idx = 4, fraction = 0.456789321,
         locator = "/body/DocFragment[4]/body/p[15]/text().12", page = 123, total_pages = 270,
+        extra = { chapter_idx = 4, volume = 0, offset = 4826, at_fraction = 0.456789321 },
     }
     local ok, err, pos
     a:putProgressAsync(id, sent, function(v, e) ok, err = v, e end)
     Stubs.flush()
     Assert.is_true(ok)
-    Assert.eq(dav.files[remote].data, "1700000200000*4@0#0:45.7%")
+    Assert.eq(dav.files[remote].data, "1700000200000*4@0#4826:45.7%")
+    Assert.is_nil(dav.files[remote .. ".json"])
     b:getProgressAsync(id, function(v, e) pos, err = v, e end)
     Stubs.flush()
     Assert.is_nil(err)
-    Assert.eq(pos.locator, sent.locator)
-    Assert.eq(pos.page, 123)
-    Assert.eq(pos.fraction, sent.fraction)
+    Assert.is_nil(pos.locator)
+    Assert.is_nil(pos.page)
+    Assert.eq(pos.chapter_idx, 4)
+    Assert.eq(pos.extra.offset, 4826)
+    Assert.eq(pos.fraction, 0.457)
 
     putSync(dav, { { filename = "分类/precise.epub" } })
     Assert.is_true(scan(b))
-    Assert.eq(progress[id].locator, sent.locator, "整库同步不能只解析粗粒度 .po")
-    Assert.eq(progress[id].fraction, sent.fraction)
+    Assert.eq(progress[id].extra.offset, 4826, "整库同步读 .po 里的字符偏移")
+    Assert.eq(progress[id].fraction, 0.457)
+    Assert.is_nil(progress[id].locator)
     books, progress = {}, {}
 
     b:getProgressAsync("webdav://其它分类/precise.epub", function(v) pos = v end)
     Stubs.flush()
-    Assert.is_nil(pos.locator, "同名不同路径不能串用正文坐标")
+    Assert.eq(pos.extra.offset, 4826, "静读天下按文件名共用 .po")
     Assert.eq(pos.fraction, 0.457)
 
-    dav:put(remote, "1700000300000*5@0#0:62.1%")
-    b:getProgressAsync(id, function(v) pos = v end)
-    Stubs.flush()
-    Assert.is_nil(pos.locator)
-    Assert.eq(pos.fraction, 0.621)
-    Assert.eq(pos.chapter_idx, 5)
-
+    dav:put(remote, "1700000300000*5@0#120:62.1%")
     dav:put(remote .. ".json", "{broken")
     b:getProgressAsync(id, function(v, e) pos, err = v, e end)
     Stubs.flush()
-    Assert.is_nil(pos)
-    Assert.eq(err, "进度文件损坏")
+    Assert.is_nil(err)
+    Assert.eq(pos.fraction, 0.621)
+    Assert.eq(pos.chapter_idx, 5)
+    Assert.eq(pos.extra.offset, 120)
+    Assert.eq(dav:count("GET " .. remote .. ".json"), 0, "损坏的 .po.json 也不读取")
 
     local get = dav.getAsync
-    function dav:getAsync(path, dest, opts, cb)
-        if path == remote .. ".json" then cb(nil, "metadata unavailable"); return end
-        return get(self, path, dest, opts, cb)
-    end
-    b:getProgressAsync(id, function(v, e) pos, err = v, e end)
-    Stubs.flush()
-    Assert.is_nil(pos)
-    Assert.eq(err, "metadata unavailable", "精确坐标下载失败不能伪装成功")
-    dav.getAsync = get
-
-    local put = dav.putFileAsync
-    function dav:putFileAsync(path, local_path, cb)
-        if path == remote .. ".json" then cb(nil, "metadata upload failed"); return end
-        return put(self, path, local_path, cb)
-    end
-    a:putProgressAsync(id, sent, function(v, e) ok, err = v, e end)
-    Stubs.flush()
-    Assert.is_nil(ok)
-    Assert.eq(err, "metadata upload failed", "精确坐标失败必须保留本地脏行")
-    Assert.eq(dav.files[remote].data, "1700000300000*5@0#0:62.1%", "坐标未写好不能发布新 .po")
-    dav.putFileAsync = put
-
     local pending, cancelled, called
-    function dav:getAsync(path, dest, opts, cb)
-        if path ~= remote .. ".json" then return get(self, path, dest, opts, cb) end
-        pending = cb
-        return { cancel = function() cancelled = true end }
-    end
-    local handle = b:getProgressAsync(id, function() called = true end)
-    Stubs.flush()
-    handle:cancel()
-    Assert.is_true(cancelled)
-    pending(nil, "cancelled")
-    Assert.is_nil(called)
-    dav.getAsync = get
-
-    cancelled, called = nil, nil
     function dav:getAsync(path, dest, opts, cb)
         if path ~= remote then return get(self, path, dest, opts, cb) end
         pending = cb
         return { cancel = function() cancelled = true end }
     end
-    handle = b:getProgressAsync(id, function() called = true end)
+    local handle = b:getProgressAsync(id, function() called = true end)
     handle:cancel()
     Assert.is_true(cancelled, "首次异步请求也必须持有取消句柄")
     pending(nil, "cancelled")
@@ -1012,6 +912,7 @@ do
     dav.getAsync = get
 
     cancelled, called = nil, nil
+    local put = dav.putFileAsync
     function dav:putFileAsync(path, local_path, cb)
         if path ~= remote then return put(self, path, local_path, cb) end
         pending = cb
@@ -1020,7 +921,7 @@ do
     handle = a:putProgressAsync(id, sent, function() called = true end)
     Stubs.flush()
     handle:cancel()
-    Assert.is_true(cancelled, "发布阶段取消必须取消当前请求，而不是已完成的目录请求")
+    Assert.is_true(cancelled)
     pending(true)
     Assert.is_nil(called)
 end

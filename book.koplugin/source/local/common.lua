@@ -166,24 +166,179 @@ local function field(v)
     return v ~= "" and v or nil
 end
 
---- Moon+ Reader 位置文件：`毫秒时间戳*章@分卷#字符偏移:全书百分比%`，如 `1703297605115*21@0#4826:11.1%`。
+--- 一位小数的百分比只给静读天下显示。它跳转看的是 `#` 后面的章内字符数；写成 0 会把书拉回章首。
+--- 没有真实偏移时省略 `@分卷#偏移`。固定版式没有字符偏移，页码放在章号那个位置，和百分比一起写。
+local PAGED_EXT = { pdf = true, djvu = true, cbz = true, cbt = true, xps = true }
+
+local function utf8len(text)
+    local count = 0
+    for _ch in text:gmatch(Text.UTF8_CHAR) do count = count + 1 end
+    return count
+end
+
 local function encodeProgress(pos)
     local ts = tonumber(pos.updated_at) or os.time()
-    return string.format("%d*%d@0#0:%.1f%%", ts * 1000,
-        tonumber(pos.chapter_idx) or 0, (tonumber(pos.fraction) or 0) * 100)
+    local pct = (tonumber(pos.fraction) or 0) * 100
+    local chapter = tonumber(pos.chapter_idx) or 0
+    local extra = type(pos.extra) == "table" and pos.extra or nil
+    local offset = extra and tonumber(extra.offset)
+    local anchored = extra and tonumber(extra.at_fraction)
+    if offset and offset >= 0 and anchored and math.abs((tonumber(pos.fraction) or 0) - anchored) > 0.001 then
+        offset = nil
+    end
+    local volume = extra and tonumber(extra.volume) or 0
+    if not offset and chapter == 0 then
+        local page = tonumber(pos.page)
+        if page and page >= 1 then
+            chapter = math.floor(page)
+            offset = 0
+            volume = 0
+        end
+    end
+    if not offset then
+        return string.format("%d*%d:%.1f%%", ts * 1000, chapter, pct)
+    end
+    return string.format("%d*%d@%d#%d:%.1f%%", ts * 1000, chapter, volume, math.floor(offset), pct)
 end
 
 --- 兼容旧版写出的 `{秒}*...` 花括号格式与省略 `@分卷#偏移` 的短格式；时间戳统一换算成秒。
+--- 完整格式把字符偏移放进 extra，关书时同一章会原样保留（见阅读进度保存）。
 local function decodeProgress(raw)
     if type(raw) ~= "string" then return nil end
-    local ts, chapter, pct = raw:match("^%s*{?%s*(%d+)%s*}?%*(%-?%d+)[^:]*:([%d%.]+)%%")
+    local ts, chapter, volume, offset, pct = raw:match(
+        "^%s*{?%s*(%d+)%s*}?%s*%*%s*(%-?%d+)%s*@%s*(%-?%d+)%s*#%s*(%-?%d+)%s*:%s*([%d%.]+)%s*%%")
+    if not ts then
+        ts, chapter, pct = raw:match("^%s*{?%s*(%d+)%s*}?%s*%*%s*(%-?%d+)%s*:%s*([%d%.]+)%s*%%")
+    end
     if not ts then return nil end
     ts = tonumber(ts)
     if ts > 1e12 then ts = math.floor(ts / 1000) end
-    return {
-        updated_at = ts, chapter_idx = tonumber(chapter),
-        fraction = math.min(100, tonumber(pct) or 0) / 100,
-    }
+    local fraction = math.min(100, tonumber(pct) or 0) / 100
+    local pos = { updated_at = ts, chapter_idx = tonumber(chapter), fraction = fraction }
+    if offset then
+        pos.extra = {
+            chapter_idx = pos.chapter_idx,
+            volume = tonumber(volume) or 0,
+            offset = tonumber(offset) or 0,
+            at_fraction = fraction,
+        }
+    end
+    return pos
+end
+
+--- 关书时把当前章内字符数写进 extra。静读天下认这个数，不认百分比。
+---@param pos ProgressPosition
+---@param ui table|nil
+---@return ProgressPosition
+local function captureProgress(pos, ui)
+    local doc = ui and ui.document
+    local rolling = ui and ui.rolling
+    local xp = rolling and rolling.xpointer
+    if not doc or type(xp) ~= "string" or xp == "" then return pos end
+    if type(doc.getToc) ~= "function" or type(doc.getTextFromXPointers) ~= "function" then return pos end
+    local ok_toc, toc = pcall(doc.getToc, doc)
+    local idx = tonumber(pos.chapter_idx)
+    local item = ok_toc and idx and toc and toc[idx]
+    local start_xp = item and item.xpointer
+    if type(start_xp) ~= "string" or start_xp == "" then return pos end
+    local ok_text, text = pcall(doc.getTextFromXPointers, doc, start_xp, xp)
+    if not ok_text or type(text) ~= "string" then return pos end
+    local extra = type(pos.extra) == "table" and pos.extra or {}
+    extra.chapter_idx = idx
+    extra.volume = tonumber(extra.volume) or 0
+    extra.offset = utf8len(text)
+    extra.at_fraction = tonumber(pos.fraction) or 0
+    pos.extra = extra
+    return pos
+end
+
+local function copyPos(pos)
+    local out = {}
+    for key, value in pairs(pos) do out[key] = value end
+    return out
+end
+
+--- 固定版式：静读天下把页码放在 `*` 后面。页码落在这本书的页数里就用页码，否则留下百分比。
+local function refinePaged(pos, doc)
+    local ext = bookExt(pos.stable_id or "")
+    if not ext or not PAGED_EXT[ext] or type(doc.getPageCount) ~= "function" then return pos end
+    local ok, total = pcall(doc.getPageCount, doc)
+    total = ok and tonumber(total) or nil
+    if not total or total < 1 then return pos end
+    local page = tonumber(pos.page)
+    if page and tonumber(pos.total_pages) == total and page >= 1 and page <= total then return pos end
+    local moon_page = tonumber(pos.chapter_idx)
+    if not moon_page or moon_page < 1 or moon_page > total then return pos end
+    local refined = copyPos(pos)
+    refined.page = math.floor(moon_page)
+    refined.total_pages = total
+    return refined
+end
+
+--- 流式书：静读天下的位置是章号 + 章内字符数。百分比是显示值，不参与落点。
+--- 字符数超出本章能数到的文本时停在章末。这一章的文本数不到，才把原位置交回上层。
+local function refineFlow(pos, doc)
+    local extra = type(pos.extra) == "table" and pos.extra or nil
+    local offset = extra and tonumber(extra.offset)
+    if not offset or offset < 0 then return pos end
+    if type(doc.getToc) ~= "function" or type(doc.getPageCount) ~= "function"
+        or type(doc.getPageXPointer) ~= "function" or type(doc.getTextFromXPointers) ~= "function" then
+        return pos
+    end
+    local ok_toc, toc = pcall(doc.getToc, doc)
+    local idx = tonumber(pos.chapter_idx)
+    local item = ok_toc and idx and toc and toc[idx]
+    local start_xp = item and item.xpointer
+    local start_page = item and tonumber(item.page)
+    if type(start_xp) ~= "string" or not start_page then return pos end
+    local ok_total, total = pcall(doc.getPageCount, doc)
+    total = ok_total and tonumber(total) or nil
+    if not total or total < 1 then return pos end
+    local next_item = toc[idx + 1]
+    local end_page = next_item and tonumber(next_item.page) or (total + 1)
+    local function charsUntil(page)
+        local ok_xp, xp = pcall(doc.getPageXPointer, doc, page)
+        if not ok_xp or type(xp) ~= "string" then return nil end
+        local ok_text, text = pcall(doc.getTextFromXPointers, doc, start_xp, xp)
+        if not ok_text or type(text) ~= "string" then return nil end
+        return utf8len(text)
+    end
+    local last = math.max(start_page, end_page - 1)
+    local end_count = charsUntil(last)
+    if not end_count then return pos end
+    local found = last
+    if offset <= end_count then
+        local lo, hi = start_page, last
+        found = start_page
+        while lo <= hi do
+            local mid = math.floor((lo + hi) / 2)
+            local count = charsUntil(mid)
+            if not count then return pos end
+            if count <= offset then
+                found = mid
+                lo = mid + 1
+            else
+                hi = mid - 1
+            end
+        end
+    end
+    local ok_xp, xp = pcall(doc.getPageXPointer, doc, found)
+    if not ok_xp or type(xp) ~= "string" or xp == "" then return pos end
+    local refined = copyPos(pos)
+    refined.locator = xp
+    return refined
+end
+
+--- 开书落地前选更精确的坐标。已有 XPointer 就用它。
+---@param pos ProgressPosition
+---@param ui table|nil
+---@return ProgressPosition
+local function refinePosition(pos, ui)
+    if type(pos) ~= "table" or (type(pos.locator) == "string" and pos.locator ~= "") then return pos end
+    local doc = ui and ui.document
+    if not doc then return pos end
+    if ui.rolling then return refineFlow(pos, doc) end
+    return refinePaged(pos, doc)
 end
 
 
@@ -468,6 +623,8 @@ return {
     field = field,
     encodeProgress = encodeProgress,
     decodeProgress = decodeProgress,
+    captureProgress = captureProgress,
+    refinePosition = refinePosition,
     eachAsync = eachAsync,
     coverPath = coverPath,
     moveBookArtifacts = moveBookArtifacts,
