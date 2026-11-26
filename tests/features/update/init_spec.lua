@@ -208,8 +208,8 @@ local notes = check(release("v1.2.4", [[
 https://github.com/AnkioTomas/moon/compare/v1.2.3...v1.2.4
 ]])).notes
 Assert.not_nil(notes)
-Assert.matches(notes, "相对上一版本 v1.2.3")
-Assert.matches(notes, "新功能")
+Assert.matches(notes, "相对上一版本 `v1%.2%.3`")
+Assert.matches(notes, "#### 新功能", "保留 Markdown 交给 md2html 渲染")
 Assert.matches(notes, "%(update%): 显示更新日志")
 Assert.matches(notes, "%(ui%): 修弹窗")
 Assert.is_nil(notes:find("安装：", 1, true))
@@ -268,6 +268,9 @@ Assert.eq(prompt.title, "更新日志")
 Assert.matches(prompt.text, "发现月读 1%.2%.4")
 Assert.matches(prompt.text, "show notes")
 Assert.is_nil(prompt.text:find(":sparkles:", 1, true))
+Assert.matches(prompt.html, "^<p>发现月读 1%.2%.4")
+Assert.matches(prompt.html, "<li>show notes</li>", "更新日志经 md2html 渲染成 HTML")
+Assert.not_nil(prompt.css)
 local function headers(length, mime)
     local values = { ["Content-Length"] = length and tostring(length), ["Content-Type"] = mime }
     return { get = function(_, name) return values[name] end }

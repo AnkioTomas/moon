@@ -66,7 +66,7 @@ function Updater.newer(candidate, installed)
     return installed:find("%-") ~= nil and candidate:find("%-") == nil
 end
 
---- 把 GitHub Release body 收成可读纯文本：优先「更新内容」段，丢掉安装说明与对比链接。
+--- 从 GitHub Release body 截出 Markdown 更新日志：优先「更新内容」段，丢掉安装说明、对比链接与 :emoji: 短码。
 ---@return string|nil
 local function formatNotes(body)
     if type(body) ~= "string" then return nil end
@@ -75,23 +75,7 @@ local function formatNotes(body)
     local section = body:match("###%s*更新内容%s*\n+(.*)$") or body
     section = section:gsub("\n###%s*完整对比[%s%S]*$", "")
     section = section:gsub(":[%w_+-]+:%s*", "")
-    section = section:gsub("`([^`\n]*)`", "%1")
-    local out, blank = {}, false
-    for line in (section .. "\n"):gmatch("(.-)\n") do
-        line = line:gsub("^#+%s*", "")
-        line = line:gsub("%*%*([^*]+)%*%*", "%1")
-        line = Text.rtrim(line)
-        if line == "" then
-            if not blank and #out > 0 then
-                out[#out + 1] = ""
-                blank = true
-            end
-        else
-            out[#out + 1] = line
-            blank = false
-        end
-    end
-    local notes = Text.trim(table.concat(out, "\n"))
+    local notes = Text.trim(section)
     return notes ~= "" and notes or nil
 end
 
@@ -341,10 +325,13 @@ function Updater:prompt(release, ctx, force)
     self._offered_version = release.version
     local text = self.target.text
     local header = text.header(release, force)
+    local Md2Html = require("convert.md2html")
     local dialog
     dialog = require("ui.themes.widgets.text_viewer"):new{
         title = force and not release.available and _("强制更新") or text.title,
         text = release.notes and (header .. "\n\n" .. release.notes) or header,
+        html = "<p>" .. Text.xmlEscape(header) .. "</p>" .. Md2Html.toHtml(release.notes),
+        css = Md2Html.CSS,
         buttons = {
             { text = _("稍后"), callback = function() dialog:close() end },
             {
