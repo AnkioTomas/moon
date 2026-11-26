@@ -115,17 +115,16 @@ local BUILTIN = {
         end,
     },
     {
-        id = "local", name = "本地书库 WebDAV", invalidate = true,
+        id = "local", name = "月读同步（WebDAV）", invalidate = true,
         fields = {
             { key = "webdav_url", label = "WebDAV 地址", type = "url", placeholder = "https://dav.example.com/dav" },
             { key = "webdav_username", label = "用户名" },
             { key = "webdav_password", label = "密码", secret = true },
-            { key = "webdav_path", label = "目录" },
+            { key = "webdav_path", label = "目录", placeholder = "Apps/Books", default = "Apps/Books" },
         },
-        replace = function(changed, save)
-            if changed.webdav_url or changed.webdav_path or changed.webdav_username then
-                return require("source.logout").replaceWebdav(save)
-            end
+        -- 连接在本地源。空目录和 Apps/Books 是同一条路径，只改密码不换库。
+        commit = function(cfg, values)
+            return require("moon_sync").applyRemote(cfg, values)
         end,
     },
 }
@@ -204,6 +203,7 @@ local function snapshotForm(form)
         else
             value = value == nil and "" or tostring(value)
         end
+        if value == "" and field.default then value = field.default end
         values[field.key] = value
         fields[idx] = {
             key = field.key,
