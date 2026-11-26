@@ -566,6 +566,9 @@ local function installDataStorage()
         function DS:getDataDir()
             return dir
         end
+        function DS:getFullDataDir()
+            return dir
+        end
         function DS:getSettingsDir()
             return dir .. "/settings"
         end

@@ -1416,6 +1416,17 @@ do
     Assert.eq(err, "书库目录不能是插件数据目录")
 end
 
+-- ── 换设备：已配置路径在本机失效 ────────────────────
+do
+    reset()
+    Assert.is_false(Client.new({ path = "/books" }):localRootMissing())
+    Assert.is_true(Client.new({ path = "/mnt/us/books" }):localRootMissing())
+    Assert.is_false(Client.new({ path = "" }):localRootMissing(), "空路径算未配置")
+    Assert.is_false(Client.new({ path = "/mnt/us/books" }, {
+        webdav_url = "https://dav.example/books",
+    }):localRootMissing(), "WebDAV 模式不看本地目录")
+end
+
 os.time = real_time
 os.remove = real_remove
 

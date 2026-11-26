@@ -157,29 +157,48 @@ function Setting.subdirs(path)
     return names
 end
 
+--- 目录是否可读且可列子目录。
+---@param path string|nil
+---@return boolean
+function Setting.usableDir(path)
+    local lfs = require("libs/libkoreader-lfs")
+    return type(path) == "string" and path ~= ""
+        and lfs.attributes(path, "mode") == "directory"
+        and Setting.subdirs(path) ~= nil
+end
+
+--- 选目录起点回退：home_dir → 数据目录父路径 → 数据目录。不要无脑落到 /（Android 根常不可读）。
+---@return string|nil
+function Setting.defaultStart()
+    local home = G_reader_settings:readSetting("home_dir")
+    if Setting.usableDir(home) then return home end
+    local ffiUtil = require("ffi/util")
+    local data = require("datastorage"):getFullDataDir()
+    local resolved = ffiUtil.realpath(data) or data
+    local dir = ffiUtil.dirname(type(resolved) == "string" and resolved or data)
+    if Setting.usableDir(dir) then return dir end
+    if Setting.usableDir(data) then return data end
+    return nil
+end
+
+--- 打开选择器时的起点：优先已保存路径；失效则回退 defaultStart，最后才是 /。
+---@param path string|nil
+---@return string
+function Setting.resolveStart(path)
+    if Setting.usableDir(path) then return path end
+    return Setting.defaultStart() or "/"
+end
+
 --- 目录选择列表：逐层浏览（原地换项），首行「使用此目录」确认当前目录。
 ---@param on_saved fun()|nil 保存目录后回调（书城下载前引导配置用）
 ---@param desktop table|nil 有桌面时换目录先收成待重匹配并强制重扫；没有则 Registry.reload
 function Setting.open(on_saved, desktop)
-    local lfs = require("libs/libkoreader-lfs")
     local Text = require("utils.text")
     local List = require("ui.themes.widgets.list")
     local MoonSettings = require("utils.settings")
     local cfg = MoonSettings.getSource(SOURCE_ID)
     local previous = Text.rtrimSlashes(Text.rtrim(cfg.path))
-    local start_path = cfg.path
-    if type(start_path) ~= "string" or start_path == "" then
-        local home = G_reader_settings:readSetting("home_dir")
-        start_path = type(home) == "string" and home or nil
-        if not start_path or start_path == "" then
-            local ffiUtil = require("ffi/util")
-            local data = require("datastorage"):getFullDataDir()
-            local resolved = ffiUtil.realpath(data) or data
-            local dir = ffiUtil.dirname(type(resolved) == "string" and resolved or data)
-            start_path = type(dir) == "string" and dir or data
-        end
-    end
-    if lfs.attributes(start_path, "mode") ~= "directory" then start_path = "/" end
+    local start_path = Setting.resolveStart(cfg.path)
 
     local list
     ---@param dir string
@@ -262,7 +281,6 @@ function Setting.open(on_saved, desktop)
         list.page = 1
         list:setItems(items)
     end
-    if not Setting.subdirs(start_path) then start_path = "/" end
     list = List:new{ title = _("选择书库目录"), subtitle = start_path, items = entries(start_path) or {} }
     list:show()
 end

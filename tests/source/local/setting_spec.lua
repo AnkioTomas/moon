@@ -70,6 +70,7 @@ package.preload["ui.themes.widgets.list"] = function()
         end,
     }
 end
+local home_dir = "/storage/emulated/0"
 package.preload["libs/libkoreader-lfs"] = function()
     local children = {
         ["/mnt/us/documents"] = { "books" },
@@ -77,16 +78,22 @@ package.preload["libs/libkoreader-lfs"] = function()
         ["/mnt/us"] = { "documents" },
         ["/"] = { "mnt" },
         ["/mnt"] = { "us" },
+        [home_dir] = { "Books" },
+        [home_dir .. "/Books"] = {},
+        ["/data"] = { "koreader" },
+        ["/data/koreader"] = {},
     }
     return {
         attributes = function(path, mode)
             if mode == "mode" then
-                return children[path] and "directory" or "directory"
+                return children[path] and "directory" or nil
             end
-            return { mode = "directory" }
+            return children[path] and { mode = "directory" } or nil
         end,
         dir = function(path)
-            local names = children[path] or {}
+            if path == "/" then error("cannot open /: Permission denied") end
+            local names = children[path]
+            if not names then error("cannot open " .. tostring(path) .. ": No such file") end
             local i = 0
             return function()
                 i = i + 1
@@ -98,9 +105,28 @@ end
 package.preload["utils.log"] = function()
     return { warn = function() end, dbg = function() end }
 end
+package.preload["datastorage"] = function()
+    return { getFullDataDir = function() return "/data/koreader" end }
+end
+package.preload["ffi/util"] = function()
+    return {
+        realpath = function(path) return path end,
+        dirname = function(path) return path:match("(.+)/[^/]+$") or path end,
+    }
+end
+_G.G_reader_settings = {
+    readSetting = function(_, key) return key == "home_dir" and home_dir or nil end,
+}
 
 package.loaded["source.local.setting"] = nil
 local Setting = require("source.local.setting")
+
+-- 失效路径（换设备）回退 home_dir，不要掉到不可读的 /
+Assert.is_false(Setting.usableDir("/mnt/us/books"))
+Assert.is_true(Setting.usableDir(home_dir))
+Assert.eq(Setting.resolveStart("/mnt/us/books"), home_dir)
+Assert.eq(Setting.resolveStart(""), home_dir)
+Assert.eq(Setting.resolveStart("/mnt/us/documents"), "/mnt/us/documents")
 
 local plugin = { desktop = { settings_overlay = { updateView = function() painted = painted + 1 end } } }
 
@@ -135,6 +161,12 @@ Assert.eq(cleared, false)
 Assert.is_true(rescanned)
 Assert.eq(painted, 2)
 Assert.is_true(not reloaded)
+
+-- 配置里是旧机失效路径：打开选择器直接落在 home_dir。
+cfg.path = "/mnt/us/books"
+list = nil
+Setting.open(nil, plugin.desktop)
+Assert.eq(list.subtitle, home_dir)
 
 -- 重选当前普通目录不弹换根提醒。
 cfg.path = "/mnt/us/documents/books"

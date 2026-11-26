@@ -109,6 +109,17 @@ function Client:configured()
     return self:isWebdav() or Text.stripWhitespace(self.cfg.path) ~= ""
 end
 
+--- 已配置本地目录，但本机上不存在或不是目录（换设备搬配置常见）。
+--- WebDAV 模式不看本地目录；空路径算未配置，不算失效。
+---@return boolean
+function Client:localRootMissing()
+    if self:isWebdav() then return false end
+    local path = rootPath(self.cfg)
+    if path == "" then return false end
+    local attr = lfs.attributes(path)
+    return not attr or attr.mode ~= "directory"
+end
+
 --- 本地路径是否有效（存在、是目录、且不在插件数据目录内）。WebDAV 只校验地址。
 ---@return boolean, string|nil
 function Client:validatePath()

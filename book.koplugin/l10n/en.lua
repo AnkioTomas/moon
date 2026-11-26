@@ -1098,6 +1098,8 @@ return {
     ["请先在月读设置中配置 AI 服务"] = "Configure the AI service in 月读 settings first",
     ["请先在设置里填写 Z-Library 邮箱和密码"] = "Enter your Z-Library email and password in Settings first",
     ["请先完成数据源设置，再刷新书库。"] = "Finish setting up the source before refreshing the library.",
+    ["本地书库目录已失效，可能是换过设备。请重新选择目录；把同一本书放到新目录后再扫描，阅读记录会跟过来。"] = "The local library folder is missing—often after switching devices. Choose a new folder; after you put the same books there and scan, reading history will match by content.",
+    ["选择目录"] = "Choose folder",
     ["正在同步 %1 个数据源，可在顶栏查看进度"] = "Syncing %1 sources, see the top bar for progress",
     ["正在增量同步 %1 个数据源，可在顶栏查看进度"] = "Incrementally syncing %1 sources, see the top bar for progress",
     ["正在全量同步 %1 个数据源，可在顶栏查看进度"] = "Fully syncing %1 sources, see the top bar for progress",

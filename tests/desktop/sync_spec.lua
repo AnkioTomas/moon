@@ -353,6 +353,53 @@ do
     Assert.eq(Themed.last("toast").text, "Connection timed out")
 end
 
+-- 本地书库目录失效（换设备）：引导重选，不当同步失败 toast；后台只弹一次，手动每次弹。
+do
+    local opened = 0
+    package.loaded["source.local.setting"] = {
+        open = function() opened = opened + 1 end,
+    }
+    local missing = true
+    local syncs = 0
+    source.id = "local"
+    source.name = "本地"
+    source.localRootMissing = function() return missing end
+    source.syncBooksAsync = function(_, _, cb)
+        syncs = syncs + 1
+        cb({ skipped = true })
+        return { cancel = function() end }
+    end
+    Themed.made = {}
+    Sync.open(desktop)
+    Assert.eq(syncs, 0, "失效目录不发起同步")
+    Assert.is_nil(Themed.last("toast"), "不 toast 路径不存在")
+    local confirm = Themed.last("confirm")
+    Assert.not_nil(confirm)
+    Assert.is_true(confirm.text:find("换过设备", 1, true) ~= nil)
+    confirm.ok_callback()
+    Assert.eq(opened, 1)
+
+    Themed.made = {}
+    Sync.open(desktop)
+    Assert.is_nil(Themed.last("confirm"), "后台本进程只弹一次")
+    Assert.eq(syncs, 0)
+
+    Sync.refresh(desktop)
+    Assert.not_nil(Themed.last("confirm"), "手动刷新仍引导")
+    Assert.eq(syncs, 0)
+
+    missing = false
+    Themed.made = {}
+    Sync.open(desktop)
+    Assert.eq(syncs, 1, "目录恢复后继续同步")
+    Assert.is_nil(Themed.last("confirm"))
+
+    source.id = "test"
+    source.name = "Test"
+    source.localRootMissing = nil
+    package.loaded["source.local.setting"] = nil
+end
+
 -- 联网时后台同步失败（如 WebDAV 密码错）：提示一次，同一条错误不再重复；干净成功后再出错重新提示。
 do
     local fail = "WebDAV 认证失败：用户名或密码错误"

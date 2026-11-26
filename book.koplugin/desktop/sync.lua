@@ -30,9 +30,28 @@ local books_at = {}
 ---@type table<string, string> 源 id → 已提示过的书架同步错误；同步干净成功后清掉
 local reported = {}
 
+--- 本地书库目录失效引导：后台本进程只弹一次；手动刷新每次都弹。
+local path_prompted = false
+
 ---@return boolean
 local function mixed()
     return MoonSettings.get("source").library_mixed == true
+end
+
+--- 本地目录失效（换设备搬配置）：引导重选，不要 toast「路径不存在」。
+---@param desktop table
+---@param manual boolean|nil
+local function promptLocalPath(desktop, manual)
+    if not manual and path_prompted then return end
+    path_prompted = true
+    require("ui.themes.widgets.confirm"):new{
+        text = _("本地书库目录已失效，可能是换过设备。请重新选择目录；把同一本书放到新目录后再扫描，阅读记录会跟过来。"),
+        ok_text = _("选择目录"),
+        cancel_text = _("稍后"),
+        ok_callback = function()
+            require("source.local.setting").open(nil, desktop)
+        end,
+    }:show()
 end
 
 --- 本轮要同步的已配置源：混合模式 = 全部已启用源，否则只有活跃源。加载失败的源跳过。
@@ -207,6 +226,17 @@ local function syncBooks(desktop, source, opts)
     if current and current.cancel then
         logger.dbg("book shelf refresh cancel previous", source.id)
         current.cancel:cancel()
+    end
+    -- 换设备后常见：配置里还是旧机路径。当配置问题引导重选，不要当成同步失败刷 toast。
+    if source.id == "local" and source.localRootMissing then
+        if source:localRootMissing() then
+            logger.warn("book shelf sync skipped local root missing")
+            -- 调用方可能先盖了 books_at 节流戳；没真正同步就清掉，免得混合模式把 local 节流掉。
+            books_at[source.id] = nil
+            promptLocalPath(desktop, queued)
+            return
+        end
+        path_prompted = false
     end
     local mode = force and "forced" or (queued and "incremental" or "background")
     logger.dbg("book shelf refresh start", source.id, mode)

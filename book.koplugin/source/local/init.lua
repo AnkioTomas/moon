@@ -57,6 +57,12 @@ function Source:configured()
     return self._client:configured()
 end
 
+--- 已配置本地目录但本机失效（换设备常见）。桌面同步用它引导重选，不当同步失败 toast。
+---@return boolean
+function Source:localRootMissing()
+    return self._client:localRootMissing()
+end
+
 --- 编辑 / 刮削后：WebDAV 书库立即上行这本书；纯本地目录没有远端，什么都不做。
 ---@param event string
 ---@param payload table|nil
