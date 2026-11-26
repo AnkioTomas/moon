@@ -541,6 +541,7 @@ return {
     ["已保存"] = "Saved",
     ["已切换字典"] = "Dictionary switched",
     ["已切换数据源：%1"] = "Switched source: %1",
+    ["切换数据源失败：%1"] = "Failed to switch source: %1",
     ["已加入书库："] = "Added to library: ",
     ["已启用 %1 项"] = "%1 enabled",
     ["已填写 · 未登录"] = "Saved · not signed in",

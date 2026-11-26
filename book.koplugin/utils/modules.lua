@@ -62,14 +62,23 @@ function Modules.install(root)
     loaded_by_root[root] = ours
 
     -- 只服务本插件目录内发起的 require：别的 koplugin 撞名的 utils/、ui/ 不能被劫持到这里的代码。
-    -- 栈：1 本加载器，2 require（C），3 发起 require 的 chunk。`return require(x)` 是尾调用，发起方帧被抹掉，
-    -- 这时看到的是再上一层；认不出来只是退回标准搜索（慢），不会装错模块。
+    -- 从 level 往上找第一个 Lua 帧：pcall / xpcall(require, name) 时紧挨着的是 C 帧，要越过它看真正的发起方，
+    -- 否则模块经标准搜索加载、不进 ours，之后本插件再 require 就会 loadfile 第二遍（挂点重复登记）。
+    -- `return require(x)` 是尾调用，发起方帧被抹掉，看到的是再上一层；认不出来只是退回标准搜索（慢）。
     local mine = "@" .. root .. "/"
+    local function fromMine(level)
+        local info = debug.getinfo(level + 1, "S")
+        while info and info.what == "C" do
+            level = level + 1
+            info = debug.getinfo(level + 1, "S")
+        end
+        return info ~= nil and info.source:sub(1, #mine) == mine
+    end
+    -- 栈：1 本加载器，2 require（C），3 发起 require 的 chunk。
     table.insert(package.loaders, 2, function(name)
         local path = index[name:gsub("%.", "/")]
         if not path then return nil end
-        local caller = debug.getinfo(3, "S")
-        if not (caller and caller.source:sub(1, #mine) == mine) then return nil end
+        if not fromMine(3) then return nil end
         return assert(loadfile(path))
     end)
 
@@ -83,10 +92,7 @@ function Modules.install(root)
         if cached ~= nil and package.loaded[name] == cached then return cached end
         local path = index[name:gsub("%.", "/")]
         if not path then return real_require(name) end
-        local caller = debug.getinfo(2, "S")
-        if not (caller and caller.source:sub(1, #mine) == mine) then
-            return real_require(name)
-        end
+        if not fromMine(2) then return real_require(name) end
         if cached ~= nil then
             package.loaded[name] = cached
             return cached

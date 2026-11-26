@@ -63,11 +63,15 @@ local function pickSource(active_id)
             end
             if not id then return end
             if not mixed and id == active_id then return end
+            local switched, err = SourceRegistry.setActive(id)
+            if not switched then
+                Toast:new{ text = T(_("切换数据源失败：%1"), tostring(err or id)) }:show()
+                return
+            end
             if mixed then
                 MoonSettings.get("source").library_mixed = false
                 MoonSettings.save("source")
             end
-            SourceRegistry.setActive(id)
             local name = id
             for _idx, meta in ipairs(sources) do
                 if meta.id == id then name = meta.name or meta.id break end
