@@ -1,6 +1,6 @@
 --[[--
 feature 元信息：功能开关页的名称、说明与能力清单。约定见 features/init.lua。
-removable = false：只靠约定文件生效，不在 list 里，没有可停用的加载动作。
+removable = false：不在 list 里，只靠约定文件（setting.lua）登记「我的设备」子页；不开放停用。
 
 @module koplugin.book.features.monitor._meta
 --]]

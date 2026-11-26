@@ -54,7 +54,7 @@ end
 
 local Ext = require("utils.extension")
 local Setting = require("features.battery.setting")
-Assert.eq(#Setting.entries({}), 0)
+Assert.is_nil(Setting.entries, "只登记设备子页，不进设置树")
 Assert.eq(Setting.defaults.awake.percentage, 0)
 
 local item = Ext.list("setting.device_section")[1]

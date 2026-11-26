@@ -174,6 +174,37 @@ guarded = {}
 Assert.is_false(Features.handleEvent(event("Boom"), plugin))
 Assert.eq(guarded[1].label, "feature e1.events.Boom")
 
+-- 加载抛错的 feature 只经 guard 报一次：之后钩子与事件分发都跳过它，不在 guard 外重新 require，
+-- 排在它后面的 feature 照常收到钩子和事件
+local broken_loads = 0
+package.preload["features.broken"] = function()
+    broken_loads = broken_loads + 1
+    error("load boom")
+end
+package.preload["features.e4"] = function()
+    return { events = { Pong = function() calls[#calls + 1] = "e4"; return true end } }
+end
+guarded, seen, calls = {}, {}, {}
+Features.list = { "broken", "a" }
+Features.emit("onCreate", plugin)
+Features.emit("onCreate", plugin)
+Assert.eq(broken_loads, 1)
+Assert.len(guarded, 1)
+Assert.eq(guarded[1].label, "feature broken load")
+Assert.eq(table.concat(seen, ","), "a:onCreate:p:nil,a:onCreate:p:nil")
+do
+    -- 事件路由首次分发时建好，换一个没建过路由的加载器实例来测
+    local kept = package.loaded["features"]
+    package.loaded["features"] = nil
+    local Fresh = require("features")
+    package.loaded["features"] = kept
+    Fresh.list = { "broken", "e4" }
+    Assert.is_true(Fresh.handleEvent(event("Pong"), plugin))
+    Assert.is_true(Fresh.handleEvent(event("Pong"), plugin))
+    Assert.eq(table.concat(calls, ","), "e4,e4")
+    Assert.eq(broken_loads, 1, "加载失败的模块不会被再次执行")
+end
+
 -- scan：扫真实 features/ 目录，返回提供某约定文件的目录名（按名字排序，不看 list），同一文件只扫一次
 Assert.eq(table.concat(Features.scan("events"), ","), "ai,xray")
 Assert.eq(table.concat(Features.scan("panel"), ","), "ai,animation,bluetooth,demo,fontmap,ime,nightmode,rare,reflow,remote,reviews,translate,xray")

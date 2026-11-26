@@ -176,6 +176,7 @@ os.remove = function(path)
     removed_paths[#removed_paths + 1] = path
     return true
 end
+function lfs.rmdir(path) return os.remove(path) end
 function lfs.dir(path)
     Assert.eq(path, "/dict/book-xhzd")
     local names = { ".", "..", "external" }

@@ -18,12 +18,6 @@ Setting.defaults = {
 }
 Setting.keys = { "awake_state", "charging_state", "was_charging" }
 
----@param _desktop BookDesktop
----@return BookSettingEntry[]
-function Setting.entries(_desktop)
-    return {}
-end
-
 require("utils.extension").add("setting.device_section", {
     id = "battery",
     order = 30,

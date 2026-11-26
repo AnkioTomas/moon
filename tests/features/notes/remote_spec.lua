@@ -44,7 +44,7 @@ end
 package.loaded["ui/network/manager"] = { isConnected = function() return false end }
 package.loaded["source.registry"] = { resolve = function(id) return { id = id } end }
 package.loaded["apps/reader/readerui"] = { instance = nil }
-package.loaded["reader.session"] = { _snapshot = nil }
+package.loaded["reader.session"] = { current = function() return nil end }
 
 for _idx, name in ipairs({
     "utils.db", "book.books_db", "book.note_db", "book.note",

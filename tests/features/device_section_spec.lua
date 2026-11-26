@@ -31,5 +31,6 @@ Assert.eq(type(items[2].status), "function")
 Assert.eq(type(items[3].status), "function")
 Assert.is_nil(require("features.storage.setting").entries)
 Assert.is_nil(require("features.monitor.setting").entries)
+Assert.is_nil(require("features.battery.setting").entries)
 
 return true

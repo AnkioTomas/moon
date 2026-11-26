@@ -82,27 +82,8 @@ local function tmpDir(id)
     return Paths.root() .. "/dict-" .. id .. ".dl"
 end
 
---- 递归删除但不跟随符号链接，避免受控目录里的链接把删除扩散到目录外。
----@param path string
----@return boolean|nil, string|nil
-local function purge(path)
-    local attr, attr_err = lfs.symlinkattributes(path)
-    if not attr then
-        return nil, attr_err
-    end
-    if attr.mode ~= "directory" then
-        return os.remove(path)
-    end
-    local ok, iter, dir_obj = pcall(lfs.dir, path)
-    if not ok then return nil, iter end
-    for name in iter, dir_obj do
-        if name ~= "." and name ~= ".." then
-            local removed, remove_err = purge(path .. "/" .. name)
-            if not removed then return nil, remove_err end
-        end
-    end
-    return os.remove(path)
-end
+-- 递归删除不跟随符号链接，受控目录里的链接不会把删除扩散到目录外。
+local purge = require("utils.fs").removeTree
 
 --- 分片是否已完整落盘：只比长度，sha256 留到拼接时统一校验（避免每次重启全量重算）。
 ---@param dir string 临时目录

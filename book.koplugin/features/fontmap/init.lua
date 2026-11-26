@@ -244,7 +244,6 @@ function FontMap:show(names)
         items = self:items(names),
         close_callback = function() self.dialog = nil end,
     }
-    self.dialog.font_names = names
     self.dialog:show()
 end
 

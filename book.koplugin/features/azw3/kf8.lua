@@ -17,6 +17,7 @@ DRM、结构损坏直接 error。HUFF/CDIC 见 `features.azw3.huff`。
 local bit = require("bit")
 local ffi = require("ffi")
 require("ffi/posix_h")
+local Fs = require("utils.fs")
 local Image = require("utils.image")
 local Text = require("utils.text")
 
@@ -50,12 +51,6 @@ local function u32(s, o)
     local a, b, c, d = s:byte(o + 1, o + 4)
     if not d then error("truncated u32") end
     return ((a * 256 + b) * 256 + c) * 256 + d
-end
-
-local function writeFile(path, data)
-    local f = assert(io.open(path, "wb"))
-    assert(f:write(data))
-    assert(f:close())
 end
 
 --- 读 PalmDB 分节表与 MOBI 头，按需 seek 取节（不整本读入内存）。
@@ -501,7 +496,7 @@ local function extractFile(f, dir)
             local ext = Image.ext(data)
             if ext then
                 local name = string.format("res%04d%s", sec0 - first_image + 1, ext)
-                writeFile(dir .. "/" .. name, data)
+                assert(Fs.write(dir .. "/" .. name, data))
                 resources[sec0 - first_image + 1] = name
             end
         end
@@ -517,7 +512,7 @@ local function extractFile(f, dir)
         local ext = data:find("<svg", 1, true) and "svg" or "css"
         local name = string.format("flow%04d.%s", i - 1, ext)
         flow_names[i - 1] = name
-        writeFile(dir .. "/" .. name, (data:gsub(EMBED, embed)))
+        assert(Fs.write(dir .. "/" .. name, (data:gsub(EMBED, embed))))
         if ext == "css" then
             css_links[#css_links + 1] = '<link rel="stylesheet" type="text/css" href="' .. name .. '"/>'
         end

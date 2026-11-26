@@ -74,7 +74,6 @@ local Perf = require("utils.perf")
 local Features = {}
 
 local DIR = debug.getinfo(1, "S").source:match("^@(.*)/[^/]+$")
-Features.DIR = DIR
 local scanned = {}
 local off = {} -- 用户停用的 feature（启动时由 Manage.apply 取得），目录扫描跳过
 
@@ -93,14 +92,6 @@ function Features.scan(file)
     table.sort(names)
     scanned[file] = names
     return names
-end
-
---- 取某个 feature 的约定文件模块（名字来自 Features.scan），核心经端口拿到后用它，不自己拼模块路径。
----@param name string
----@param file string
----@return table
-function Features.module(name, file)
-    return require("features." .. name .. "." .. file)
 end
 
 -- 顺序即 onCreate 先后。bars / sidebar 没有 onCreate，排前面只影响设置页里的行序。
@@ -143,6 +134,17 @@ local External = require("utils.external")
 local Ext = require("utils.extension")
 
 local loaded = false
+-- 目录名 → 模块；加载抛错记 false，之后分发直接跳过，不在 guard 外重新 require 坏模块。
+local mods = {}
+
+---@param name string
+---@return table|false
+local function mod(name)
+    if mods[name] == nil then
+        mods[name] = Guard.call("feature " .. name .. " load", require, "features." .. name) or false
+    end
+    return mods[name]
+end
 
 --- 加载器：main.lua 顶层调一次（不点名任何 feature）。
 ---   0. 先把用户在「功能开关」里停用的 feature 从 list 去掉并记下（features/manage）；
@@ -156,15 +158,10 @@ function Features.load()
     off = Guard.call("feature manage apply", require("features.manage").apply, Features.list) or off
     for _idx, name in ipairs(Features.list) do
         local started_at = Perf.now()
-        Guard.call("feature " .. name .. " load", require, "features." .. name)
+        mod(name)
         Perf.slow("feature load " .. name, started_at)
     end
     Features.registerConventions()
-end
-
---- 丢掉目录扫描缓存：插件目录被替换后（在线更新装好、尚未重启）要重新认约定文件。
-function Features.invalidateScan()
-    scanned = {}
 end
 
 --- 约定文件代登记（load 的第 2、3 步；单测只要设置 / 顶栏条目时也可单独调）。
@@ -172,7 +169,7 @@ end
 --- reader.ready 只挂一次，避免重复 emit。
 local conventions_ready = false
 function Features.registerConventions()
-    Features.invalidateScan()
+    scanned = {}
     Ext.removeWhere("setting.entries", function(item)
         return type(item) == "table" and type(item.name) == "string" and type(item.entries) == "function"
     end)
@@ -180,14 +177,13 @@ function Features.registerConventions()
         return type(item) == "function"
     end)
     for _idx, name in ipairs(Features.scan("setting")) do
-        if Features.module(name, "setting").entries then
-            Ext.add("setting.entries", { name = name, entries = function(desktop)
-                return Features.module(name, "setting").entries(desktop)
-            end })
+        local setting = require("features." .. name .. ".setting")
+        if setting.entries then
+            Ext.add("setting.entries", { name = name, entries = function(desktop) return setting.entries(desktop) end })
         end
     end
     for _idx, name in ipairs(Features.scan("topbar")) do
-        Ext.add("topbar.items", function() return Features.module(name, "topbar").items() end)
+        Ext.add("topbar.items", function() return require("features." .. name .. ".topbar").items() end)
     end
     if not conventions_ready then
         Ext.add("reader.ready", function(plugin) Features.emit("onReaderReady", plugin) end)
@@ -198,30 +194,23 @@ function Features.registerConventions()
     end
 end
 
---- 磁盘上的 bookversion 与内存不一致时（更新已换目录、进程还没重启）：重建模块索引并重登约定文件。
+-- 已按它重登过约定文件的磁盘版本：同一次更新只重登一次。
+local refreshed
+
+--- 磁盘上的 bookversion 与内存不一致时（更新已换目录、进程还没重启）：重扫目录、重登约定文件。
 --- 设置页打开前调用，让新 feature（如壁纸）不必等整机重启才出现。
+--- 已加载的模块不重载：重新执行 init / setting 会重复登记挂点、重置模块状态，旧定时器也取消不掉。
+--- 新目录里的模块不在模块索引中，经 KOReader 给插件目录加的 package.path 照常 require 到。
 ---@param plugin_root string|nil
 ---@return boolean refreshed
 function Features.refreshIfStale(plugin_root)
     local root = plugin_root
-    if not root or root == "" then
-        root = DIR and DIR:match("^(.*)/features$") or nil
-    end
-    if not root then return false end
+    if not root or root == "" then root = DIR:match("^(.*)/features$") end
     local disk = loadfile(root .. "/bookversion.lua")
     if not disk then return false end
-    local ok, version = pcall(disk)
-    if not ok or type(version) ~= "string" then return false end
-    local mem_ok, mem = pcall(require, "bookversion")
-    if mem_ok and mem == version then return false end
-    require("utils.modules").refresh(root)
-    -- 清掉已加载的 feature 约定模块，让下次 require 读新文件。
-    for name, _ in pairs(package.loaded) do
-        if type(name) == "string" and name:match("^features%.") then
-            package.loaded[name] = nil
-        end
-    end
-    package.loaded["bookversion"] = nil
+    local version = disk()
+    if version == require("bookversion") or version == refreshed then return false end
+    refreshed = version
     Features.registerConventions()
     require("utils.log").info("features refreshed after update", version)
     return true
@@ -232,7 +221,8 @@ end
 function Features.emit(hook, plugin)
     for _idx, name in ipairs(Features.list) do
         local started_at = Perf.now()
-        local fn = require("features." .. name)[hook]
+        local feature = mod(name)
+        local fn = feature and feature[hook]
         if fn then Guard.call("feature " .. name .. "." .. hook, fn, plugin) end
         Perf.slow("feature " .. name .. "." .. hook, started_at)
     end
@@ -252,7 +242,8 @@ function Features.handleEvent(event, plugin)
     if not routes then
         routes = {}
         for _idx, name in ipairs(Features.list) do
-            for ev, fn in pairs(require("features." .. name).events or {}) do
+            local feature = mod(name)
+            for ev, fn in pairs(feature and feature.events or {}) do
                 local handler = "on" .. ev
                 routes[handler] = routes[handler] or {}
                 table.insert(routes[handler], { label = "feature " .. name .. ".events." .. ev, fn = fn })

@@ -54,12 +54,13 @@ function Dictionary.manage(ui, changed_callback)
     local Manager = require("features.dictionary.manager")
     local paths = Manager.list(dictionary.data_dir)
     if #paths == 0 then info(_("尚未安装字典")); return end
-    local items = {}
-    table.sort(paths, function(a, b) return bookName(a) < bookName(b) end)
+    local items, names = {}, {}
+    for index = 1, #paths do names[paths[index]] = bookName(paths[index]) end
+    table.sort(paths, function(a, b) return names[a] < names[b] end)
     for index = 1, #paths do
         local path = paths[index]
         local id = managedId(dictionary, path)
-        local name = bookName(path)
+        local name = names[path]
         local current = not (dictionary.dicts_disabled and dictionary.dicts_disabled[path])
         items[#items + 1] = {
             text = name,
