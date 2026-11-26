@@ -92,6 +92,15 @@ local function coreEntries(desktop)
     network.group, network.order = "system", 10
     return {
         {
+            group = "library", order = 1, id = "moon_sync", icon = "cloud_sync",
+            title = _("月读同步（WebDAV）"),
+            subtitle = _("同步本地书、账号、书籍设置，以及书源自己不同步的阅读数据"),
+            page = {
+                title = _("月读同步（WebDAV）"),
+                sections = function() return require("moon_sync.page").sections(desktop) end,
+            },
+        },
+        {
             group = "library", order = 5, id = "enabled_sources",
             row = function(iw)
                 local n = #SourceRegistry.listEnabled()
