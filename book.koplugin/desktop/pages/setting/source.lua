@@ -154,6 +154,19 @@ local function configurable(mod)
     return mod ~= nil and (type(mod.rows) == "function" or type(mod.open) == "function")
 end
 
+--- 源自己的设置。有 sections 用它的分组，否则一整节，标题是源名。
+---@param mod table|nil
+---@param plugin table|nil
+---@param title string
+---@return table[]
+local function accountSections(mod, plugin, title)
+    if mod and type(mod.sections) == "function" then return mod.sections(plugin) end
+    if mod and type(mod.rows) == "function" then
+        return { { title = title, rows = mod.rows(plugin) } }
+    end
+    return {}
+end
+
 --- 账号页上的一行：点开二级页面（模块有 rows），只有 open 的直接调 open。
 ---@param desktop table
 ---@param plugin table|nil
@@ -166,20 +179,19 @@ local function entryRow(desktop, plugin, mod, title, icon, source_id)
     local docs = require("utils.docs").source(source_id)
     return function(iw)
         local status, status_on
-        if type(mod.rowStatus) == "function" then status, status_on = mod.rowStatus() end
+        if mod and type(mod.rowStatus) == "function" then status, status_on = mod.rowStatus() end
         return Row.widget({
             width = iw, kind = "nav", icon = icon, title = title,
             status = status, status_on = status_on,
             callback = function()
-                if type(mod.rows) ~= "function" then return mod.open(plugin) end
+                if mod and type(mod.rows) ~= "function" and type(mod.sections) ~= "function" then
+                    return mod.open(plugin)
+                end
                 require("desktop.pages.setting.overlay").push(desktop, {
                     title = title,
                     docs = docs,
                     sections = function()
-                        -- 模块可以自己分组（Kavita：连接 / 缓存与同步 / 诊断）；
-                        -- 没给 sections 的沿用一整块，标题就是源名。
-                        if type(mod.sections) == "function" then return mod.sections(plugin) end
-                        return {{ title = title, rows = mod.rows(plugin) }}
+                        return accountSections(mod, plugin, title)
                     end,
                 })
             end,
@@ -253,9 +265,9 @@ function Source.openAccount(desktop, source_id)
     if not source_id then return end
     local mod = Source.loadSetting(source_id)
     if not configurable(mod) then return end
-    local meta = SourceRegistry.meta(source_id)
+    local meta = type(SourceRegistry.meta) == "function" and SourceRegistry.meta(source_id) or nil
     local title = (meta and meta.name) or source_id
-    if type(mod.rows) ~= "function" then
+    if type(mod.rows) ~= "function" and type(mod.sections) ~= "function" then
         if type(mod.open) == "function" then mod.open(desktop.plugin) end
         return
     end
@@ -263,8 +275,7 @@ function Source.openAccount(desktop, source_id)
         title = title,
         docs = require("utils.docs").source(source_id),
         sections = function()
-            if type(mod.sections) == "function" then return mod.sections(desktop.plugin) end
-            return {{ title = title, rows = mod.rows(desktop.plugin) }}
+            return accountSections(mod, desktop.plugin, title)
         end,
     })
 end
