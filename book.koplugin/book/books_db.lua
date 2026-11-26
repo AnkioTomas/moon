@@ -6,7 +6,7 @@ books 表：身份 + 书架成员（软删）+ 展示元数据 + 目录/排版�
   成员：deleted（0=在架有效，1=软删/非成员）；sync_status（0 待上传，1 已同步）
   展示：title/authors/category/series/intro/cover
   扩展元数据：meta（JSON 对象，见 BookMeta；入库前由 normalizeMeta 规范成可直接展示的值）
-  本地-only：reader_prefs、toc、toc_fetched_at、read_state、hidden（软删除：书留库不显示，远端同步不碰）
+  本地-only：reader_prefs（书源书架同步不碰；月读同步按书抄到别的设备）、toc、toc_fetched_at、read_state、hidden（软删除：书留库不显示，远端同步不碰）
   进度真源在 pending_progress；本表不存 percent，进度禁止写回本表。
 
 不变量：
@@ -732,6 +732,28 @@ function BookDB.pathsBySource(source_id)
     local out = {}
     for i = 1, nrows do
         out[i] = { source_id = result[1][i], stable_id = result[2][i], path = result[3][i] }
+    end
+    return out
+end
+
+--- 月读同步要抄的书：在架，并且有本地文件或全书排版。墓碑不列。
+---@return { source_id: string, stable_id: string, path: string|nil, reader_prefs: string|nil }[]
+function BookDB.sidecarBooks()
+    local result, nrows = DB.query([[
+        SELECT source_id, stable_id, path, reader_prefs FROM books
+        WHERE deleted=0 AND (
+            (path IS NOT NULL AND path<>'')
+            OR (reader_prefs IS NOT NULL AND reader_prefs<>'')
+        );
+    ]])
+    local out = {}
+    for i = 1, nrows do
+        out[i] = {
+            source_id = result[1][i],
+            stable_id = result[2][i],
+            path = result[3][i],
+            reader_prefs = result[4][i],
+        }
     end
     return out
 end
