@@ -1,8 +1,8 @@
 --[[--
-全书阅读排版偏好：字体 + CRE 边距/字号、漫画分页/连续模式，按 source_id + stable_id 存 books.reader_prefs。
+全书阅读排版偏好：字体 + CRE 边距/字号、漫画视图/缩放等 kopt，按 source_id + stable_id 存 books.reader_prefs。
 
 连续章节每章是独立物理文件；本模块在关书/休眠/切章前捕获当前排版，开章时按书身份写回 sidecar。
-「保存为默认」写 G_reader_settings，并同步覆盖所有已有 reader_prefs；无 per-book 快照的章节书
+「保存为默认」写 G_reader_settings，并同步覆盖所有已有 reader_prefs（含当前书）；无 per-book 快照的章节书
 开书时从全局默认注入，避免旧章 sidecar 挡住默认。
 
 渲染模式例外：全局没写过时补成平面。全书快照里的网页模式在全局不是网页时改回全局，
@@ -43,6 +43,27 @@ local DOC_KEYS = {
 --- native_font.lua 为渲染字体选项塞进 configurable 的临时键，不属于排版偏好。
 local SKIP_COPT_KEY = "book_font_face"
 local COMIC_EXT = { cbz = true, cbt = true }
+--- 漫画跨章要带着走的 kopt 键；zoom_mode 是 sidecar 顶层键，不在 configurable 里。
+local COMIC_KOPT_KEYS = {
+    "page_scroll",
+    "zoom_mode_genus",
+    "zoom_mode_type",
+    "zoom_factor",
+    "trim_page",
+    "page_gap_height",
+}
+local ZOOM_GENUS_TO_MODE = { [4] = "page", [3] = "content", [2] = "columns", [1] = "rows", [0] = "manual" }
+local ZOOM_TYPE_TO_SUFFIX = { [2] = "", [1] = "width", [0] = "height" }
+
+---@param genus number|nil
+---@param typ number|nil
+---@return string
+local function zoomModeString(genus, typ)
+    local mode = ZOOM_GENUS_TO_MODE[genus]
+    if not mode then return "pagewidth" end
+    if mode == "manual" or mode == "columns" or mode == "rows" then return mode end
+    return mode .. (ZOOM_TYPE_TO_SUFFIX[typ or 2] or "")
+end
 
 ---@param file string|nil
 ---@return boolean
@@ -98,7 +119,17 @@ function M.capture(ui)
     -- 让各模块把活状态写进内存里的 doc_settings，再采（真正 flush 仍由原生关书路径做）。
     ui:handleEvent(require("ui/event"):new("SaveSettings"))
     if comic then
-        return { kopt = { page_scroll = config.page_scroll } }
+        local kopt = {}
+        for _idx, key in ipairs(COMIC_KOPT_KEYS) do
+            if config[key] ~= nil then
+                kopt[key] = copyValue(config[key])
+            end
+        end
+        local zoom_mode = ui.doc_settings and ui.doc_settings:readSetting("zoom_mode")
+        if type(zoom_mode) ~= "string" or zoom_mode == "" then
+            zoom_mode = zoomModeString(kopt.zoom_mode_genus, kopt.zoom_mode_type)
+        end
+        return { kopt = kopt, zoom_mode = zoom_mode }
     end
     -- configurable 就是整套 copt_ 排版状态；逐键白名单会丢字重、字间距等设置。
     local copt = {}
@@ -360,7 +391,13 @@ function M.saveDefaults(ui)
         local merged = BookDB.mergeReaderPrefs(function(raw)
             local existing = decode(raw) or {}
             if prefs.kopt then
-                if existing.kopt then existing.kopt = copyValue(prefs.kopt) end
+                -- 小说快照有 copt：不动。已有漫画 kopt、或空壳快照：换成这套。
+                if existing.kopt or not existing.copt then
+                    existing.kopt = copyValue(prefs.kopt)
+                    if prefs.zoom_mode ~= nil then
+                        existing.zoom_mode = prefs.zoom_mode
+                    end
+                end
             else
                 existing.copt = copyValue(prefs.copt)
                 existing.font_id, existing.font_name, existing.font_face = prefs.font_id, prefs.font_name, prefs.font_face
@@ -370,20 +407,48 @@ function M.saveDefaults(ui)
         if not merged then
             logger.warn("book.reader_prefs merge failed")
         end
+        -- merge 只扫库里已有行；当前书若还没 reader_prefs，这里补上，否则下一章 inject 仍吃旧默认。
+        local identity = Store.ensureIdentity(ui.document.file)
+        if identity and identity.chapter_idx and prefs.kopt then
+            local existing = M.load(identity) or {}
+            existing.kopt = copyValue(prefs.kopt)
+            if prefs.zoom_mode ~= nil then
+                existing.zoom_mode = prefs.zoom_mode
+            end
+            if not BookDB.setReaderPrefs(identity.source_id, identity.stable_id, JSON.encode(existing)) then
+                logger.warn("book.reader_prefs saveDefaults current failed", identity.source_id, identity.stable_id)
+            end
+        end
     end
     return true
 end
 
 
---- 漫画 CBZ 开书默认：整页按宽度缩放、不裁边、页间距为 0。
+--- 漫画 CBZ 开书默认：不裁边、页间距 0；缩放/视图有用户默认或全书偏好就用它们，
+--- 否则才回落整页按宽度 + 连续滚动。
 ---
 --- KOReader 默认 trim_page=auto，且 sidecar 没写 zoom 时 genus 回退为 content；
 --- 于是每页按内容框 fit width。条漫切片画布同宽、接缝本应对齐，空白更多的一页
 --- 会被放大并左右错开。连续滚动默认还有 kopt_page_gap_height=8 的灰条缝。
---- 只写 CBZ/CBT，不动 PDF。对齐与去缝各记一次标记，之后尊重用户改动。
---- 分页/连续模式按书身份恢复，不能把每章的首次默认当成全书的用户选择。
+--- 只写 CBZ/CBT，不动 PDF。对齐与去缝各记一次标记；缩放键优先全书 prefs / 全局默认，
+--- 不能每章新 sidecar 都强制 pagewidth 盖掉「设为默认」。
 local COMIC_FIT_KEY = "book_comic_cbz_fit"
 local COMIC_GAP_KEY = "book_comic_cbz_nogap"
+
+--- 种一个 kopt 键：全书 prefs 已写过的不动；否则全局默认；再否则 moon_default（可覆盖 sidecar 噪值）。
+---@param doc_settings table
+---@param kopt table|nil
+---@param key string
+---@param moon_default any
+---@return boolean
+local function plantComicKopt(doc_settings, kopt, key, moon_default)
+    if kopt and kopt[key] ~= nil then return false end
+    local global = G_reader_settings:readSetting("kopt_" .. key)
+    local value = global ~= nil and global or moon_default
+    if doc_settings:readSetting("kopt_" .. key) == value then return false end
+    doc_settings:saveSetting("kopt_" .. key, value)
+    return true
+end
 
 --- DocSettingsLoad：在原生 ReadSettings 之前写入 kopt 默认。
 ---@param doc_settings table
@@ -396,27 +461,76 @@ function M.injectComic(doc_settings, document)
     local changed = false
     local identity = Store.identityFor(document.file)
     local prefs = identity and identity.chapter_idx and M.load(identity)
-    local mode = prefs and prefs.kopt and prefs.kopt.page_scroll
-    if mode ~= nil and doc_settings:readSetting("kopt_page_scroll") ~= mode then
-        doc_settings:saveSetting("kopt_page_scroll", mode)
-        changed = true
+    local kopt = prefs and prefs.kopt
+    if kopt then
+        for _idx, key in ipairs(COMIC_KOPT_KEYS) do
+            local value = kopt[key]
+            if value ~= nil and doc_settings:readSetting("kopt_" .. key) ~= value then
+                doc_settings:saveSetting("kopt_" .. key, copyValue(value))
+                changed = true
+            end
+        end
+        local zoom_mode = prefs.zoom_mode
+        if type(zoom_mode) == "string" and zoom_mode ~= ""
+            and doc_settings:readSetting("zoom_mode") ~= zoom_mode then
+            doc_settings:saveSetting("zoom_mode", zoom_mode)
+            changed = true
+        end
     end
     if not doc_settings:readSetting(COMIC_FIT_KEY) then
         -- 3=none，4=page，1=width：与 koptoptions / ReaderZooming 的取值一致。
-        doc_settings:saveSetting("kopt_trim_page", 3)
-        doc_settings:saveSetting("kopt_zoom_mode_genus", 4)
-        doc_settings:saveSetting("kopt_zoom_mode_type", 1)
-        if doc_settings:readSetting("kopt_page_scroll") == nil then
+        if plantComicKopt(doc_settings, kopt, "trim_page", 3) then changed = true end
+        -- 视图模式：全书 prefs 已写；否则 sidecar 已有明确值不盖；缺省才种全局或连续。
+        if not (kopt and kopt.page_scroll ~= nil)
+            and doc_settings:readSetting("kopt_page_scroll") == nil then
             local default = G_reader_settings:readSetting("kopt_page_scroll")
             doc_settings:saveSetting("kopt_page_scroll", default ~= nil and default or 1)
+            changed = true
         end
-        doc_settings:saveSetting("zoom_mode", "pagewidth")
+        -- 有全书 / 全局缩放默认：尊重用户。否则强制 pagewidth，盖掉 sidecar 里 KOReader 的 contentwidth。
+        local user_zoom = (kopt and kopt.zoom_mode_genus ~= nil)
+            or G_reader_settings:readSetting("kopt_zoom_mode_genus") ~= nil
+        if user_zoom then
+            if plantComicKopt(doc_settings, kopt, "zoom_mode_genus", 4) then changed = true end
+            if plantComicKopt(doc_settings, kopt, "zoom_mode_type", 1) then changed = true end
+            if not (kopt and kopt.zoom_factor ~= nil) then
+                local zoom_factor = G_reader_settings:readSetting("kopt_zoom_factor")
+                if zoom_factor ~= nil and doc_settings:readSetting("kopt_zoom_factor") ~= zoom_factor then
+                    doc_settings:saveSetting("kopt_zoom_factor", zoom_factor)
+                    changed = true
+                end
+            end
+            if doc_settings:readSetting("zoom_mode") == nil then
+                doc_settings:saveSetting("zoom_mode", zoomModeString(
+                    doc_settings:readSetting("kopt_zoom_mode_genus"),
+                    doc_settings:readSetting("kopt_zoom_mode_type")))
+                changed = true
+            end
+        else
+            if doc_settings:readSetting("kopt_zoom_mode_genus") ~= 4 then
+                doc_settings:saveSetting("kopt_zoom_mode_genus", 4)
+                changed = true
+            end
+            if doc_settings:readSetting("kopt_zoom_mode_type") ~= 1 then
+                doc_settings:saveSetting("kopt_zoom_mode_type", 1)
+                changed = true
+            end
+            if doc_settings:readSetting("zoom_mode") ~= "pagewidth" then
+                doc_settings:saveSetting("zoom_mode", "pagewidth")
+                changed = true
+            end
+        end
         doc_settings:saveSetting(COMIC_FIT_KEY, true)
         changed = true
     end
     -- 上一版只种了对齐标记的 sidecar 也要去掉灰缝，但不能再改用户后来的缩放/裁边。
     if not doc_settings:readSetting(COMIC_GAP_KEY) then
-        doc_settings:saveSetting("kopt_page_gap_height", 0)
+        if kopt and kopt.page_gap_height ~= nil then
+            -- 全书偏好已写。
+        else
+            local gap = G_reader_settings:readSetting("kopt_page_gap_height")
+            doc_settings:saveSetting("kopt_page_gap_height", gap ~= nil and gap or 0)
+        end
         doc_settings:saveSetting(COMIC_GAP_KEY, true)
         changed = true
     end
