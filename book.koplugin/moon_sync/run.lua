@@ -243,6 +243,7 @@ function Run.start(report, done, interactive)
     end
 
     local function fail(err)
+        require("utils.log").warn("moon sync failed", err)
         finish({ ok = false, err = err })
     end
 
@@ -479,10 +480,11 @@ local function syncProgress(handle, dav, dir, source_id, cb)
     local job = listDir(dav, dir, function(entries, err)
         if handle.cancelled then return end
         if not entries then return cb(err) end
+        local index = Reading.digestIndex(source_id)
         local pulls = {}
         for _idx, entry in ipairs(entries) do
             local name = not entry.is_dir and entry.name:match("^([%w%%%-]+)%.po$")
-            local id = name and Reading.idFromName(name)
+            local id = name and Reading.idOf(name, index)
             local updated_at, dirty = id and Reading.progressStamp(source_id, id)
             if id and handle.trusted ~= false and Reading.shouldPull(updated_at, dirty, entry.mtime) then
                 pulls[#pulls + 1] = { id = id, name = name, mtime = entry.mtime }
@@ -519,22 +521,24 @@ end
 ---@param handle table
 ---@param dav WebdavClient
 ---@param dir string
+---@param source_id string
 ---@param books table
 ---@param device_id string
 ---@param suffix string
 ---@param apply fun(book_id: string, doc: table, mtime: number|nil)
 ---@param confirm fun(book: table)
 ---@param cb fun(err: string|nil)
-local function syncPerBook(handle, dav, dir, books, device_id, ext, apply, confirm, cb)
+local function syncPerBook(handle, dav, dir, source_id, books, device_id, ext, apply, confirm, cb)
     local Reading = require("moon_sync.reading")
     local pattern = "^([%w%%%-]+)" .. ext:gsub("%.", "%%.") .. "$"
     local job = listDir(dav, dir, function(entries, err)
         if handle.cancelled then return end
         if not entries then return cb(err) end
+        local index = Reading.digestIndex(source_id)
         local pulls = {}
         for _idx, entry in ipairs(entries) do
             local name = not entry.is_dir and entry.name:match(pattern)
-            local id = name and Reading.idFromName(name)
+            local id = name and Reading.idOf(name, index)
             local book = id and books[id]
             if id and handle.trusted ~= false and Reading.shouldPull(book and book.latest, book and #book.dirty > 0, entry.mtime) then
                 pulls[#pulls + 1] = { id = id, name = name, mtime = entry.mtime }
@@ -589,7 +593,7 @@ local function syncFallback(handle, dav, root, item, device_id, cb)
     local function after_notes(err)
         if err or handle.cancelled then return cb(err) end
         if not item.stats then return cb() end
-        syncPerBook(handle, dav, base .. "/Stats", Reading.statsByBook(item.id), device_id, ".json",
+        syncPerBook(handle, dav, base .. "/Stats", item.id, Reading.statsByBook(item.id), device_id, ".json",
             function(id, doc) Reading.applyStats(item.id, id, doc, device_id) end,
             function(book) Reading.confirmStats(book.dirty) end,
             cb)
@@ -597,7 +601,7 @@ local function syncFallback(handle, dav, root, item, device_id, cb)
     local function after_progress(err)
         if err or handle.cancelled then return cb(err) end
         if not item.notes then return after_notes() end
-        syncPerBook(handle, dav, base .. "/Notes", Reading.notesByBook(item.id), device_id, ".json",
+        syncPerBook(handle, dav, base .. "/Notes", item.id, Reading.notesByBook(item.id), device_id, ".json",
             function(id, doc, mtime) Reading.applyNotes(item.id, id, doc, mtime) end,
             function(book) Reading.confirmNotes(item.id, book) end,
             after_notes)

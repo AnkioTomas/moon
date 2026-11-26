@@ -1,9 +1,8 @@
 --[[--
-本地源：WebDAV 下 .Moon+/ 的进度、统计、笔记文件读写。
+本地源：WebDAV 下的进度、统计、笔记文件读写。
 非 webdav:// 身份（纯本地书）没有远端，推送直接成功、拉取为空。
 函数首参即 LocalClient，由 source.local.client 装配为方法。
-进度只读写静读天下的 .po（章、分卷、字符偏移、百分比）。
-Notes/ 是 KOReader 注解坐标，Stats/ 是阅读时长；静读天下的文件里没有这两样。
+进度的路径和编码在 source.local.layout。笔记和统计仍在 .Moon+/，布局不认它们。
 
 @module koplugin.book.source.local.remote_data
 --]]
@@ -16,8 +15,7 @@ local defer, readFile, writeFile, field = Common.defer, Common.readFile, Common.
 local eachAsync, fetchText, putText = Common.eachAsync, Common.fetchText, Common.putText
 local md5 = require("ffi/sha2").md5
 local remoteStableId, remoteRelativePath = Common.remoteStableId, Common.remoteRelativePath
-local encodeProgress, decodeProgress = Common.encodeProgress, Common.decodeProgress
-local moonPath, progressRemotePath, notesRemotePath = Common.moonPath, Common.progressRemotePath, Common.notesRemotePath
+local moonPath, notesRemotePath = Common.moonPath, Common.notesRemotePath
 
 local RemoteData = {}
 
@@ -30,12 +28,14 @@ function RemoteData.getProgressAsync(self, stable_id, cb)
     local rel = remoteRelativePath(stable_id)
     if not rel then return defer(cb, nil, nil, { empty = true }) end
     local cancelled, active = false, nil
-    active = fetchText(self, progressRemotePath(self, rel), self:webdavCacheRoot() .. "/.progress.get",
+    local layout = self:layout()
+    active = fetchText(self, layout:progress_path(self, rel), self:webdavCacheRoot() .. "/.progress.get",
         function(raw, err, missing)
             if cancelled then return end
             if missing then return cb(nil, nil, { empty = true }) end
             if not raw then return cb(nil, err) end
-            local pos = decodeProgress(raw)
+            local row = require("book.books_db").get(SOURCE_ID, stable_id)
+            local pos = layout:decode(raw, row and row.path)
             if not pos then return cb(nil, _("进度为空")) end
             cb(pos)
         end)
@@ -55,8 +55,9 @@ function RemoteData.putProgressAsync(self, stable_id, pos, cb)
     local rel = remoteRelativePath(stable_id)
     if not rel then return defer(cb, true) end
     local cancelled, active = false, nil
-    active = putText(self, progressRemotePath(self, rel), self:webdavCacheRoot() .. "/.progress.upload",
-        encodeProgress(pos), function(ok, err)
+    local layout = self:layout()
+    active = putText(self, layout:progress_path(self, rel), self:webdavCacheRoot() .. "/.progress.upload",
+        layout:encode(self, rel, pos), function(ok, err)
             if cancelled then return end
             if ok then cb(true) else cb(nil, err) end
         end)

@@ -2242,3 +2242,53 @@ do
     Assert.eq(dav:count("GET " .. ROOT .. "/直接传的.epub"), 0, "正文不下载")
     books = {}
 end
+
+-- Legado：books/ 就是书架，不写 books.sync。进度文件名是书名_作者，章号从 0 起。
+do
+    books, progress = {}, {}
+    local legado = require("source.local.layout").get("legado")
+    local dav = fakeDav()
+    dav:put(ROOT .. "/books/斗破.epub", "x")
+    local c = Client.new({ webdav_url = "https://dav.example", webdav_sync_style = "legado" })
+    c.dav = dav
+    local s = source(c)
+    sync(s)
+    local id = "webdav://斗破.epub"
+    Assert.eq(books[id].deleted, 0)
+    Assert.eq(books[id].title, "斗破")
+    Assert.is_nil(dav.files[SYNC], "不写静读天下书目")
+    Assert.eq(dav:count("PROPFIND " .. ROOT .. "/books"), 1, "日常同步就列 books/")
+
+    books[id].title = "斗破苍穹"
+    books[id].authors = "天蚕土豆"
+    local progress_path = ROOT .. "/bookProgress/" .. legado.progress_filename("斗破苍穹", "天蚕土豆")
+    dav:put(progress_path, legado.encode_progress({
+        updated_at = 1700000200, chapter_idx = 4, fraction = 0, chapter_title = "第四章",
+        extra = { offset = 12, at_fraction = 0 },
+    }, "斗破苍穹", "天蚕土豆"), 1700000300)
+    sync(s)
+    Assert.eq(progress[id].chapter_idx, 4)
+    Assert.eq(progress[id].extra.offset, 12)
+    Assert.eq(progress[id].chapter_title, "第四章")
+
+    local pushed
+    s:putProgressAsync({ stable_id = id }, {
+        updated_at = 1700000400, chapter_idx = 5, fraction = 0.2, chapter_title = "第五章",
+        extra = { offset = 8, volume = 0, at_fraction = 0.2 },
+    }, function(ok) pushed = ok end)
+    Stubs.flush()
+    Assert.is_true(pushed)
+    local body = Json.decode(dav.files[progress_path].data)
+    Assert.eq(body.durChapterIndex, 4)
+    Assert.eq(body.durChapterPos, 8)
+    Assert.eq(body.name, "斗破苍穹")
+    Assert.eq(body.author, "天蚕土豆")
+    Assert.eq(body.durChapterTitle, "第五章")
+
+    BookDB.markDeleted("local", id)
+    sync(s, { dirty_only = true })
+    Assert.is_nil(dav.files[ROOT .. "/books/斗破.epub"])
+    Assert.is_nil(dav.files[progress_path])
+    Assert.is_nil(books[id])
+    books, progress = {}, {}
+end

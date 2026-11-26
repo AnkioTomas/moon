@@ -61,6 +61,7 @@ package.preload["ui.themes.widgets.list"] = function()
                 subtitle = opts.subtitle,
                 page = 1,
                 items = opts.items,
+                on_select = opts.on_select,
                 show = function() end,
                 close = function() end,
                 setItems = function(self, items) self.items = items end,
@@ -189,7 +190,7 @@ local groups = Setting.sections(plugin)
 Assert.eq(groups[1].title, "书库")
 Assert.len(groups[1].rows, 2)
 Assert.eq(groups[2].title, "同步")
-Assert.len(groups[2].rows, 1)
+Assert.len(groups[2].rows, 2)
 local upload = groups[2].rows[1](100)
 Assert.eq(upload.title, "上传本地书到 WebDAV")
 Assert.eq(upload.status, "开")
@@ -197,3 +198,13 @@ upload.callback()
 Assert.eq(cfg.webdav_upload_local, false)
 Assert.eq(row(3).status, "关")
 Assert.eq(painted, 4)
+
+local style = groups[2].rows[2](100)
+Assert.eq(style.title, "同步风格")
+Assert.eq(style.status, "静读天下")
+style.callback()
+list.on_select("legado")
+Assert.eq(cfg.webdav_sync_style, "legado")
+Assert.eq(row(4).status, "Legado")
+list.on_select("moon")
+Assert.is_nil(cfg.webdav_sync_style)

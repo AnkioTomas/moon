@@ -139,7 +139,7 @@ local skipped = SourceBase.skipped
 local AUTO_SYNC_INTERVAL = 60
 
 --- 书架同步。WebDAV 地址在月读同步的 webdav_url。
---- 地址非空就走静读天下流水线（它自己合并本机目录）；再并行扫一遍盘会和收编打架。
+--- 地址非空就走 WebDAV 流水线（风格见本地源「同步风格」，缺省静读天下；它自己合并本机目录）；再并行扫一遍盘会和收编打架。
 --- WebDAV：force=逐目录核对远端文件、dirty_only=只推本地删除与书目改动、否则日常同步；
 --- 有本地改动没推上去时整轮仍算成功，原因放在 push_error。纯本地目录：轻扫盘（不开文档）+ 后台补齐封面。
 --- AUTO_SYNC_INTERVAL 只约束打开桌面的自动同步；force / manual / dirty_only 都跳过，不重提封面。

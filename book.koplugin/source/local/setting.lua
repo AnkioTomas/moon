@@ -60,6 +60,38 @@ function Setting.sections(plugin)
                 repaint()
             end })
     end
+    local function styleRow(iw)
+        local Settings = require("utils.settings")
+        local Layout = require("source.local.layout")
+        local cfg = Settings.getSource(SOURCE_ID)
+        local current = Layout.get(cfg.webdav_sync_style)
+        local items = {}
+        for i, layout in ipairs(Layout.all()) do
+            items[i] = { value = layout.id, text = _(layout.label) }
+        end
+        return Row.widget({ width = iw, chevron = true, kind = "nav", icon = "cloud_sync",
+            title = _("同步风格"),
+            subtitle = _(current.detail),
+            status = _(current.label), status_on = true,
+            callback = function()
+                require("ui.themes.widgets.list"):new{
+                    title = _("同步风格"),
+                    items = items,
+                    current = current.id,
+                    centered = true,
+                    on_select = function(value)
+                        if Layout.get(value).id ~= value then return end
+                        -- 缺省不落盘，旧配置没有这个键就仍是缺省布局。
+                        local next_style = nil
+                        if value ~= Layout.default_id then next_style = value end
+                        if cfg.webdav_sync_style == next_style then return end
+                        cfg.webdav_sync_style = next_style
+                        Settings.saveSource(SOURCE_ID, cfg)
+                        repaint()
+                    end,
+                }:show()
+            end })
+    end
     local function uploadRow(iw)
         local Settings = require("utils.settings")
         local cfg = Settings.getSource(SOURCE_ID)
@@ -76,7 +108,7 @@ function Setting.sections(plugin)
     end
     return {
         { title = _("书库"), rows = { localPathRow, folderCategoryRow } },
-        { title = _("同步"), rows = { uploadRow } },
+        { title = _("同步"), rows = { uploadRow, styleRow } },
     }
 end
 

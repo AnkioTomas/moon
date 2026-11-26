@@ -531,7 +531,7 @@ local function scanFiles(root, flat)
     return files, skipped
 end
 
---- 远端 .Moon+ 下的路径。
+--- 远端 .Moon+ 下的路径。静读天下边车走这里。别的布局在 source.local.layout。
 ---@param self LocalClient
 ---@param name string
 ---@return string

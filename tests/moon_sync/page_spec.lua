@@ -28,7 +28,9 @@ package.preload["ui.themes.widgets.row"] = function()
     return { widget = function(opts) return opts end }
 end
 package.preload["gettext"] = function()
-    return setmetatable({}, { __call = function(_, text) return text end })
+    return setmetatable({ translation = {}, current_lang = "zh_CN" }, {
+        __call = function(_, text) return text end,
+    })
 end
 package.loaded["utils.settings"] = nil
 package.loaded["ui.themes.widgets.row"] = nil

@@ -1,6 +1,6 @@
 --[[--
-本地源：WebDAV 书库。书目（.Moon+/books.sync）同步流水线、按需下载正文、删除、
-单本上行、排版替换与连通性测试。布局与静读天下 / book 服务端共用，见 scanWebdavAsync。
+本地源：WebDAV 书库。按需下载正文、删除、单本上行与连通性测试。
+目录、书目、进度编码都在 source.local.layout，这里不出现风格名字。
 函数首参即 LocalClient，由 source.local.client 装配为方法。
 
 @module koplugin.book.source.local.webdav
@@ -22,7 +22,6 @@ local eachAsync, coverPath = Common.eachAsync, Common.coverPath
 local safeRel = Common.safeRel
 local parseBookProps, scanFiles = Common.parseBookProps, Common.scanFiles
 local moonPath, coverRemotePath = Common.moonPath, Common.coverRemotePath
-local progressRemotePath, notesRemotePath = Common.progressRemotePath, Common.notesRemotePath
 
 local Webdav = {}
 
@@ -270,7 +269,7 @@ local function listBooks(self, run, done)
     local folder_timeout = Timeout.net(1)
     local folder_connect = Timeout.net(Timeout.CONNECT_RATIO)
     local tree_timeout = Timeout.net(10)
-    local root = self:webdavPath()
+    local root = self:bookRemoteRoot()
     local known = knownRemoteFiles()
     local list_jobs = {}
     run.list_jobs = list_jobs
@@ -341,22 +340,26 @@ local function listBooks(self, run, done)
         done(err)
     end
 
-    -- 固定布局目录（书库根、.Moon+、Cache、Cover）不存在就建，已存在时 MKCOL 返回 405 视为成功。
-    run.report(_("正在检查远端目录…"))
-    run.active = self.dav:ensurePathAsync(moonPath(self, "Cache"), function(ok, err)
-        if run.cancelled then return end
-        if not ok then return done(err) end
-        run.active = self.dav:ensurePathAsync(moonPath(self, "Cover"), function(ok_cover, cover_err)
+    -- 布局声明的目录不存在就建，已存在时 MKCOL 返回 405 视为成功。
+    local function beginList()
+        run.report(T(_("正在列出远端目录 %1"), root))
+        run.active = self.dav:listAsync(root, function(entries, list_err)
             if run.cancelled then return end
-            if not ok_cover then return done(cover_err) end
-            run.report(T(_("正在列出远端目录 %1"), root))
-            run.active = self.dav:listAsync(root, function(entries, list_err)
-                if run.cancelled then return end
-                if not entries then return finishList(list_err or "WebDAV list failed") end
-                walkEntries(root, "", 1, entries, function() finishList() end)
-            end, { depth = "1", timeout = tree_timeout, connect_timeout = tree_timeout })
+            if not entries then return finishList(list_err or "WebDAV list failed") end
+            walkEntries(root, "", 1, entries, function() finishList() end)
+        end, { depth = "1", timeout = tree_timeout, connect_timeout = tree_timeout })
+    end
+    local function ensureDirs(dirs, index)
+        local dir = dirs[index]
+        if not dir then return beginList() end
+        run.active = self.dav:ensurePathAsync(dir, function(ok, err)
+            if run.cancelled then return end
+            if not ok then return done(err) end
+            ensureDirs(dirs, index + 1)
         end)
-    end)
+    end
+    run.report(_("正在检查远端目录…"))
+    ensureDirs(self:layout():dirs(self), 1)
 end
 
 --- 同步步骤：扫本地书库目录。扫不全就中止整轮：合并时会把“本地也没有”的条目删掉。
@@ -430,9 +433,7 @@ end
 ---@param run WebdavRun
 ---@param done fun(err: string|nil)
 local function pullBooksSync(self, run, done)
-    run.report(_("正在下载书目…"))
-    run.active = fetchText(self, moonPath(self, "books.sync"), self:webdavCacheRoot() .. "/.books.sync",
-        function(raw, err, missing)
+    local function fetched(raw, err, missing)
         if run.cancelled then return end
         -- 连不上、认证 / 权限错误：后面每一步都会同样失败，中止整轮把原因报给用户。
         if not raw and not missing then return done(err) end
@@ -515,27 +516,39 @@ local function pullBooksSync(self, run, done)
             end
         end
         done()
-    end)
+    end
+    -- 没有书目文件时，书架就是列出来的书。没列过目录不能把空书目当成「远端没有书」。
+    local layout = self:layout()
+    run.report(_("正在下载书目…"))
+    if not layout.catalog then
+        if not run.remote then return done() end
+        for rel in pairs(run.remote) do
+            if safeRel(rel) then run.entries[rel] = { filename = rel } end
+        end
+        return fetched(nil, nil, true)
+    end
+    run.active = fetchText(self, layout:catalog(self), self:webdavCacheRoot() .. "/.books.sync", fetched)
 end
 
---- 同步步骤：拉进度。版本以 .po 文件 mtime 为准，只下载比本地新的；本地脏行由 upsertRemote 保留。
+--- 同步步骤：拉进度。文件名和目录由布局给出，mtime 比本地新才下；本地脏行由 upsertRemote 保留。
 ---@param self LocalClient
 ---@param run WebdavRun
 ---@param done fun(err: string|nil)
 local function pullProgress(self, run, done)
     local ProgressDB = require("book.progress_db")
+    local layout = self:layout()
     run.report(_("正在检查阅读进度…"))
-    run.active = self.dav:listAsync(moonPath(self, "Cache"), function(entries, err)
+    local by_key = {}
+    for _idx, rel in ipairs(run.files) do by_key[layout:progress_file(self, rel)] = rel end
+    run.active = self.dav:listAsync(layout:progress_dir(self), function(entries, err)
         if run.cancelled then return end
         if not entries then
             require("utils.log").warn("book webdav progress list failed", err)
             return done()
         end
-        local by_key = {}
-        for _idx, rel in ipairs(run.files) do by_key[sidecarKey(rel)] = rel end
         local pending = {}
         for _idx, entry in ipairs(entries) do
-            local rel = by_key[entry.name:match("^(.+)%.po$") or ""]
+            local rel = by_key[entry.name]
             local pos = rel and ProgressDB.get(SOURCE_ID, remoteStableId(rel))
             if rel and entry.mtime and (not pos or pos.sync_status ~= 0
                 and entry.mtime > (tonumber(pos.updated_at) or 0)) then
@@ -563,6 +576,7 @@ end
 ---@param run WebdavRun
 ---@param done fun(err: string|nil)
 local function pullCovers(self, run, done)
+    if not self:layout().covers then return done() end
     run.report(_("正在检查封面…"))
     run.active = self.dav:listAsync(moonPath(self, "Cover"), function(entries, err)
         if run.cancelled then return end
@@ -792,7 +806,8 @@ local function uploadLocal(self, run, done)
         run.report(T(_("正在上传 %1"), rel), i, #pending)
         local item, stable_id = run.local_files[rel], remoteStableId(rel)
         local parent = rel:match("^(.+)/[^/]+$")
-        run.active = self.dav:ensurePathAsync(self:webdavPath() .. (parent and "/" .. parent or ""),
+        local remote_root = self:bookRemoteRoot()
+        run.active = self.dav:ensurePathAsync(remote_root .. (parent and "/" .. parent or ""),
             function(ok_dir, dir_err)
                 if run.cancelled then return end
                 if not ok_dir then
@@ -800,7 +815,7 @@ local function uploadLocal(self, run, done)
                     fail(rel, dir_err, true)
                     return next_item()
                 end
-                run.active = self.dav:putFileAsync(self:webdavPath() .. "/" .. rel, item.path, function(ok, err, code)
+                run.active = self.dav:putFileAsync(remote_root .. "/" .. rel, item.path, function(ok, err, code)
                     if run.cancelled then return end
                     if not ok then
                         require("utils.log").warn("book webdav upload failed", rel, err)
@@ -818,6 +833,11 @@ local function uploadLocal(self, run, done)
                     })
                     -- 文件上去了、书目还没写：标脏，书目写成才由 pushBooksSync 清脏。
                     -- 已同步而书目里没有的行会被下一轮当成别的设备删了，连本地原书一起删掉。
+                    -- 没有书目文件时，这个文件本身就是书目，传完把它算进本轮远端。
+                    if not self:layout().catalog then
+                        run.remote = run.remote or {}
+                        run.remote[rel] = true
+                    end
                     BookDB.setLibraryMembership(SOURCE_ID, stable_id, true)
                     if not member[rel] then
                         member[rel] = true
@@ -839,7 +859,7 @@ end
 ---@param run WebdavRun
 ---@param done fun(err: string|nil)
 local function uploadCovers(self, run, done)
-    if not uploadEnabled() then return done() end
+    if not self:layout().covers or not uploadEnabled() then return done() end
     local pending = {}
     for _idx, rel in ipairs(run.files) do
         if not run.covers[sidecarKey(rel)]
@@ -872,7 +892,7 @@ local function writeBooksSync(self, list, remote_version, cb)
     local ok_zlib, Zlib = pcall(require, "ffi/zlib")
     local data = ok_zlib and Zlib.zlib_compress(JSON.encode(#list > 0 and list or JSON.util.InitArray({})))
     if not data then return defer(cb, false, _("无法生成 WebDAV 书目文件")) end
-    return putText(self, moonPath(self, "books.sync"), self:webdavCacheRoot() .. "/.books.sync.upload", data,
+    return putText(self, self:layout():catalog(self), self:webdavCacheRoot() .. "/.books.sync.upload", data,
         function(ok, err)
             if ok then rememberVersion(self, version, device) end
             cb(ok, err)
@@ -888,6 +908,22 @@ end
 ---@param run WebdavRun
 ---@param done fun(err: string|nil)
 local function pushBooksSync(self, run, done)
+    if not self:layout().catalog then
+        -- 没有书目文件。只有远端已经有文件的脏行才能清掉；
+        -- 还没传上去的书留着脏标记，否则下一轮会把它当成别的设备删了。
+        if run.reconcile_skipped or not run.remote then return done() end
+        local BookDB = require("book.books_db")
+        local ids = {}
+        for i, rel in ipairs(run.files) do ids[i] = remoteStableId(rel) end
+        local rows = BookDB.getMany(SOURCE_ID, ids)
+        for i, rel in ipairs(run.files) do
+            local row = rows[ids[i]]
+            if row and row.sync_status == 0 and row.deleted ~= 1 and run.remote[rel] then
+                BookDB.markSynced(SOURCE_ID, ids[i])
+            end
+        end
+        return done()
+    end
     if run.meta_failed or (run.reconcile_skipped and not run.remote) then return done() end
     local BookDB = require("book.books_db")
     local ids = {}
@@ -939,11 +975,10 @@ end
 ---@return { cancel: fun() }
 local function deleteRemoteBook(self, rel, cb)
     local cancelled, active = false, nil
-    active = self.dav:deleteAsync(self:webdavPath() .. "/" .. rel, function(ok, err, code)
+    active = self.dav:deleteAsync(self:bookRemoteRoot() .. "/" .. rel, function(ok, err, code)
         if cancelled then return end
         if not ok and code ~= 404 then return cb(false, err) end
-        local sidecars = { coverRemotePath(self, rel), progressRemotePath(self, rel),
-            progressRemotePath(self, rel) .. ".json", notesRemotePath(self, rel) }
+        local sidecars = self:layout():sidecars(self, rel)
         eachAsync(sidecars, function(path, next_item)
             active = self.dav:deleteAsync(path, function()
                 if not cancelled then next_item() end
@@ -966,7 +1001,7 @@ end
 ---@return { cancel: fun() }
 local function editBooksSync(self, rel, edit, cb)
     local cancelled, active = false, nil
-    active = fetchText(self, moonPath(self, "books.sync"), self:webdavCacheRoot() .. "/.books.sync.edit",
+    active = fetchText(self, self:layout():catalog(self), self:webdavCacheRoot() .. "/.books.sync.edit",
         function(raw, get_err, missing)
         if cancelled then return end
         if not raw and not missing then return cb(false, get_err) end
@@ -1016,6 +1051,10 @@ local function pushDeletes(self, run, done)
                 run.push_error = run.push_error or err
                 return next_item()
             end
+            if not self:layout().catalog then
+                if BookDB.remove(SOURCE_ID, stable_id) then run.deleted = run.deleted + 1 end
+                return next_item()
+            end
             run.active = editBooksSync(self, rel, function() return nil end, function(listed, edit_err)
                 if run.cancelled then return end
                 if not listed then run.push_error = run.push_error or edit_err end
@@ -1025,14 +1064,6 @@ local function pushDeletes(self, run, done)
         end)
     end, done)
 end
-
---- 日常同步以 books.sync 为准，并扫本地书库目录、本地新书先入库、整轮结束后台再上传（扫在拉书目之后：别的设备删掉的书先删了本地那份，
---- 不会被当成新书传回去）；推脏只推删除与书目改动（改书目要先读远端）；刷新再列远端目录合并。
-local SYNC_STEPS = {
-    pushDeletes, pullBooksSync, scanLocal, pullProgress, pullCovers,
-    indexLocal, enrichCached, uploadCovers, pushBooksSync,
-}
-local DIRTY_STEPS = { pushDeletes, pullBooksSync, pushBooksSync }
 
 --- 刷新收尾：远端原本为空而跳过了 reconcile 时，按刚写出的书目再 reconcile 一次（服务端被清空后一轮收敛）。
 ---@param self LocalClient
@@ -1044,10 +1075,41 @@ local function reconcileSkipped(self, run, done)
     pullBooksSync(self, run, done)
 end
 
-local REFRESH_STEPS = {
-    pushDeletes, listBooks, scanLocal, pullBooksSync, pullProgress, pullCovers,
-    indexLocal, enrichCached, uploadCovers, pushBooksSync, reconcileSkipped,
-}
+--- 一轮要跑哪些步，只看布局上的两个事实：书架是不是目录、有没有封面。
+--- 有书目文件的推脏要先读再写；没有书目文件的推脏只删文件。
+---@param layout table
+---@param opts { refresh?: boolean, dirty_only?: boolean }
+---@return function[] steps
+---@return boolean list 这一轮会列书目录（run.remote 必须是表）
+local function roundSteps(layout, opts)
+    local dirty = opts.dirty_only
+    local list = not dirty and (opts.refresh or layout.shelf_is_dir)
+    local steps = { pushDeletes }
+    if dirty then
+        -- 有书目文件才先读再写；没有书目文件的推脏只删远端文件。
+        if layout.catalog then steps[#steps + 1] = pullBooksSync end
+        steps[#steps + 1] = pushBooksSync
+        return steps, false
+    end
+    if list then steps[#steps + 1] = listBooks end
+    -- 列过目录就先扫本地再对书目。没列目录先按书目删掉别的设备删了的书，
+    -- 再扫，否则那份本地文件会被当成新书传回去。
+    if list then
+        steps[#steps + 1] = scanLocal
+        steps[#steps + 1] = pullBooksSync
+    else
+        steps[#steps + 1] = pullBooksSync
+        steps[#steps + 1] = scanLocal
+    end
+    steps[#steps + 1] = pullProgress
+    if layout.covers then steps[#steps + 1] = pullCovers end
+    steps[#steps + 1] = indexLocal
+    steps[#steps + 1] = enrichCached
+    if layout.covers then steps[#steps + 1] = uploadCovers end
+    steps[#steps + 1] = pushBooksSync
+    if list and layout.catalog then steps[#steps + 1] = reconcileSkipped end
+    return steps, list
+end
 
 --- 后台上传：重读书目再上传，不复用前台那一轮的快照（排队期间 books.sync 可能已被别的写入改过）。
 local UPLOAD_STEPS = { scanLocal, pullBooksSync, uploadLocal, uploadCovers, pushBooksSync, reconcileSkipped }
@@ -1063,7 +1125,9 @@ local queues = {}
 ---@param start fun(release: fun()): table|nil 返回可取消句柄
 ---@return { cancel: fun() }
 local function serial(self, start)
-    local key = self:connection().webdav_url .. "\0" .. moonPath(self, "books.sync")
+    local layout = self:layout()
+    local catalog = layout.catalog and layout:catalog(self) or layout:book_root(self)
+    local key = self:connection().webdav_url .. "\0" .. catalog
     local queue = queues[key] or {}
     queues[key] = queue
     local handle, released, begin = nil, false, nil
@@ -1125,14 +1189,9 @@ local function backgroundUpload(self, remote, report, done)
     end)
 end
 
---- WebDAV 书库同步，布局与静读天下 / book 服务端共用：
----   <根>/[分类/]书文件                正文
----   <根>/.Moon+/books.sync            书目（zlib 压缩 JSON）；书架成员只以它为准
----   <根>/.Moon+/Cover/<文件名>_2.png   封面
----   <根>/.Moon+/Cache/<文件名>.po      进度（只这一份，不另写 .po.json）
----   <根>/.Moon+/Stats/                 阅读统计：index.json 总表 + books/<md5>.json 按书（本插件私有，见 remote_data）
---- 正文不下载，openWebdavAsync 按需拉到本地书库目录。
---- 与单本上行同经 serial 排队：桌面同步、推脏、编辑上行不会交错读改写 books.sync。
+--- WebDAV 书库同步。目录、书目、进度在 source.local.layout。
+--- 笔记和统计仍在 .Moon+/，布局不认它们。正文不下载，打开时按需拉。
+--- 与单本上行同经 serial 排队：桌面同步、推脏、编辑上行不会交错读改写书目。
 ---@param cb fun(ok: boolean, err: string|nil, push_error: string|nil) push_error=整轮跑完但有本地改动没推上去
 ---@param opts { refresh?: boolean, dirty_only?: boolean, on_progress?: fun(text: string, done: integer|nil, total: integer|nil), on_background?: fun(start: fun(report: function, done: fun(err: string|nil)): { cancel: fun() }|nil) }|nil on_background=有本地新书要上传时把后台上传交给调用方排队并展示进度；refresh=用户点刷新：另列远端文件合并；dirty_only=只推本地改动
 ---@return { cancel: fun() }|nil
@@ -1143,11 +1202,11 @@ function Webdav.scanWebdavAsync(self, cb, opts)
         return defer(cb, false, err)
     end
     opts = opts or {}
-    local steps = opts.refresh and REFRESH_STEPS or opts.dirty_only and DIRTY_STEPS or SYNC_STEPS
+    local steps, list = roundSteps(self:layout(), opts)
     return serial(self, function(release)
         ---@type WebdavRun
         local run = { files = {}, entries = {}, covers = {}, cancelled = false,
-            remote = steps == REFRESH_STEPS and {} or nil,
+            remote = list and {} or nil,
             report = opts.on_progress or function() end }
         local index = 0
         local function nextStep(step_err)
@@ -1192,7 +1251,7 @@ function Webdav.openWebdavAsync(self, stable_id, cb)
     ensureParent(target)
     local part = target .. ".part"
     local cancelled = false
-    local job = self.dav:getAsync(self:webdavPath() .. "/" .. rel, part, nil, function(ok, get_err)
+    local job = self.dav:getAsync(self:bookRemoteRoot() .. "/" .. rel, part, nil, function(ok, get_err)
         if cancelled then return end
         if not ok then
             os.remove(part)
@@ -1225,11 +1284,26 @@ function Webdav.pushBookAsync(self, stable_id, cover, cb)
     local rel = remoteRelativePath(stable_id)
     if not rel then return defer(cb, true) end
     local BookDB = require("book.books_db")
+    local layout = self:layout()
+    local function mark()
+        -- 墓碑留给删除。没有书目文件时书名写在进度文件名里，下次推进度带上。
+        local row = BookDB.get(SOURCE_ID, stable_id)
+        if row and row.deleted ~= 1 then BookDB.markSynced(SOURCE_ID, stable_id) end
+    end
+    if not layout.catalog and not (cover and layout.covers) then
+        mark()
+        return defer(cb, true)
+    end
     -- upsertLocal 不标脏已有行；不标的话推送失败后下一轮 reconcile 会用远端书目把改动盖回去。
-    BookDB.setLibraryMembership(SOURCE_ID, stable_id, true)
+    if layout.catalog then BookDB.setLibraryMembership(SOURCE_ID, stable_id, true) end
     return serial(self, function(release)
         local cancelled, active = false, nil
         local function pushEntry()
+            if not layout.catalog then
+                mark()
+                release()
+                return cb(true)
+            end
             active = editBooksSync(self, rel, function(base)
                 local row = BookDB.get(SOURCE_ID, stable_id)
                 return row and rowEntry(self, row, rel, base) or base
@@ -1240,7 +1314,7 @@ function Webdav.pushBookAsync(self, stable_id, cover, cb)
                 cb(listed, edit_err)
             end)
         end
-        if not cover then
+        if not cover or not layout.covers then
             pushEntry()
         else
             local remote, path = coverRemotePath(self, rel), coverPath(stable_id)
@@ -1280,7 +1354,8 @@ function Webdav.importWebdavAsync(self, temp_path, filename, cb)
     if filename == "" then return defer(cb, nil, _("无效文件名")) end
     local BookDB = require("book.books_db")
     local cancelled, active = false, nil
-    active = self.dav:listAsync(self:webdavPath(), function(entries, list_err)
+    local root = self:bookRemoteRoot()
+    active = self.dav:listAsync(root, function(entries, list_err)
         if cancelled then return end
         -- 根目录还不存在（首次使用）按空目录处理，上传前会建。
         local remote = {}
@@ -1294,10 +1369,10 @@ function Webdav.importWebdavAsync(self, temp_path, filename, cb)
             n = n + 1
         end
         if not entries then require("utils.log").dbg("book webdav import list failed", list_err) end
-        active = self.dav:ensurePathAsync(self:webdavPath(), function(ok_dir, dir_err)
+        active = self.dav:ensurePathAsync(root, function(ok_dir, dir_err)
             if cancelled then return end
             if not ok_dir then return cb(nil, dir_err) end
-            active = self.dav:putFileAsync(self:webdavPath() .. "/" .. name, temp_path, function(ok, put_err)
+            active = self.dav:putFileAsync(root .. "/" .. name, temp_path, function(ok, put_err)
                 if cancelled then return end
                 if not ok then return cb(nil, put_err) end
                 local stable_id = remoteStableId(name)

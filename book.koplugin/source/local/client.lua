@@ -73,6 +73,18 @@ function Client:webdavPath()
     return path ~= "" and path or "Apps/Books"
 end
 
+--- 当前 WebDAV 布局。见 source.local.layout。
+---@return table
+function Client:layout()
+    return require("source.local.layout").of(self)
+end
+
+--- 书文件所在的远端目录，由布局决定。
+---@return string
+function Client:bookRemoteRoot()
+    return self:layout():book_root(self)
+end
+
 ---@return string
 function Client:webdavCacheRoot()
     return Paths.bookDir(SOURCE_ID) .. "/webdav"

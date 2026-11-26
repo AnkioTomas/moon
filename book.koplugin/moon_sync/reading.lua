@@ -29,20 +29,34 @@ local function rows(result, nrows, fields)
     return out
 end
 
---- 文件名。字母和横线原样留下，其余字节写成 %HH，这样网址一类的身份也能当文件名。
+-- 单级文件名 255 字节。最长的后缀是 `.cover.webp`（11 字节），茎留 244。
+local NAME_MAX = 244
+
+--- 文件名。字母和横线原样留下，其余字节写成 %HH。
+--- 编码后放不进 255 字节就改用 `h-` 加 md5：短名字保持原样，已经传上去的文件还能对上。
 ---@param stable_id string
 ---@return string|nil
 function Reading.fileName(stable_id)
     if type(stable_id) ~= "string" or stable_id == "" or stable_id:find("\0", 1, true) then return nil end
-    return (stable_id:gsub("[^%w%-]", function(ch)
+    local name = (stable_id:gsub("[^%w%-]", function(ch)
         return string.format("%%%02X", ch:byte())
     end))
+    if #name <= NAME_MAX then return name end
+    return "h-" .. require("ffi/sha2").md5(stable_id)
 end
 
---- 从文件名还原 stable_id。百分号后面不是两位十六进制就当无效文件。
+--- `h-` 加 32 位十六进制。这种文件名还原不了身份，得查书库。
+---@param name string
+---@return boolean
+function Reading.isDigest(name)
+    return type(name) == "string" and #name == 34 and name:match("^h%-%x+$") ~= nil
+end
+
+--- 从文件名还原 stable_id。百分号后面不是两位十六进制就当无效文件。摘要文件名返回 nil。
 ---@param name string
 ---@return string|nil
 function Reading.idFromName(name)
+    if Reading.isDigest(name) then return nil end
     if type(name) ~= "string" or name == "" or name:find("\0", 1, true) then return nil end
     local out, i = {}, 1
     while i <= #name do
@@ -61,6 +75,29 @@ function Reading.idFromName(name)
     local id = table.concat(out)
     if id == "" or id:find("\0", 1, true) then return nil end
     return id
+end
+
+--- 摘要文件名对上书库里的身份；普通文件名直接还原。
+---@param name string
+---@param index table<string, string>|nil
+---@return string|nil
+function Reading.idOf(name, index)
+    if Reading.isDigest(name) then return index and index[name] end
+    return Reading.idFromName(name)
+end
+
+--- 这个源里，摘要文件名 → stable_id。短名字不进表。
+---@param source_id string
+---@return table<string, string>
+function Reading.digestIndex(source_id)
+    local index = {}
+    local result, nrows = DB.query("SELECT stable_id FROM books WHERE source_id=?;", source_id)
+    for i = 1, nrows or 0 do
+        local id = result[1][i]
+        local name = Reading.fileName(id)
+        if name and Reading.isDigest(name) then index[name] = id end
+    end
+    return index
 end
 
 --- 远端文件比本地新，且本地这行不脏，才拉。没有本地行也拉。
