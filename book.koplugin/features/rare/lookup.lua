@@ -590,7 +590,9 @@ function Lookup:actions()
     if Device:hasClipboard() then
         row[#row + 1] = { text = _("复制"), callback = function()
             local text = self:activeContent()
-            if text then Device.input.setClipboardText(text) end
+            if not text then return end
+            Device.input.setClipboardText(text)
+            require("ui.themes.widgets.toast"):new{ text = _("已复制"), timeout = 2 }:show()
         end }
     end
     if self.from_highlight then
@@ -610,6 +612,7 @@ function Lookup:actions()
             local props = self.ui.doc_props
             local book = props and props.display_title or _("查词")
             self.ui:handleEvent(require("ui/event"):new("WordLookedUp", self.text, book, true))
+            require("ui.themes.widgets.toast"):new{ text = _("已加入生词本"), timeout = 2 }:show()
         end }
     end
     if self.active == "ai" and self.content.ai then

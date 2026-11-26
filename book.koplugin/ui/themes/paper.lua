@@ -29,8 +29,9 @@ return {
         primary = { bg = 0x00, ink = 0xFF, border_color = 0x00 },
         ghost = { ink = 0x00 },
     },
-    -- 选中项（Tab、列表当前项）；mark > 0 时在底部画同色指示条。
-    selected = { bg = 0xFF, ink = 0x00, mark = 2 },
+    -- 选中项（Tab、列表当前项）；底色须与 page 有差，否则查词底栏等切 Tab 看不出选中。
+    -- mark > 0 时在底部再画指示条。
+    selected = { bg = 0xEE, ink = 0x00, mark = 3 },
     -- 图标磁贴（快捷面板开关）：bare 无框、只给开着的项垫 primary 底 / circle 圆形底座、文字在外 /
     -- block 方块（card 的圆角、阴影）、文字在内。
     tile = { shape = "bare" },

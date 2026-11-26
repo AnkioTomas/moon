@@ -414,8 +414,24 @@ end
 Assert.eq(noted, "大猪", "存当前（上次选的）词典释义")
 Assert.eq(clears, 1)
 
--- 加入生词本：装了原生生词本插件才有按钮，发 WordLookedUp（手动，不看自动开关）
+-- 复制：写入剪贴板并 Toast「已复制」
 do
+    local Themed = require("support.theme_stubs")
+    local clipped
+    require("device").input.setClipboardText = function(text) clipped = text end
+    local cp = Lookup.open{ ui = ui, text = "彘", source = "dict" }
+    for _idx, b in ipairs(Kit.buttons(cp[1])) do
+        if b.text == "复制" then b.callback(); break end
+    end
+    Assert.eq(clipped, "大猪")
+    Assert.eq(Themed.last("toast").text, "已复制")
+    cp:close()
+    require("device").input.setClipboardText = function() end
+end
+
+-- 加入生词本：装了原生生词本插件才有按钮，发 WordLookedUp（手动，不看自动开关）+ Toast
+do
+    local Themed = require("support.theme_stubs")
     local sent
     local vb_ui = { dictionary = ui.dictionary, vocabbuilder = {}, doc_props = { display_title = "书名" },
         handleEvent = function(_, ev) sent = ev end }
@@ -427,6 +443,7 @@ do
     Assert.eq(sent.args[1], "彘")
     Assert.eq(sent.args[2], "书名")
     Assert.eq(sent.args[3], true)
+    Assert.eq(Themed.last("toast").text, "已加入生词本")
     vp:close()
     local plain = Lookup.open{ ui = ui, text = "彘", source = "dict" }
     for _idx, b in ipairs(Kit.buttons(plain[1])) do Assert.is_true(b.text ~= "加入生词本") end

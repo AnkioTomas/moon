@@ -116,7 +116,7 @@ bar = Tabbar.widget({ width = 200, tabs = tabs, active = "home" })
 local accent = require("ui.themes").current().color.accent
 Assert.is_true(accent > 255)
 Assert.eq(Kit.find(bar, function(w) return w.style and w.style.border == 0 and w.width == 100 end)[1].style.bg,
-    255, "纸本风格保留白底与指示条，不强制实心色块")
+    0xEE, "纸本选中格浅灰底，与页面白底区分（查词底栏等切 Tab 才看得见）")
 Assert.eq(Kit.find(bar, function(w) return w.text == "home" end)[1].fgcolor, accent)
 Assert.eq(Kit.find(bar, function(w) return w.text == "book" end)[1].fgcolor, 0x88,
     "未选中导航退回中性色，与当前页区分")
