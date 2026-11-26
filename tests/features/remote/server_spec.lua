@@ -1620,6 +1620,7 @@ do
         opds = {},
         copymanga = {},
         ["local"] = {},
+        moon_sync = {},
     }
     package.preload["utils.settings"] = function()
         return {
