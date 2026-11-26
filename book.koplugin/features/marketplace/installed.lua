@@ -73,13 +73,11 @@ local function readMetaEntry(dir, name)
     if cached and cached.mtime == attr.modification and cached.size == attr.size then
         return cached
     end
-    local file = io.open(path, "rb")
-    if not file then
+    local text = require("utils.fs").read(path)
+    if not text then
         meta_cache[path] = nil
         return nil
     end
-    local text = file:read("*a")
-    file:close()
     local meta = select(1, Meta.parse(text))
     local entry = {
         mtime = attr.modification,
@@ -195,14 +193,6 @@ function Installed.clearRecords()
     record_index = nil
 end
 
-local function resolveRecordVersion(plugin, explicit)
-    local v = nonEmpty(explicit)
-        or (type(plugin) == "table" and (nonEmpty(plugin.version)
-            or (type(plugin.meta) == "table" and nonEmpty(plugin.meta.version))
-            or (nonEmpty(plugin.release_tag) and (plugin.release_tag:gsub("^[vV]", "")))))
-    return v or nil
-end
-
 --- 本地 _meta.lua 缺失 version 时，用安装记录里的版本号兜底（不改原扫描表）。
 local function withFallbackVersion(loc, record)
     if not loc or nonEmpty(loc.version) or not record or not nonEmpty(record.version) then
@@ -236,7 +226,8 @@ function Installed.remember(plugin, name, version)
           kind=excluded.kind, version=excluded.version;
     ]], name, uid or "", plugin.type or "", plugin.host or "",
         plugin.owner or "", plugin.repo or "", plugin.title, plugin.kind,
-        resolveRecordVersion(plugin, version) or "")
+        -- catalog 顶层 require 了本模块，这里延迟加载。
+        nonEmpty(version) or require("features.marketplace.catalog").catalogVersion(plugin) or "")
     if not ok then return nil, "write" end
     record_index = nil
     return true

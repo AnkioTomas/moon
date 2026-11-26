@@ -86,7 +86,7 @@ package.preload["features.ime.pinyin.dictionary"] = function()
 end
 
 package.preload["features.ime.registry"] = function()
-    local method = { id = "pinyin", label = "拼音" }
+    local method = { id = "pinyin", label = "拼音", dictionary = "pinyin" }
     return {
         current = function() return method end,
         get = function(id) return id == "pinyin" and method or method end,

@@ -15,7 +15,6 @@ local UIManager = require("ui/uimanager")
 local MoonSettings = require("utils.settings")
 local Guard = require("ui.guard")
 local ReaderExit = require("desktop.reader_exit")
-local Menu = require("features.panel.menu")
 local NativeSettings = require("features.panel.native_settings")
 
 ---@class BookQuickPanelNative
@@ -34,8 +33,11 @@ local READER_TAB_ICON = "appbar.pageview"
 ---@return BookQuickPanelExecuteOpts
 local function menuCallbacks(menu)
     return {
-        close = function() Menu.close(menu) end,
-        refresh = function() Menu.refresh(menu) end,
+        close = function() menu:closeMenu() end,
+        -- 动作的 refresh_delay 晚一拍才刷，那时菜单可能已关：关掉的菜单不能再重建内容、多刷一次屏。
+        refresh = function()
+            if UIManager:isWidgetShown(menu.show_parent) then menu:updateItems(1) end
+        end,
     }
 end
 
@@ -131,24 +133,24 @@ local function buildPanel(menu, W)
         end,
         on_exit_edit = function()
             tab._book_panel_editing = false
-            Menu.refresh(menu)
+            menu:updateItems(1)
         end,
         on_move = function(id, other_id)
             panel.swap(id, other_id)
-            Menu.refresh(menu)
+            menu:updateItems(1)
         end,
         on_disable = function(id)
             panel.setEnabled(id, false)
-            Menu.refresh(menu)
+            menu:updateItems(1)
         end,
         on_add = function(id)
             panel.setEnabled(id, true)
-            Menu.refresh(menu)
+            menu:updateItems(1)
         end,
         on_add_plugin = function()
             require("features.panel.plugin_actions").choose(mode, { ui = tab._book_ui }, function(id)
                 panel.setEnabled(id, true)
-                Menu.refresh(menu)
+                menu:updateItems(1)
             end)
         end,
         addable = function()
@@ -166,7 +168,7 @@ local function buildPanel(menu, W)
         body_opts.header = W.Header:new{
             width = content_w,
             on_exit = function()
-                Menu.close(menu)
+                menu:closeMenu()
                 ReaderExit.closeToDesktop(ui)
             end,
         }
@@ -252,7 +254,7 @@ local function syncEditPen(menu, show)
                 local tab = menu.item_table
                 if not panelMode(tab) or tab._book_panel_editing then return end
                 tab._book_panel_editing = true
-                Menu.refresh(menu)
+                menu:updateItems(1)
             end,
         }
         menu._book_edit_pen = pen
@@ -323,7 +325,7 @@ local function patchTouchMenu()
     TouchMenu._book_panel_patched = true
     local original = TouchMenu.updateItems
     TouchMenu.updateItems = function(self, ...)
-        local fresh, old_h = self.is_fresh, self.dimen.h
+        local old_h = self.dimen.h
         if panelMode(self.item_table) and Device:isTouchDevice() then
             Guard.call("quick panel render", renderPanelContent, self)
         else
@@ -332,7 +334,8 @@ local function patchTouchMenu()
         end
         -- 网点按菜单下沿起算，叠画在下层旧像素上。菜单变高时原生只重画菜单自身，
         -- 下沿一移，新旧网点相位错开叠成更黑的一片：下层必须重画，顺带全刷清残影。
-        if (fresh or self.dimen.h ~= old_h) and MoonSettings.get("ui").mesh_mask
+        -- 新建菜单 dimen.h 为 0，首次打开也算变高。
+        if self.dimen.h ~= old_h and MoonSettings.get("ui").mesh_mask
             and select(2, meshSpan(self)) > 0 then
             UIManager:setDirty("all", "full")
         end

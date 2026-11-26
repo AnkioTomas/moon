@@ -108,10 +108,10 @@ end
 
 --- 设置页词库状态：未下载、下载中、不可用或词条数与构建版本。
 function IME.dictStatus()
-    if require("features.ime.download").downloading() then
+    local method = Registry.current()
+    if require("features.ime.download").downloading(require("utils.paths").imeDictPath(method.dictionary)) then
         return _("下载中…")
     end
-    local method = Registry.current()
     if not Registry.isAvailable(method) then
         if Registry.fileExists(method) then
             return _("词库文件存在但不可用")

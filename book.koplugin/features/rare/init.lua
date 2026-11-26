@@ -41,10 +41,7 @@ function Rare.migrate(s)
     end
     s.rare_split_migrated = true
     s.rare_enabled = s.rare_ruby or s.rare_wordwise or false
-    -- 测试桩可能没有 save；生产路径必有。
-    if type(MoonSettings.save) == "function" then
-        MoonSettings.save("features.rare", s)
-    end
+    MoonSettings.save("features.rare", s)
     return s
 end
 

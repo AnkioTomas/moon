@@ -105,13 +105,7 @@ local function isVideo(s)
     return false
 end
 
---- UTF-8 字符数。
-local function len(s)
-    local _n, count = s:gsub("[^\128-\191]", "")
-    return count
-end
-
-local function trim(s) return (s:match("^%s*(.-)%s*$")) end
+local len, trim = Text.len, Text.trim
 
 -- ── 迷你 DOM ──────────────────────────────────────────────────────────────
 -- 元素 { tag, attrs = {}, parent, children = {} }；文本 { text, parent }；文档 tag = "#document"。
@@ -1402,11 +1396,8 @@ end
 ---@return string|nil content
 ---@return table|nil meta parse_article 的结果
 function R.extract(html, url)
-    local ok, result = pcall(R.parse_article, html, url)
-    if not ok then
-        require("utils.log").warn("readability failed", result)
-        return nil
-    end
+    -- 跑在 Job 子进程里：抛错由 Subscribe.extract 的 on_failed 记日志并退回 Parse.article。
+    local result = R.parse_article(html, url)
     if not result or len(trim(result.textContent)) < MIN_CHARS then return nil end
     return Text.trim(result.content), result
 end

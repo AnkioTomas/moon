@@ -183,20 +183,18 @@ do
     os.execute("rm -rf '" .. root .. "'")
 end
 
--- 已缓存文章的二、三级标题成章内小节（目录没变也更新目录缓存）；没缓存的没有小节
+-- 章内小节按 uid 沿用旧目录（文章缓存时写回）：目录重排后跟着文章走，不读缓存文章；没记过小节的没有
 do
-    os.execute("mkdir -p '" .. dir .. "/articles'")
-    local f = assert(io.open(dir .. "/articles/" .. require("ffi/sha2").md5("f") .. ".html", "wb"))
-    f:write('<h1>六</h1><h2 id="mh1">一节</h2><h3 id="mh2">小节</h3>')
-    f:close()
+    Assert.eq(tocs["3"][1].uid, "f")
+    tocs["3"][1].anchors = { { id = "mh1", depth = 2, title = "一节" }, { id = "mh2", depth = 3, title = "小节" } }
+    items = { { guid = "g", title = "七" }, { guid = "f", title = "六" }, { guid = "e", title = "又一篇" }, { guid = "d", title = "最新" } }
     local list
     src:loadTocAsync(identity, function(t) list = t end)
     Stubs.flush()
-    Assert.eq(#list[1].anchors, 2)
-    Assert.eq(list[1].anchors[2].depth, 3)
-    Assert.eq(list[1].anchors[2].id, "mh2")
-    Assert.is_nil(list[2].anchors)
-    Assert.eq(#tocs["3"][1].anchors, 2, "目录缓存跟着更新")
+    Assert.is_nil(list[1].anchors)
+    Assert.eq(#list[2].anchors, 2)
+    Assert.eq(list[2].anchors[2].id, "mh2")
+    Assert.eq(#tocs["3"][2].anchors, 2, "目录缓存跟着更新")
     os.execute("rm -rf '" .. root .. "'")
 end
 

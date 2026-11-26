@@ -6,7 +6,6 @@
 @module koplugin.book.features.marketplace.readme
 --]]
 
-local lfs = require("libs/libkoreader-lfs")
 local Paths = require("utils.paths")
 local Client = require("features.marketplace.client")
 local Catalog = require("features.marketplace.catalog")
@@ -14,8 +13,6 @@ local Catalog = require("features.marketplace.catalog")
 local Readme = {}
 
 Readme.CACHE_DIR = "marketplace-readme"
-
-local jobs = {}
 
 ---@return string
 function Readme.cacheDir()
@@ -37,28 +34,13 @@ end
 
 --- 清空磁盘上的全部 README 缓存文件。
 function Readme.clearCache()
-    local dir = Readme.cacheDir()
-    if lfs.attributes(dir, "mode") == "directory" then
-        for name in lfs.dir(dir) do
-            if name ~= "." and name ~= ".." then os.remove(dir .. "/" .. name) end
-        end
-    end
-end
-
-function Readme.cancel()
-    local active = jobs
-    jobs = {}
-    for job in pairs(active) do
-        if job and job.cancel then job.cancel() end
-    end
+    require("utils.fs").removeTree(Readme.cacheDir())
 end
 
 local function loadEntry(key)
-    local file = io.open(entryPath(key), "rb")
-    if not file then return nil end
-    local text = file:read("*a")
-    file:close()
-    local ok, data = pcall(require("json").decode, text or "")
+    local text = require("utils.fs").read(entryPath(key))
+    if not text then return nil end
+    local ok, data = pcall(require("json").decode, text)
     return (ok and type(data) == "table") and data or nil
 end
 
@@ -96,11 +78,7 @@ local function store(key, detail, plugin)
         updated_at = os.time(),
     }
     Paths.ensureDir(Readme.cacheDir())
-    local file = io.open(entryPath(key), "wb")
-    if file then
-        file:write(require("json").encode(entry))
-        file:close()
-    end
+    require("utils.fs").write(entryPath(key), require("json").encode(entry))
     return entry
 end
 
@@ -121,18 +99,8 @@ function Readme.fetch(plugin, cb, opts)
         cb(raw)
         return { cancel = function() end }
     end
-    local cancelled, current, job = false, nil, nil
-    job = {
-        cancel = function()
-            cancelled = true
-            jobs[job] = nil
-            if current and current.cancel then current.cancel() end
-        end,
-    }
-    jobs[job] = true
-
-    current = Client.getDetail(key, function(detail, err)
-        jobs[job] = nil
+    local cancelled = false
+    local current = Client.getDetail(key, function(detail, err)
         if cancelled then return end
         if type(detail) == "table" then
             Catalog.mergeDetail(detail)
@@ -141,15 +109,10 @@ function Readme.fetch(plugin, cb, opts)
         end
         if raw then cb(raw, nil) else cb(nil, err or "network") end
     end)
-    return job
-end
-
---- 当前在途请求数（测试用于校验完成/取消后无引用残留）。
----@return integer
-function Readme.pendingCount()
-    local n = 0
-    for _job in pairs(jobs) do n = n + 1 end
-    return n
+    return { cancel = function()
+        cancelled = true
+        current.cancel()
+    end }
 end
 
 return Readme

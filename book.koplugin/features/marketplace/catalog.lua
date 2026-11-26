@@ -428,7 +428,7 @@ end
 
 --- 刷新插件目录与分类。并发刷新会取消上一轮；失败保留库中旧数据。
 --- opts.silent = true 时为后台静默刷新：失败不污染 last_error，也不阻止用户手动刷新接管。
----@param cb (fun(cache: table|nil, err: string|nil))|nil
+---@param cb (fun(err: string|nil))|nil
 ---@param opts { on_progress?: fun(done: integer, total: integer), silent?: boolean }|nil
 ---@return table job
 function Catalog.refresh(cb, opts)
@@ -455,7 +455,7 @@ function Catalog.refresh(cb, opts)
     end }
     state.job = handle
 
-    local function finish(cache, err)
+    local function finish(err)
         if gen ~= state.gen then return end
         state.refreshing = false
         state.silent = false
@@ -465,7 +465,7 @@ function Catalog.refresh(cb, opts)
         elseif not silent then
             state.last_error = err
         end
-        if cb then cb(cache, err) end
+        if cb then cb(err) end
     end
 
     local pending = 2
@@ -476,21 +476,15 @@ function Catalog.refresh(cb, opts)
         pending = pending - 1
         if pending > 0 then return end
         if not fetched_plugins then
-            finish({ updated_at = Catalog.updatedAt(), categories = Catalog.categories(), plugins = Catalog.plugins() },
-                first_err or "network")
+            finish(first_err or "network")
             return
         end
-        local next_cache = {
+        local ok, save_err = Catalog.saveCache({
             updated_at = os.time(),
             categories = fetched_categories or Catalog.categories(),
             plugins = fetched_plugins,
-        }
-        local ok, save_err = Catalog.saveCache(next_cache)
-        if not ok then
-            finish(next_cache, save_err or "write")
-            return
-        end
-        finish(next_cache, nil)
+        })
+        finish(not ok and (save_err or "write") or nil)
     end
 
     jobs[1] = Client.listCategories(function(items)

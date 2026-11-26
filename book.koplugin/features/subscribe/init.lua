@@ -13,6 +13,7 @@
 
 local Parse = require("features.subscribe.parse")
 local SubDB = require("features.subscribe.db")
+local Fs = require("utils.fs")
 local Paths = require("utils.paths")
 local Text = require("utils.text")
 local Image = require("utils.image")
@@ -25,6 +26,8 @@ local Subscribe = {}
 local MAX_PAGE = 3 * 1024 * 1024
 --- 单张图片上限：整张先攒在内存里，RSS 一张几十 MB 的原图会把 Kindle 拖进 OOM；超过就断流当没图。
 local MAX_IMAGE = 5 * 1024 * 1024
+--- 主线程 Parse.article 只看页面前这么多：它整串跑十来次 `<tag.-</tag>` gsub，标签不闭合时近 O(n²)。
+local ARTICLE_MAX = 512 * 1024
 --- RSS 自带正文去掉标签后超过这么多字节才当全文（约 500 个汉字）；否则当摘要、去抓原文。
 local FULL_TEXT = 1500
 --- 摘要结尾带这些就是被截断的（省略号 / 阅读全文 / WordPress 的 "appeared first on"），不管多长都去抓原文。
@@ -53,12 +56,20 @@ Subscribe.STALE = 5 * 60
 --- 远程管理网页发起的抓取（试拉 / 添加 / 导入 / 批量）一律拒绝，免得局域网里的页面借设备探内网。
 --- 字面量之外，opts.public 路径还会对解析后的 IP 再查一次（防 DNS rebinding）；设备上自己添加的订阅不受限。
 ---@param url string
+---@return string|nil 去掉 userinfo、端口与 IPv6 方括号的小写主机名；不是 URL 时 nil
+local function hostOf(url)
+    local host = tostring(url or ""):match("^%a[%w+.-]*://([^/?#]*)")
+    if not host then return nil end
+    host = host:gsub("^.*@", ""):lower()
+    if host:sub(1, 1) == "[" then return host:match("^%[(.-)%]") or host end
+    return (host:gsub(":%d*$", ""))
+end
+
+---@param url string
 ---@return boolean
 function Subscribe.privateHost(url)
-    local host = tostring(url or ""):match("^%a[%w+.-]*://([^/?#]*)")
+    local host = hostOf(url)
     if not host then return true end
-    host = host:gsub("^.*@", ""):lower()
-    if host:sub(1, 1) == "[" then host = host:match("^%[(.-)%]") or host else host = host:gsub(":%d*$", "") end
     host = host:gsub("%.$", "")
     if host == "" or host == "localhost" or host:match("%.localhost$") or host:match("%.local$")
         or host:match("%.internal$") or host:match("%.lan$") then
@@ -78,38 +89,36 @@ function Subscribe.privateHost(url)
     return false
 end
 
+-- 主机名 → { private, expire }。getaddrinfo 在主线程同步阻塞：每一跳、每个订阅都现查，弱网下一串探测会卡死 UI。
+-- 缓存不削弱防护：查完到真正连接之间请求层本来就会再解析一次（rebinding 窗口一直在），缓存只省掉重复的阻塞。
+local DNS_TTL, DNS_FAIL_TTL = 60, 10
+local dns_cache = {}
+
 --- 解析主机名后的 IP 是否落在私网；解析失败不当私网（交给后续请求报错）。
 ---@param url string
 ---@return boolean
 local function resolvePrivate(url)
-    local host = tostring(url or ""):match("^%a[%w+.-]*://([^/?#]*)")
-    if not host then return true end
-    host = host:gsub("^.*@", ""):lower()
-    if host:sub(1, 1) == "[" then
-        host = host:match("^%[(.-)%]") or host
-    else
-        host = host:gsub(":%d*$", "")
-    end
-    if host == "" then return true end
+    local host = hostOf(url)
+    if not host or host == "" then return true end
     -- 已是 IP 字面量：privateHost 已经查过
     if host:match("^[%d.]+$") or host:find(":", 1, true) then return false end
-    -- 失败负缓存：弱网下每次 getaddrinfo 堵到超时，一串订阅探测会卡死 UI。
-    Subscribe._dns_fail = Subscribe._dns_fail or {}
     local now = os.time()
-    if (Subscribe._dns_fail[host] or 0) > now then return false end
+    local hit = dns_cache[host]
+    if hit and hit.expire > now then return hit.private end
     local ok, list = pcall(function() return require("socket").dns.getaddrinfo(host) end)
-    if not ok or type(list) ~= "table" then
-        Subscribe._dns_fail[host] = now + 10
-        return false
-    end
-    for _i, info in ipairs(list) do
-        local addr = info and info.addr
-        if addr and addr ~= "" then
-            local wrapped = addr:find(":", 1, true) and ("http://[" .. addr .. "]/") or ("http://" .. addr .. "/")
-            if Subscribe.privateHost(wrapped) then return true end
+    local private, ttl = false, DNS_FAIL_TTL
+    if ok and type(list) == "table" then
+        ttl = DNS_TTL
+        for _i, info in ipairs(list) do
+            local addr = info and info.addr
+            if addr and addr ~= "" and not private then
+                private = Subscribe.privateHost(addr:find(":", 1, true) and ("http://[" .. addr .. "]/")
+                    or ("http://" .. addr .. "/"))
+            end
         end
     end
-    return false
+    dns_cache[host] = { private = private, expire = now + ttl }
+    return private
 end
 
 local ACCEPT = "application/rss+xml,application/atom+xml,application/xml,text/html,*/*"
@@ -258,7 +267,7 @@ end
 ---@param cb fun(html: string|nil, meta: table|nil)
 ---@return table|nil job
 function Subscribe.extract(body, link, cb)
-    local function fallback() cb(Parse.article(body)) end
+    local function fallback() cb(Parse.article(body:sub(1, ARTICLE_MAX))) end
     return require("workers.job").run(function()
         local html, meta = require("features.subscribe.readability").extract(body, link)
         return { html = html, meta = meta }
@@ -350,7 +359,7 @@ Subscribe.providers = {
         fetch = function(feed, _cursor, cb)
             return get(feed.url, function(body, err)
                 if not body then return cb(nil, nil, err) end
-                local text = Text.stripHtml(Parse.article(body) or body)
+                local text = Text.stripHtml(Parse.article(body:sub(1, ARTICLE_MAX)) or body)
                 local title = Parse.title(body)
                 cb({ {
                     guid = feed.url .. "#" .. require("ffi/sha2").md5(text),
@@ -421,10 +430,8 @@ function Subscribe.probe(kind, url, filter, cb, public, seen)
     end)
 end
 
-local swept = {}
-
 --- 清缓存：条目已被淘汰（条数 / 180 天）的文章缓存删掉，没有任何缓存文章再引用的图片删掉。收藏的条目不会被淘汰，缓存跟着留。
---- 淘汰发生时扫；另外每个订阅每次启动扫一次，收拾老版本留下的孤儿文件。
+--- 只在淘汰发生时扫：要整篇读每个缓存文章找图片引用，主线程上不能每次启动都来一遍。
 ---@param feed_id integer
 function Subscribe.sweep(feed_id)
     local lfs = require("libs/libkoreader-lfs")
@@ -440,11 +447,7 @@ function Subscribe.sweep(feed_id)
         if id and not keep[id] then
             os.remove(articles .. "/" .. name)
         elseif id then
-            local f = io.open(articles .. "/" .. name, "rb")
-            if f then
-                for img in f:read("*a"):gmatch('src="images/([^"]+)"') do used[img] = true end
-                f:close()
-            end
+            for img in (Fs.read(articles .. "/" .. name) or ""):gmatch('src="images/([^"]+)"') do used[img] = true end
         end
     end
     local images = dir .. "/images"
@@ -474,10 +477,7 @@ function Subscribe.refresh(feed, more, cb)
             return cb(nil, err)
         end
         local added, removed = SubDB.merge(feed.id, items)
-        if removed > 0 or not swept[feed.id] then
-            swept[feed.id] = true
-            Subscribe.sweep(feed.id)
-        end
+        if removed > 0 then Subscribe.sweep(feed.id) end
         -- 刷新第一页不能把已经翻到更早的游标拉回来。
         local keep = more and (next_cursor or 0) or math.max(feed.cursor or 0, next_cursor or 0)
         SubDB.update(feed.id, { cursor = keep, updated_at = os.time(), error = "" })
@@ -572,11 +572,8 @@ function Subscribe.content(feed, item, cb)
     local dir = Subscribe.dir(feed.id)
     local path = Subscribe.articlePath(feed.id, item.guid)
     local images_dir = Subscribe.settings().images ~= false and dir .. "/images" or nil
-    local cached
-    local f = io.open(path, "rb")
-    if f then
-        cached = f:read("*a")
-        f:close()
+    local cached = Fs.read(path)
+    if cached then
         -- 有图没落地（当时下载失败）的缓存不算数：联网时重做一次，重做失败仍用旧缓存。
         local incomplete = images_dir and (cached:find('<img[^>]-src="https?://') or cached:find("AVIF", 1, true))
         if not incomplete or not require("ui/network/manager"):isConnected() then return cb(cached) end
@@ -589,14 +586,8 @@ function Subscribe.content(feed, item, cb)
         if not html then return cb(cached, not cached and err or nil) end
         html = require("features.subscribe.typography").article(item.title or "", html, images_dir ~= nil,
             meta and meta.byline)
-        -- 先写临时文件再改名：写到一半断电 / 被杀不会留下半截缓存（下次直接当正文用）。
-        local tmp = path .. ".tmp"
-        local out = io.open(tmp, "wb")
-        if out then
-            local ok = out:write(html)
-            out:close()
-            if not ok or not os.rename(tmp, path) then os.remove(tmp) end
-        end
+        -- 原子写：写到一半断电 / 被杀不会留下半截缓存（下次直接当正文用）。
+        Fs.write(path, html)
         cb(html)
     end)
 end

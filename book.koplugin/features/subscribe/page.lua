@@ -37,6 +37,7 @@ local _ = require("gettext")
 ---@field page integer
 ---@field busy string|nil 正在做的事（标题栏副标题）
 ---@field job table|nil
+---@field _unwatch fun() 退掉 Refresh.watch 的监听
 local Page = {}
 
 --- 筛选条件（落盘 features.subscribe 的 filter，重启后保留）：范围 = 单个源 feed_filter 或分组 group_filter（nil 全部，"" 未分组），页签 unread / all / star，搜索词。
@@ -66,9 +67,7 @@ function Page:new(opts)
     opts.page = 1
     restore()
     local page = setmetatable(opts, self)
-    -- 只订一份：页面重建时先退掉旧的监听。
-    if Page._unwatch then Page._unwatch() end
-    Page._unwatch = Refresh.watch(function() page:redraw() end)
+    page._unwatch = Refresh.watch(function() page:redraw() end)
     return page
 end
 
@@ -81,8 +80,13 @@ function Page:cancel()
     self.job, self.busy = nil, nil
 end
 Page.deactivate = Page.cancel
-Page.destroy = Page.cancel
 Page.onCancel = Page.cancel
+
+--- 桌面销毁 / 页签关掉时调：退掉刷新监听，旧页的闭包不留在 listeners 里。
+function Page:destroy()
+    self:cancel()
+    self._unwatch()
+end
 
 function Page:redraw()
     local desktop = self.desktop

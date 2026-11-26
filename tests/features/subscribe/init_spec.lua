@@ -488,8 +488,10 @@ end
 
 -- opts.public：域名解析到私网 IP 也拦（DNS rebinding）。
 do
+    local lookups = 0
     package.preload["socket"] = function()
         return { dns = { getaddrinfo = function(host)
+            lookups = lookups + 1
             if host == "evil.example" then return { { addr = "127.0.0.1" } } end
             if host == "ok.example" then return { { addr = "8.8.8.8" } } end
             return nil
@@ -502,6 +504,11 @@ do
     S.fetchText("https://evil.example/x", function(b, e) body, err = b, e end, true)
     Assert.is_nil(body)
     Assert.eq(err, "不允许访问局域网或本机地址")
+    body, err = "x", nil
+    S.fetchText("https://evil.example/y", function(b, e) body, err = b, e end, true)
+    Assert.is_nil(body)
+    Assert.eq(err, "不允许访问局域网或本机地址", "缓存的私网结论照样拦")
+    Assert.eq(lookups, 1, "同一主机 TTL 内不再同步解析")
     web["https://ok.example/x"] = "ok"
     S.fetchText("https://ok.example/x", function(b, e) body, err = b, e end, true)
     Assert.eq(body, "ok")

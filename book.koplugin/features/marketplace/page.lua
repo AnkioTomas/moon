@@ -185,7 +185,7 @@ function Page.refresh(desktop)
         end,
     }
     dialog:showWhile(function()
-        Catalog.refresh(function(_cache, err)
+        Catalog.refresh(function(err)
             if cancelled then
                 redraw(desktop)
                 return

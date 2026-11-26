@@ -95,7 +95,7 @@ Assert.eq(fetches, 1)
 
 -- 正文没变的重建不能刷新原章时间戳，否则已生成的双语章会被误判过期。
 local ChapterBi = require("features.translate.chapter")
-require("source.chapter").variant = ChapterBi.resolve
+require("utils.extension").add("reader.chapter_variant", ChapterBi.resolve)
 ChapterBi.set(identity, { engine = "edge", lang = "zh" })
 local bi = Paths.bilingualChapterPath(origin)
 assert(require("utils.paths").ensureDir(bi:match("^(.*)/[^/]+$")))

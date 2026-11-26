@@ -105,13 +105,17 @@ function Lookup.looksHtml(s)
 end
 
 local ifo_cache = {}
---- 词典目录下各 .ifo：bookname → { html = sametypesequence 含 h/x/g, css = 同名 .css 内容 }（按目录缓存）。
+--- 词典目录下各 .ifo：bookname → { html = sametypesequence 含 h/x/g, css = 同名 .css 内容 }。
+--- 按目录 mtime 缓存：装 / 删词典会增删 data_dir 下的子目录，mtime 随之变。
 ---@param data_dir string|nil
 ---@return table<string, { html: boolean, css: string|nil }>
 function Lookup.ifoInfo(data_dir)
     if not data_dir then return {} end
-    if ifo_cache[data_dir] then return ifo_cache[data_dir] end
     local lfs = require("libs/libkoreader-lfs")
+    local mtime = lfs.attributes(data_dir, "modification")
+    local cached = ifo_cache[data_dir]
+    if cached and cached.mtime == mtime then return cached.map end
+    local Fs = require("utils.fs")
     local map = {}
     local function walk(dir, depth)
         local ok, iter, obj = pcall(lfs.dir, dir)
@@ -123,22 +127,18 @@ function Lookup.ifoInfo(data_dir)
                 if mode == "directory" and depth < 4 then
                     walk(path, depth + 1)
                 elseif mode == "file" and name:lower():match("%.ifo$") then
-                    local f = io.open(path, "r")
-                    local c = f and f:read("*a") or ""
-                    if f then f:close() end
+                    local c = Fs.read(path) or ""
                     local book = c:match("\nbookname=(.-)\r?\n")
                     if book then
                         local seq = c:match("\nsametypesequence=(%w+)") or ""
-                        local cf = io.open((path:gsub("%.[Ii][Ff][Oo]$", ".css")), "r")
-                        map[book] = { html = seq:find("[hxg]") ~= nil, css = cf and cf:read("*a") or nil }
-                        if cf then cf:close() end
+                        map[book] = { html = seq:find("[hxg]") ~= nil, css = Fs.read((path:gsub("%.[Ii][Ff][Oo]$", ".css"))) }
                     end
                 end
             end
         end
     end
     walk(data_dir, 0)
-    ifo_cache[data_dir] = map
+    ifo_cache[data_dir] = { mtime = mtime, map = map }
     return map
 end
 
@@ -184,8 +184,8 @@ end
 ---@return string|nil
 function Lookup.readingOf(word)
     for _idx, lex in ipairs(require("features.rare.catalog").active()) do
-        local e = lex.entries[word] or lex.entries[word:lower()]
-        if e then return e[1] end
+        local ann = lex.entries[word] or lex.entries[word:lower()]
+        if ann then return ann end
     end
 end
 
@@ -202,7 +202,6 @@ function Lookup.queryDicts(ui, word)
     local names = dict.enabled_dict_names
     local load_all = require("utils.settings").get("features.dictionary").dictionary_load_all
     if load_all then
-        ifo_cache[dict.data_dir] = nil
         names = {}
         for name in pairs(Lookup.ifoInfo(dict.data_dir)) do names[#names + 1] = name end
         table.sort(names)

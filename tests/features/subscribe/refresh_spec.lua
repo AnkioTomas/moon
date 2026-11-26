@@ -25,6 +25,10 @@ package.loaded["features.subscribe"] = {
         pending[#pending + 1] = cb
         return { cancel = function() end }
     end,
+    mpProvider = function()
+        local list = require("utils.extension").list("desktop.account_feeds")
+        return list[#list]
+    end,
 }
 package.loaded["features.subscribe.refresh"] = nil
 local Refresh = require("features.subscribe.refresh")

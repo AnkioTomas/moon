@@ -33,7 +33,8 @@ local DEFAULT_LEVELS = { zh = { 6500, 3500, 0 }, en = { 20000, 8000, 3000 } }
 ---@field lang string
 ---@field kind "ruby"|"wordwise"
 ---@field levels number[]
----@field entries table<string, { [1]: string, [2]: number }> key → { 标注, rank }
+---@field entries table<string, string> key → 标注
+---@field ranks table<string, number> key → rank（与 entries 分两张表：每条省一张小表，几万条常驻差出数 MB）
 ---@field max_len integer 最长 key 的字数（zh 词组最长匹配用）
 ---@field phrase_lengths table<string, integer> 首字 → 以它开头的最长词组字数
 
@@ -41,7 +42,7 @@ local DEFAULT_LEVELS = { zh = { 6500, 3500, 0 }, en = { 20000, 8000, 3000 } }
 ---@param text string
 ---@return RareLexicon
 function Lexicon.parse(text)
-    local meta, entries, max_len, count = {}, {}, 1, 0
+    local meta, entries, ranks, max_len, count = {}, {}, {}, 1, 0
     local phrase_lengths = {}
     for line in text:gmatch("[^\r\n]+") do
         if line:sub(1, 1) == "#" then
@@ -50,7 +51,7 @@ function Lexicon.parse(text)
         else
             local key, ann, rank = line:match("^([^\t]+)\t([^\t]+)\t(%d+)")
             if key then
-                entries[key] = { ann, tonumber(rank) }
+                entries[key], ranks[key] = ann, tonumber(rank)
                 count = count + 1
                 local n = select(2, key:gsub("[^\128-\191]", ""))
                 if n > max_len then max_len = n end
@@ -67,8 +68,8 @@ function Lexicon.parse(text)
     local levels = {}
     for n in (meta.levels or ""):gmatch("%d+") do levels[#levels + 1] = tonumber(n) end
     if #levels ~= 3 then levels = DEFAULT_LEVELS[lang] end
-    return { meta = meta, lang = lang, kind = kind, levels = levels, entries = entries, max_len = max_len,
-        phrase_lengths = phrase_lengths, count = count }
+    return { meta = meta, lang = lang, kind = kind, levels = levels, entries = entries, ranks = ranks,
+        max_len = max_len, phrase_lengths = phrase_lengths, count = count }
 end
 
 ---@param lex RareLexicon
@@ -92,16 +93,15 @@ function Lexicon.stems(word)
     return out
 end
 
+--- 原词或其词形还原在词库里的 key；都没有返回 nil。
 ---@param lex RareLexicon
 ---@param word string 原文
----@return table|nil
+---@return string|nil
 local function lookupWord(lex, word)
     local lower = word:lower()
-    local e = lex.entries[lower]
-    if e then return e end
+    if lex.entries[lower] then return lower end
     for _idx, stem in ipairs(Lexicon.stems(lower)) do
-        e = lex.entries[stem]
-        if e then return e end
+        if lex.entries[stem] then return stem end
     end
 end
 
@@ -110,34 +110,34 @@ end
 ---@param i integer
 ---@param out { i: integer, n: integer, key: string, ann: string }[]
 ---@param limit number
----@param want fun(key: string, entry: table): boolean|nil
+---@param want fun(key: string, rank: number): boolean|nil
 ---@param force table<string, boolean>
 ---@return integer
 local function scanChinese(lex, units, i, out, limit, want, force)
     local key, length = units[i], 1
-    local entry = lex.entries[key]
     for n = math.min(lex.phrase_lengths[key] or 1, #units - i + 1), 2, -1 do
         local candidate = table.concat(units, "", i, i + n - 1)
         if lex.entries[candidate] then
-            key, entry, length = candidate, lex.entries[candidate], n
+            key, length = candidate, n
             break
         end
     end
+    local entry = lex.entries[key]
     if not entry then return 1 end
     local readings
     if lex.kind == "ruby" and length > 1 then
         readings = {}
-        for ann in entry[1]:gmatch("%S+") do readings[#readings + 1] = ann end
+        for ann in entry:gmatch("%S+") do readings[#readings + 1] = ann end
     end
     if not readings or #readings ~= length then
-        if want(key, entry) then out[#out + 1] = { i = i, n = length, key = key, ann = entry[1] } end
+        if want(key, lex.ranks[key]) then out[#out + 1] = { i = i, n = length, key = key, ann = entry } end
         return length
     end
     local forced = force[key] or force[key:lower()]
     for offset, ann in ipairs(readings) do
         local pos = i + offset - 1
         local char = units[pos]
-        if #out < limit and (forced or want(char, lex.entries[char] or entry)) then
+        if #out < limit and (forced or want(char, lex.ranks[char] or lex.ranks[key])) then
             out[#out + 1] = { i = pos, n = 1, key = char, ann = ann }
         end
     end
@@ -157,7 +157,7 @@ function Lexicon.scan(lex, units, threshold, force, limit)
     local out = {}
     limit = limit or math.huge
     force = force or {}
-    local function want(key, e) return e[2] > threshold or force[key] or force[key:lower()] end
+    local function want(key, rank) return rank > threshold or force[key] or force[key:lower()] end
     local i, total = 1, #units
     while i <= total and #out < limit do
         local step = 1
@@ -167,8 +167,10 @@ function Lexicon.scan(lex, units, threshold, force, limit)
                 while j + 1 <= total and units[j + 1]:match("^[%a']$") do j = j + 1 end
                 local word = table.concat(units, "", i, j)
                 if #word >= 3 and not word:find("'", 1, true) then
-                    local e = lookupWord(lex, word)
-                    if e and want(word, e) then out[#out + 1] = { i = i, n = j - i + 1, key = word, ann = e[1] } end
+                    local hit = lookupWord(lex, word)
+                    if hit and want(word, lex.ranks[hit]) then
+                        out[#out + 1] = { i = i, n = j - i + 1, key = word, ann = lex.entries[hit] }
+                    end
                 end
                 step = j - i + 1
             end

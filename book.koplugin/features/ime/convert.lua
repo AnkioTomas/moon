@@ -41,17 +41,7 @@ local function workDir(identity, target)
     return require("utils.paths").bookWorkDir(identity.stable_id, identity.source_id) .. "/" .. TARGETS[target].dir
 end
 
-local readFile = require("utils.fs").read
-
---- 写临时文件再改名，读的一方不会看到半截文件。
----@param path string
----@param data string
-local function writeFile(path, data)
-    local f = assert(io.open(path .. ".part", "wb"))
-    assert(f:write(data))
-    assert(f:close())
-    assert(os.rename(path .. ".part", path))
-end
+local Fs = require("utils.fs")
 
 ---@param path string
 ---@return boolean
@@ -60,17 +50,30 @@ local function isMarkup(path)
     return ext == "xhtml" or ext == "html" or ext == "htm" or ext == "ncx" or ext == "opf"
 end
 
+-- convertTexts 对每个字枚举至多 15 字的子串（seen + keys 两张表）：整本一次交给它，子进程会 OOM。
+-- 按文字字节分批，16KB（约 5 千字）一批，峰值约 10MB。
+local BATCH_BYTES = 16 * 1024
+
 --- 标签之间含汉字等非 ASCII 的文字段转成目标字形。
 ---@param markup string
 ---@param target "simplified"|"traditional"
 ---@return string
 function Convert.markup(markup, target)
-    local texts = {}
-    for text in markup:gmatch(">([^<]+)<") do
-        if text:find("[\128-\255]") then texts[#texts + 1] = text end
+    local Script = require("features.ime.script")
+    local converted, batch, size = {}, {}, 0
+    local function flush()
+        for _idx, text in ipairs(Script.convertTexts(batch, target)) do converted[#converted + 1] = text end
+        batch, size = {}, 0
     end
-    if #texts == 0 then return markup end
-    local converted = require("features.ime.script").convertTexts(texts, target)
+    for text in markup:gmatch(">([^<]+)<") do
+        if text:find("[\128-\255]") then
+            batch[#batch + 1] = text
+            size = size + #text
+            if size >= BATCH_BYTES then flush() end
+        end
+    end
+    if #batch > 0 then flush() end
+    if #converted == 0 then return markup end
     local idx = 0
     return (markup:gsub(">([^<]+)<", function(text)
         if not text:find("[\128-\255]") then return nil end
@@ -119,11 +122,11 @@ end
 ---@return boolean
 local function build(input)
     if input.kind == "dom" then
-        writeFile(input.dest, Convert.markup(assert(readFile(input.source)), input.target))
+        assert(Fs.write(input.dest, Convert.markup(assert(Fs.read(input.source)), input.target)))
     else
         buildEpub(input)
     end
-    writeFile(input.dir .. "/meta.json", JSON.encode({ origin = input.origin, file = input.dest }))
+    assert(Fs.write(input.dir .. "/meta.json", JSON.encode({ origin = input.origin, file = input.dest })))
     return true
 end
 
@@ -146,7 +149,7 @@ local function prepare(ui, identity, target)
     input.kind = "dom"
     input.source = dir .. "/source." .. ext
     input.dest = dir .. "/book." .. ext
-    writeFile(input.source, '<?xml version="1.0" encoding="UTF-8"?>\n' .. html)
+    assert(Fs.write(input.source, '<?xml version="1.0" encoding="UTF-8"?>\n' .. html))
     return input
 end
 
@@ -184,7 +187,9 @@ end
 ---@param target "simplified"|"traditional"
 ---@return boolean
 function Convert.active(ui, target)
-    local meta = DerivedNote.readMeta(workDir(require("reader.session").current().identity, target))
+    local session = require("reader.session").current()
+    if session == nil then return false end
+    local meta = DerivedNote.readMeta(workDir(session.identity, target))
     return meta ~= nil and meta.file == ui.document.file
 end
 

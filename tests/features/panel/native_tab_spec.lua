@@ -9,7 +9,7 @@ package.preload["device"] = function()
     return { isTouchDevice = function() return false end }
 end
 package.preload["ui/uimanager"] = function()
-    return { show = function() end, setDirty = function() end }
+    return { show = function() end, setDirty = function() end, isWidgetShown = function() return true end }
 end
 package.preload["features.lockscreen"] = function()
     return { refresh = function() end }

@@ -266,7 +266,7 @@ function Meta.displayDescription(meta, fallback)
         locales[#locales + 1] = meta.l10n.zh or meta.l10n.zh_CN or meta.l10n.zh_TW
     end
     for _idx, locale in ipairs(locales) do
-        local _, desc = localeTitleDesc(locale)
+        local _title, desc = localeTitleDesc(locale)
         if type(desc) == "string" and desc ~= "" then return desc end
     end
     for _idx, value in ipairs({ meta.description_zh, meta.description }) do

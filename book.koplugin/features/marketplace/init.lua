@@ -28,7 +28,7 @@ local function runAutoRefresh(desk)
     local Catalog = require("features.marketplace.catalog")
     if Catalog.isRefreshing() or not Catalog.isStale() then return end
     if not require("ui/network/manager"):isConnected() then return end
-    Catalog.refresh(function(_cache, err)
+    Catalog.refresh(function(err)
         if err then
             require("utils.log").dbg("marketplace auto refresh skipped", err)
             return
@@ -58,8 +58,6 @@ function Marketplace.onExit()
     Marketplace.cancelAutoRefresh()
     require("features.marketplace.catalog").cancel()
     require("workers.tasks").cancelPrefixed("plugin")
-    require("features.marketplace.install").cancel()
-    require("features.marketplace.readme").cancel()
     local Page = require("features.marketplace.page")
     Page.cancelPending()
     Page.onClose()

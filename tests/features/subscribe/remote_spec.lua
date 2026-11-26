@@ -33,6 +33,9 @@ package.loaded["features.subscribe.db"] = {
         _G.__sub_items_read = read
         return { { guid = "g1", title = "文一", link = "https://a/1", read = false } }, 1
     end,
+    item = function(_id, guid)
+        if guid == "g1" then return { guid = "g1", title = "文一", link = "https://a/1", read = false } end
+    end,
     summary = function() return nil end,
     markRead = function(id, guid) read_calls[#read_calls + 1] = id .. ":" .. tostring(guid) end,
 }

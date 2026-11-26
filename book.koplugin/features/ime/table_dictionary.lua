@@ -10,10 +10,11 @@ local lfs = require("libs/libkoreader-lfs")
 local Paths = require("utils.paths")
 local logger = require("utils.log")
 
-local MAX_CANDIDATES = 21
+local MAX_CANDIDATES = 21 -- 候选栏约 3 页，多了也翻不到
 
 local Dictionary = {}
 Dictionary.__index = Dictionary
+Dictionary.MAX_CANDIDATES = MAX_CANDIDATES
 
 ---@param id "pinyin"|"wubi"|"cangjie"|"zhuyin"
 ---@param schema_version string|nil 形码词库为 "1"
@@ -67,6 +68,18 @@ function Dictionary:reset()
     self.statements = nil
 end
 
+--- 查询抛错后语句可能停在 SQLITE_ROW：全部重置，下一次输入仍可正常查词。
+---@param what string 日志标签
+---@param err any
+---@return string[] 空结果
+function Dictionary:failed(what, err)
+    logger.warn("book ime dict " .. what .. " failed", self.id, err)
+    for _sql_name, stmt in pairs(self.statements or {}) do
+        pcall(function() stmt:clearbind():reset() end)
+    end
+    return {}
+end
+
 ---@param name string
 ---@param sql string
 ---@param ... any
@@ -117,13 +130,7 @@ function Dictionary:lookup(code)
             end
         end
     end)
-    if not ok then
-        logger.warn("book ime dict lookup failed", self.id, err)
-        for _sql_name, stmt in pairs(self.statements or {}) do
-            pcall(function() stmt:clearbind():reset() end)
-        end
-        return {}
-    end
+    if not ok then return self:failed("lookup", err) end
     return words
 end
 
@@ -136,11 +143,7 @@ function Dictionary:glob(pattern)
         "SELECT DISTINCT text FROM entries WHERE code GLOB ?"
             .. " ORDER BY weight DESC, source_order LIMIT " .. MAX_CANDIDATES,
         pattern)
-    if not ok then
-        logger.warn("book ime dict glob failed", self.id, words)
-        pcall(function() self.statements.glob:clearbind():reset() end)
-        return {}
-    end
+    if not ok then return self:failed("glob", words) end
     return words
 end
 

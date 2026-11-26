@@ -13,7 +13,7 @@ Kit.sections.dictionary = dict_settings
 require("utils.settings").save = function() end
 require("device").hasClipboard = function() return true end
 require("device").input.setClipboardText = function() end
-local lex = { entries = { ["彘"] = { "zhì", 7000 } } }
+local lex = { entries = { ["彘"] = "zhì" }, ranks = { ["彘"] = 7000 } }
 package.preload["features.rare.catalog"] = function() return { active = function() return { lex } end } end
 local translate_cb, translate_cancelled
 package.preload["features.translate.edge"] = function()

@@ -162,10 +162,6 @@ for t in ("script style iframe object embed video audio noscript template svg ma
     .. "button form canvas frameset frame title head"):gmatch("%S+") do DROP[t] = true end
 local VOID = { br = true, hr = true, img = true }
 
-local function esc(v)
-    return (v:gsub("&", "&amp;"):gsub('"', "&quot;"):gsub("<", "&lt;"):gsub(">", "&gt;"))
-end
-
 local function attr(raw, name)
     raw = " " .. raw
     return raw:match("%s" .. name .. '%s*=%s*"([^"]*)"') or raw:match("%s" .. name .. "%s*=%s*'([^']*)'")
@@ -177,7 +173,7 @@ local function attrs(tag, raw)
     if tag == "a" then
         local v = attr(raw, "[hH][rR][eE][fF]")
         if v and v:gsub("&#?%w+;", ""):gsub("[%c%s]", ""):lower():match("^https?://") then
-            out[#out + 1] = ' href="' .. esc(v) .. '" rel="noopener noreferrer" target="_blank"'
+            out[#out + 1] = ' href="' .. Text.xmlEscape(v) .. '" rel="noopener noreferrer" target="_blank"'
         end
     elseif tag == "img" then
         local v = attr(raw, "[sS][rR][cC]")
@@ -185,7 +181,7 @@ local function attrs(tag, raw)
         if not (plain:match("^https://") or plain:match("^data:image/[%w.+-]+;base64,")) or plain:match("^data:image/svg") then
             return nil
         end
-        out[#out + 1] = ' src="' .. esc(v:gsub("&amp;", "&")) .. '" referrerpolicy="no-referrer" loading="lazy" alt=""'
+        out[#out + 1] = ' src="' .. Text.xmlEscape((v:gsub("&amp;", "&"))) .. '" referrerpolicy="no-referrer" loading="lazy" alt=""'
     elseif tag == "td" or tag == "th" then
         for _idx, k in ipairs({ "colspan", "rowspan" }) do
             local v = attr(raw:lower(), k)
@@ -223,8 +219,6 @@ function Remote.clean(html)
     return table.concat(out)
 end
 
-local function num(v) return tonumber(v) end
-
 --- 设置里登记的分组补上 names 中还没有的（保持出现顺序，未分组 "" 不登记）。
 ---@param names string[]
 local function addGroups(names)
@@ -259,7 +253,7 @@ local function publicUrl(url)
 end
 
 local function feedOr404(id, cb)
-    local feed = SubDB.feed(num(id))
+    local feed = SubDB.feed(tonumber(id))
     if not feed then cb(404, { error = _("订阅不存在") }) end
     return feed
 end
@@ -267,7 +261,7 @@ end
 local function idList(v)
     local out = {}
     for _idx, id in ipairs(type(v) == "table" and v or {}) do
-        if num(id) then out[#out + 1] = num(id) end
+        if tonumber(id) then out[#out + 1] = tonumber(id) end
     end
     return out
 end
@@ -279,7 +273,7 @@ function GET.list(_q, cb) cb(200, Remote.list()) end
 function GET.items(q, cb)
     local feed = feedOr404(q.id, cb)
     if not feed then return end
-    local page = math.max(1, num(q.page) or 1)
+    local page = math.max(1, tonumber(q.page) or 1)
     -- read：缺省全部，"1" 只要已读，"0" 只要未读
     local read = nil
     if q.read == "1" or q.read == 1 then read = true elseif q.read == "0" or q.read == 0 then read = false end
@@ -290,10 +284,7 @@ end
 function POST.article(q, cb)
     local feed = feedOr404(q.id, cb)
     if not feed then return end
-    local item
-    for _idx, it in ipairs((SubDB.items(feed.id, 1, SubDB.KEEP))) do
-        if it.guid == q.guid then item = it; break end
-    end
+    local item = SubDB.item(feed.id, q.guid)
     if not item then return cb(404, { error = _("文章不存在") }) end
     if feed.kind ~= "mp" then feed.public = true end
     S().content(feed, item, function(html, err)

@@ -14,8 +14,10 @@ package.preload["device"] = function()
         isTouchDevice = function() return false end,
     }
 end
+local menu_shown = true
 package.preload["ui/uimanager"] = function()
-    return { show = function() end, setDirty = function() end, nextTick = function(_, fn) fn() end }
+    return { show = function() end, setDirty = function() end, nextTick = function(_, fn) fn() end,
+        isWidgetShown = function() return menu_shown end }
 end
 
 local drawer_enabled = true
@@ -108,6 +110,14 @@ tab[2].callback({
 })
 Assert.eq(executed[1], "plugin.example.popup")
 Assert.eq(refreshed, 1)
+-- 动作晚一拍刷新时菜单已关：不再重建内容。
+menu_shown = false
+tab[2].callback({
+    updateItems = function() refreshed = refreshed + 1 end,
+    closeMenu = function() end,
+})
+Assert.eq(refreshed, 1, "关掉的菜单不刷新")
+menu_shown = true
 
 local reader_menu = setmetatable({}, { __index = ReaderMenu })
 reader_menu:setUpdateItemTable()
@@ -116,7 +126,10 @@ Assert.is_nil(reader_menu.tab_item_table[1]._book_quick_panel)
 -- 文件管理器抽屉 Tab：开关开且桌面未显示 → 关菜单开桌面；不记忆该 Tab。
 local desktop_opens, fm_menu_closes = 0, 0
 local fm_plugin = {}
-package.loaded["desktop"] = { open = function(p) if p == fm_plugin then desktop_opens = desktop_opens + 1 end end }
+package.loaded["desktop"] = {
+    open = function(p) if p == fm_plugin then desktop_opens = desktop_opens + 1 end end,
+    hostPlugin = function(ui) return ui.book end,
+}
 local drawer_menu = setmetatable({
     ui = { book = fm_plugin },
     onCloseFileManagerMenu = function() fm_menu_closes = fm_menu_closes + 1 end,

@@ -105,8 +105,7 @@ local prompted_at
 ---@param err any
 ---@return boolean
 local function isMpAuth(err)
-    local list = require("utils.extension").list("desktop.account_feeds")
-    local provider = list[#list]
+    local provider = require("features.subscribe").mpProvider()
     if not provider then return false end
     local Mp = provider.mp()
     return err ~= nil and tostring(err) == _(Mp.AUTH_EXPIRED)
@@ -116,8 +115,7 @@ local function promptMpAuth()
     local now = os.time()
     if prompted_at and now - prompted_at < Refresh.PROMPT_INTERVAL then return end
     prompted_at = now
-    local list = require("utils.extension").list("desktop.account_feeds")
-    local Mp = list[#list].mp()
+    local Mp = require("features.subscribe").mpProvider().mp()
     require("ui.themes.widgets.confirm"):new{ text = _(Mp.AUTH_EXPIRED), ok_text = _("知道了") }:show()
 end
 

@@ -15,8 +15,8 @@ local Request = require("http.request")
 local MarketInstall = {}
 
 local MAX_ARCHIVE_BYTES = 50 * 1024 * 1024
+-- 插件目录全进程共享：同一时刻只允许一个安装在写。
 local busy = false
-local job_handle
 
 --- KOReader 插件目录（月读的同级目录）。禁止把第三方插件写进 book.koplugin 内部。
 ---@param plugin_root string
@@ -118,13 +118,6 @@ function MarketInstall.plan(plugin, asset, plugin_root)
     }
 end
 
-function MarketInstall.cancel()
-    local handle = job_handle
-    job_handle = nil
-    if handle and handle.cancel then handle.cancel() end
-    busy = false
-end
-
 --- 下载并安装。成功回调 cb(true, installed_dir_name)；失败回调 cb(false, err)。
 --- 立刻返回 { cancel }。句柄始终打到当前阶段（下载或解压），取消后不再回调。
 --- 测试可注入 download / run，避免真实拉取或解压外部包。
@@ -151,25 +144,21 @@ function MarketInstall.perform(plan, opts, cb)
 
     local cancelled = false
     local stage = idle
-    local handle
-    handle = {
+    local handle = {
         cancel = function()
             if cancelled then return end
             cancelled = true
             stage.cancel()
             os.remove(archive)
             os.remove(archive .. ".part")
-            if job_handle == handle then job_handle = nil end
             busy = false
         end,
     }
-    job_handle = handle
 
     local function done(ok, detail)
         if cancelled then return end
         os.remove(archive)
         os.remove(archive .. ".part")
-        if job_handle == handle then job_handle = nil end
         busy = false
         cb(ok, detail)
     end

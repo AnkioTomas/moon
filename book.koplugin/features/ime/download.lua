@@ -27,17 +27,21 @@ local Job = require("workers.job")
 -- 拼音保留旧仓库路径，避免已发布插件访问 main 时失效。
 local BASE_ROOT = "assets"
 
-local M = {
-    _downloading = false,
-}
+local M = {}
+
+-- 正在写的落盘路径：同一目标不并发写，不同词库（输入法 / 生僻字）互不影响。
+local active = {}
 
 -- 下载和拼接相互递归，先声明以保持主流程顺序。
 local downloadParts
 local assembleInJob
 
---- 是否有下载或拼接任务在运行。
-function M.downloading()
-    return M._downloading
+--- 是否有下载或拼接任务在运行；给 dest 只看这一份。
+---@param dest string|nil
+---@return boolean
+function M.downloading(dest)
+    if dest then return active[dest] == true end
+    return next(active) ~= nil
 end
 
 --- 分片续传用的临时目录。
@@ -49,17 +53,7 @@ end
 
 --- 删掉临时目录及其中全部分片；目录不存在时无操作。
 local function cleanupTmp(spec)
-    local dir = tmpDir(spec)
-    local ok, iter, dir_obj = pcall(lfs.dir, dir)
-    if not ok or not iter then
-        return
-    end
-    for f in iter, dir_obj do
-        if f ~= "." and f ~= ".." then
-            os.remove(dir .. "/" .. f)
-        end
-    end
-    os.remove(dir)
+    require("utils.fs").removeTree(tmpDir(spec))
 end
 
 ---@return boolean
@@ -102,10 +96,8 @@ end
 ---@return boolean, string|nil
 local function syncTmpManifest(manifest, spec)
     local path = tmpDir(spec) .. "/.manifest.json"
-    local f = io.open(path, "rb")
-    if f then
-        local body = f:read("*a")
-        f:close()
+    local body = require("utils.fs").read(path)
+    if body then
         local ok, saved = pcall(JSON.decode, body)
         if not ok or type(saved) ~= "table"
             or saved.built_at ~= manifest.built_at
@@ -116,19 +108,12 @@ local function syncTmpManifest(manifest, spec)
     if lfs.attributes(tmpDir(spec), "mode") ~= "directory" and not lfs.mkdir(tmpDir(spec)) then
         return false, "cannot create dictionary temp directory"
     end
-    local encoded = JSON.encode({
+    local wrote, write_err = require("utils.fs").write(path, JSON.encode({
         built_at = manifest.built_at,
         raw_sha256 = manifest.raw_sha256,
-    })
-    local write_file, open_err = io.open(path, "wb")
-    if not write_file then
-        return false, open_err or "cannot write dictionary manifest"
-    end
-    local wrote, write_err = write_file:write(encoded)
-    local closed, close_err = write_file:close()
-    if not wrote or not closed then
-        os.remove(path)
-        return false, write_err or close_err or "cannot write dictionary manifest"
+    }))
+    if not wrote then
+        return false, write_err or "cannot write dictionary manifest"
     end
     return true
 end
@@ -266,18 +251,18 @@ function M.install(spec, cb, on_progress)
         cancel = function()
             if state.cancelled then return end
             state.cancelled = true
-            M._downloading = false
+            active[spec.dest] = nil
             state.cancel()
             os.remove(spec.dest .. ".part")
         end,
     }
-    if M._downloading then
+    local dest = spec.dest
+    if active[dest] then
         cb(false, "already downloading")
         return { cancel = function() end }
     end
-    local dest = spec.dest
     local started_at = Perf.now()
-    M._downloading = true
+    active[dest] = true
     logger.dbg("book dict download start", spec.name, dest)
     --- 转发进度给调用方（未传 on_progress 时静默丢弃）。
     ---@param ... any 阶段名及可选的进度数值
@@ -292,7 +277,7 @@ function M.install(spec, cb, on_progress)
         if state.cancelled then return end
         state.cancelled = true
         state.cancel = function() end
-        M._downloading = false
+        active[dest] = nil
         if ok then
             logger.dbg("book dict download done", spec.name, Perf.elapsedMs(started_at), "ms")
         else

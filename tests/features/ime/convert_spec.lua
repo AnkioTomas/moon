@@ -22,3 +22,6 @@ local Convert = require("features.ime.convert")
 Assert.eq(Convert.markup('<p class="发">头发 abc</p><br/><i>x</i>', "traditional"), '<p class="发">头發 abc</p><br/><i>x</i>')
 Assert.eq(Convert.markup("<p>no cjk</p>", "traditional"), "<p>no cjk</p>")
 Assert.eq(Convert.markup("<p>头發</p><p>發</p>", "simplified"), "<p>头发</p><p>发</p>")
+-- 超过一批（16KB）的文字分批转换，按位对齐不串位。
+local one = Convert.markup("<p>头发</p>", "traditional")
+Assert.eq(Convert.markup(string.rep("<p>头发</p>", 4000), "traditional"), string.rep(one, 4000))

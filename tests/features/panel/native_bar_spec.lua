@@ -258,8 +258,9 @@ Assert.eq(full_repaints, 1, "高度变化必须整屏重画并全刷")
 TouchMenu:updateItems()
 Assert.eq(full_repaints, 1)
 
--- 刚打开：下方还没有遮罩像素，同样全刷一次
+-- 刚打开（新 TouchMenu 的 dimen 是空 Geom，h = 0）：下方还没有遮罩像素，同样全刷一次
 TouchMenu.is_fresh = true
+TouchMenu.dimen.h = 0
 TouchMenu:updateItems()
 TouchMenu.is_fresh = false
 Assert.eq(full_repaints, 2)

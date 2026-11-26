@@ -7,7 +7,6 @@
 require("l10n").apply()
 
 local UIManager = require("ui/uimanager")
-local Menu = require("features.panel.menu")
 local _ = require("gettext")
 
 ---@class BookQuickPanelNativeSettings
@@ -26,7 +25,7 @@ end
 ---@param ui table|nil
 ---@param menu table|nil
 local function saveDefault(ui, menu)
-    Menu.close(menu)
+    menu:closeMenu()
     if ui and ui.menu and ui.menu.saveDocumentSettingsAsDefault then
         ui.menu:saveDocumentSettingsAsDefault()
     end

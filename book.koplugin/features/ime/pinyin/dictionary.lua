@@ -20,11 +20,9 @@ schema（tools/build_pinyin_dict.py 生成）：
 @module koplugin.book.features.ime.pinyin.dictionary
 --]]
 
-local logger = require("utils.log")
-
 local M = require("features.ime.table_dictionary"):new("pinyin", "2")
 
-local MAX_CANDI = 21 -- 候选栏约 3 页，多了也翻不到
+local MAX_CANDI = M.MAX_CANDIDATES
 local QUICK_DIRECT_MAX = 6
 local QUICK_ABBREV_MAX = 5
 local SQL_QUICK = "SELECT words.word FROM quick JOIN words ON words.rowid = quick.word_id"
@@ -200,16 +198,7 @@ function M:lookup(code)
             out = self:fetch("abbrev", SQL_ABBREV, abbrevCode(code) .. "*")
         end
     end)
-    if not ok then
-        -- 查询异常后语句可能停在 SQLITE_ROW；重置缓存语句，下一次输入仍可正常查词。
-        logger.warn("book ime dict lookup failed", self.id, err)
-        for _sql_name, stmt in pairs(self.statements or {}) do
-            pcall(function()
-                stmt:clearbind():reset()
-            end)
-        end
-        return {}
-    end
+    if not ok then return self:failed("lookup", err) end
     return out
 end
 

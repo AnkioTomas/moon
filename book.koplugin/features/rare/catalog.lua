@@ -106,10 +106,7 @@ function Catalog.load(id)
     end
     local cached = loaded[id]
     if cached and cached.mtime == mtime then return cached.lex end
-    local f = assert(io.open(path, "rb"))
-    local text = f:read("*a")
-    f:close()
-    local lex = require("features.rare.lexicon").parse(text)
+    local lex = require("features.rare.lexicon").parse(assert(require("utils.fs").read(path), path))
     loaded[id] = { lex = lex, mtime = mtime }
     return lex
 end

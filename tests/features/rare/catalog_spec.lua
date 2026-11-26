@@ -59,7 +59,7 @@ do
     Assert.is_true(Catalog.enabled("zh-pinyin"))
     local active = Catalog.active()
     Assert.len(active, 1)
-    Assert.eq(active[1].entries["龘"][1], "dá")
+    Assert.eq(active[1].entries["龘"], "dá")
     Assert.eq(active[1].kind, "ruby")
 end
 

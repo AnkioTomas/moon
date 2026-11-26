@@ -29,6 +29,8 @@ CREATE TABLE IF NOT EXISTS sub_items (
   PRIMARY KEY (feed_id, guid)
 );
 CREATE INDEX IF NOT EXISTS idx_sub_items_order ON sub_items(feed_id, time DESC, seq DESC);
+-- 跨源文章流（SubDB.stream）按时间排序：没有它订阅页每次重画都整表排序。
+CREATE INDEX IF NOT EXISTS idx_sub_items_time ON sub_items(time DESC, seq DESC);
 ]]) ~= nil
 end)
 

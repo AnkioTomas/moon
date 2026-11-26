@@ -51,7 +51,6 @@ Assert.eq(calls, 1)
 Assert.eq(got.name, "README.zh-CN.md")
 Assert.is_true(got.text:find("你好", 1, true) ~= nil)
 Assert.is_nil(got.detail.readme, "detail 不应重复保存 readme 正文")
-Assert.eq(Readme.pendingCount(), 0, "完成后应清理在途任务引用")
 Assert.eq(Catalog.plugins()[1].default_branch, "main", "详情应顺带合并回目录索引")
 
 -- 命中缓存不再请求网络
@@ -121,18 +120,17 @@ Readme.fetch(plugin, function(item, err)
     fail_err = err
 end)
 Assert.eq(fail_err, "network")
-Assert.eq(Readme.pendingCount(), 0)
 
--- 取消后迟到回调不交付，且清理任务引用
+-- 取消后迟到回调不交付，且取消在途请求
 local late_cb, delivered
+local request_cancelled = false
 Client.getDetail = function(_uid, cb)
     late_cb = cb
-    return { cancel = function() end }
+    return { cancel = function() request_cancelled = true end }
 end
 local job = Readme.fetch(plugin, function(item) delivered = item end)
-Assert.eq(Readme.pendingCount(), 1)
 job.cancel()
-Assert.eq(Readme.pendingCount(), 0)
+Assert.is_true(request_cancelled)
 late_cb({ uid = plugin.uid, readme = { name = "README.md", text = "late" } }, nil)
 Assert.is_nil(delivered)
 

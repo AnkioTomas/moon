@@ -126,13 +126,13 @@ do
     for _idx, pair in ipairs({ { "時", "时" }, { "尋", "寻" }, { "讀", "读" }, { "無", "无" } }) do
         local t, s = lex.entries[pair[1]], lex.entries[pair[2]]
         Assert.not_nil(t, pair[1])
-        Assert.eq(t[1], s[1], pair[1])
-        Assert.eq(t[2], s[2], pair[1] .. " rank 随简体")
+        Assert.eq(t, s, pair[1])
+        Assert.eq(lex.ranks[pair[1]], lex.ranks[pair[2]], pair[1] .. " rank 随简体")
     end
-    Assert.eq(lex.entries["乾"][1], "qián", "繁体读音取本字，不照抄简体「干」")
+    Assert.eq(lex.entries["乾"], "qián", "繁体读音取本字，不照抄简体「干」")
     local hits = Lexicon.scan(lex, { "時", "無", "讀" }, Lexicon.threshold(lex, "all"))
     Assert.len(hits, 3, "「全部」档繁体字都注音")
-    Assert.eq(lex.entries["龘"][1], "dá", "字表外冷僻字也收")
+    Assert.eq(lex.entries["龘"], "dá", "字表外冷僻字也收")
     hits = Lexicon.scan(lex, { "酩", "酊", "大", "醉" }, Lexicon.threshold(lex, "rare"))
     Assert.len(hits, 2, "实际词库生僻档不标注词组里的常见字")
     Assert.eq(hits[1].key, "酩")
@@ -172,9 +172,8 @@ do
         Assert.eq(lex.lang, "en", id)
         Assert.eq(lex.kind, "wordwise", id)
         Assert.is_true(lex.count > 10000, id .. " 覆盖量")
-        local sample = lex.entries["ubiquitous"]
-        Assert.not_nil(sample, id .. " ubiquitous")
-        local ann = sample[1]
+        local ann = lex.entries["ubiquitous"]
+        Assert.not_nil(ann, id .. " ubiquitous")
         local n = select(2, ann:gsub("[^\128-\191]", ""))
         Assert.is_true(n <= 24, id .. " 短义长度 " .. ann)
         Assert.is_true(#text < 2 * 1024 * 1024, id .. " 体积")

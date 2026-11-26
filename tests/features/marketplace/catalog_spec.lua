@@ -63,11 +63,9 @@ Client.listPlugins = function(cb, progress)
     return { cancel = function() end }
 end
 
----@type table|nil
-local cache
 local err, progress_n = nil, 0
-Catalog.refresh(function(data, refresh_err)
-    cache, err = data, refresh_err
+Catalog.refresh(function(refresh_err)
+    err = refresh_err
 end, {
     on_progress = function(done, total)
         Assert.eq(done, 2)
@@ -77,7 +75,6 @@ end, {
 })
 Assert.is_nil(err)
 Assert.eq(progress_n, 1)
-Assert.eq(#cache.plugins, 2)
 Assert.eq(#Catalog.categories(), 2)
 Assert.eq(Catalog.categoryName("reader"), "阅读增强")
 Assert.eq(Catalog.count(), 2)
@@ -97,12 +94,11 @@ Client.listPlugins = function(cb)
     cb(nil, "network")
     return { cancel = function() end }
 end
-Catalog.refresh(function(data, refresh_err)
-    cache, err = data, refresh_err
+Catalog.refresh(function(refresh_err)
+    err = refresh_err
 end)
 Assert.eq(err, "network")
 Assert.eq(#Catalog.plugins(), 2)
-Assert.eq(#cache.plugins, 2)
 
 local found = Catalog.filter("阅读", "", "")
 Assert.eq(#found, 1)

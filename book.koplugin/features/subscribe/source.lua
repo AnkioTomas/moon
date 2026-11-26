@@ -47,19 +47,6 @@ function Source:configured()
     return true
 end
 
---- 已缓存文章里的二、三级标题（章内小节）；没缓存 / 旧缓存没有编号的文章没有小节。
----@param feed_id integer
----@param guid string
----@return BookChapterAnchor[]|nil
-local function anchorsOf(feed_id, guid)
-    local f = io.open(require("features.subscribe").dir(feed_id) .. "/articles/" .. require("ffi/sha2").md5(guid) .. ".html", "rb")
-    if not f then return nil end
-    local html = f:read("*a")
-    f:close()
-    local anchors = require("features.subscribe.typography").headings(html)
-    return #anchors > 0 and anchors or nil
-end
-
 --- 章节 uid 拆成（订阅 id, guid）。
 ---@param identity BookIdentity
 ---@param uid string
@@ -72,9 +59,11 @@ local function splitUid(identity, uid)
 end
 
 --- 这本书的目录：范围内的文章流；带注解的旧章（范围外了）按时间并回去。
+--- 章内小节按 uid 沿用旧目录（文章缓存时 fetchContent 写回），不逐篇读缓存文章。
 ---@param identity { stable_id: string }
+---@param old BookChapter[]|nil 旧目录；不给就读目录缓存
 ---@return BookChapter[]
-function M.toc(identity)
+function M.toc(identity, old)
     local sid = tostring(identity.stable_id)
     local spec = SubDB.scopeOf(sid)
     if not spec then return {} end
@@ -82,8 +71,8 @@ function M.toc(identity)
     local list = SubDB.stream(spec, 1, -1)
     local have = {}
     for _idx, item in ipairs(list) do have[item.feed_id .. ":" .. item.guid] = true end
-    local old = not single and require("source.toc").read(M.ID, sid, true)
-    if old then
+    old = old or require("source.toc").read(M.ID, sid, true)
+    if old and not single then
         local added
         for _idx, note in ipairs(require("book.note_db").all(M.ID, sid)) do
             local chapter = old[note.chapter_idx]
@@ -106,11 +95,13 @@ function M.toc(identity)
             end)
         end
     end
+    local anchors = {}
+    for _idx, chapter in ipairs(old or {}) do anchors[chapter.uid] = chapter.anchors end
     local toc = {}
     for i, item in ipairs(list) do
-        toc[i] = { idx = i, uid = single and item.guid or (item.feed_id .. ":" .. item.guid),
-            title = item.title ~= "" and item.title or _("无标题"), link = item.link,
-            anchors = anchorsOf(item.feed_id, item.guid) }
+        local uid = single and item.guid or (item.feed_id .. ":" .. item.guid)
+        toc[i] = { idx = i, uid = uid, title = item.title ~= "" and item.title or _("无标题"), link = item.link,
+            anchors = anchors[uid] }
     end
     return toc
 end
@@ -209,9 +200,9 @@ end
 ---@param force boolean|nil 打开书时为真：无论是否开着都同步
 function Source:loadTocAsync(identity, cb, force)
     local Toc = require("source.toc")
-    local toc = M.toc(identity)
     -- 旧目录是章节文件 / 注解现行章号的基线，过了 TTL 也得用：丢了基线就不挪，章号错位后划线串到别的文章上。
     local old = Toc.read(M.ID, identity.stable_id, true)
+    local toc = M.toc(identity, old)
     local same = old and #old == #toc
     for i = 1, same and #toc or 0 do
         if old[i].uid ~= toc[i].uid then same = false break end
@@ -222,14 +213,6 @@ function Source:loadTocAsync(identity, cb, force)
     if not same then
         if old then remapChapters(identity, old, toc) end
         if #toc > 0 then Toc.put(M.ID, identity.stable_id, toc) end
-    elseif #toc > 0 then
-        -- 目录没变，但文章缓存后多了小节：只更新目录缓存，不用挪章号。
-        for i = 1, #toc do
-            if #(old[i].anchors or {}) ~= #(toc[i].anchors or {}) then
-                Toc.put(M.ID, identity.stable_id, toc)
-                break
-            end
-        end
     end
     if #toc == 0 then return SourceBase.defer(cb, nil, _("订阅里还没有文章")) end
     return SourceBase.defer(cb, toc)
