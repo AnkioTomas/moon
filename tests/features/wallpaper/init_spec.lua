@@ -161,6 +161,33 @@ do
     end
 end
 
+-- 阅读壁纸：从 drawn-images 统计扣掉平铺背景整屏，避免被当成正文图片页。
+do
+    local raw_count, raw_coverage = 1, 1.0
+    local document = {
+        getDrawnImagesStatistics = function()
+            return raw_count, raw_coverage
+        end,
+    }
+    Wallpaper.ignoreReaderBackgroundStats(document)
+    Assert.eq(document:getDrawnImagesStatistics(), 0)
+    local _count, coverage = document:getDrawnImagesStatistics()
+    Assert.eq(coverage, 0)
+
+    raw_count, raw_coverage = 2, 1.25
+    Assert.eq(select(1, document:getDrawnImagesStatistics()), 1)
+    Assert.eq(select(2, document:getDrawnImagesStatistics()), 0.25)
+
+    raw_count, raw_coverage = 0, 0
+    Assert.eq(select(1, document:getDrawnImagesStatistics()), 0)
+    Assert.eq(select(2, document:getDrawnImagesStatistics()), 0)
+
+    -- 同一 document 只包一层
+    local before = document.getDrawnImagesStatistics
+    Wallpaper.ignoreReaderBackgroundStats(document)
+    Assert.eq(document.getDrawnImagesStatistics, before)
+end
+
 -- 非全屏弹窗不按整屏 dimen 贴壁纸，否则会盖掉下层页面只剩淡壁纸+网点。
 do
     local calls = {}

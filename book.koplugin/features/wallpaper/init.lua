@@ -10,6 +10,8 @@
 阅读页（reader，默认关）：crengine 把正文整屏铺满不透明，垫在下面看不见，所以改用它自带的
 平铺背景图接口：按屏幕尺寸渲染成 PNG 交给 `document:setBackgroundImage`，正文直接画在图上。
 只有 crengine 文档（EPUB / TXT / HTML 等）有这个接口，PDF / 漫画不生效；打开书时设置，改开关下次开书生效。
+`setBackgroundImage(tiled)` 会把整屏背景计入 drawn-images 统计；KOReader 用 coverage≥7.5%
+判「图片页」（dither / 可选每页全刷）。阅读壁纸不是正文图，装上后要从统计里扣掉这一屏。
 
 位图按「路径 + 尺寸 + 铺法 + 透明度」只缓存一张：两个作用面尺寸不同会来回换，但界面
 一次只画一处，换一次解一次可接受；改设置经 invalidate 丢弃。
@@ -488,6 +490,23 @@ end
 
 local reader_key
 
+--- cre `setBackgroundImage(tiled)` 每页往 drawn-images 加一整屏；阅读壁纸不是正文图，
+--- 装上后扣掉这一屏，否则 KOReader 会按「图片页」dither / 默认每页全刷。
+---@param document table
+function M.ignoreReaderBackgroundStats(document)
+    if document._moon_wallpaper_bg_stats then return end
+    local orig = document.getDrawnImagesStatistics
+    if not orig then return end
+    document._moon_wallpaper_bg_stats = true
+    function document:getDrawnImagesStatistics()
+        local count, coverage = orig(self)
+        if (count or 0) < 1 then return count, coverage end
+        coverage = (coverage or 0) - 1
+        if coverage < 0 then coverage = 0 end
+        return count - 1, coverage
+    end
+end
+
 --- 阅读页壁纸：首帧后再解码写 PNG，交给 crengine 平铺（不挡开书）。
 --- 同一张图 / 尺寸 / 铺法 / 透明度本进程只写一次。
 ---@param plugin BookPlugin
@@ -504,6 +523,7 @@ function M.onReaderReady(plugin)
     local file = Paths.cacheDir() .. "/wallpaper_reader.png"
     if reader_key == key and lfs.attributes(file, "mode") then
         document:setBackgroundImage(file)
+        M.ignoreReaderBackgroundStats(document)
         return
     end
     local queued_rev = revision
@@ -517,6 +537,7 @@ function M.onReaderReady(plugin)
         img:writePNG(file)
         reader_key = key
         document:setBackgroundImage(file)
+        M.ignoreReaderBackgroundStats(document)
         require("ui/uimanager"):setDirty(ui.dialog, "partial")
     end))
 end
