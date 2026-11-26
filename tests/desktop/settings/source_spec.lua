@@ -195,6 +195,14 @@ Assert.eq(opds_rows[2]().title, "OPDS 目录")
 Assert.eq(opds_rows[2]().status, "未配置")
 store_cfg.opds_enabled = false
 
+-- 书库组的快捷入口和书城页进的是同一层：开关 + 配置。
+local zlib_row = src.storeShortcut(desktop, nil, "zlib")
+Assert.eq(zlib_row().title, "Z-Library")
+Assert.eq(zlib_row().status, "未开启")
+zlib_row().callback()
+Assert.eq(desktop.settings_overlay.spec.title, "Z-Library")
+Assert.eq(src.storeShortcut(desktop, nil, "opds")().title, "OPDS")
+
 -- 源设置模块：没有文件即没有；模块自身抛错必须冒出来。
 Assert.is_nil(src.loadSetting("nosuch"))
 package.preload["source.broken.setting"] = function() error("boom") end

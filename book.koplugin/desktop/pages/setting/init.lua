@@ -1,7 +1,7 @@
 --[[--
 设置页编排：根页是搜索行、设备分组，然后是分组目录。点分组进叠层列该组条目；再点才是具体设置页。
 
-条目多的组（阅读 / 系统 / 维护）在组页里按分类分节平铺，不另开一层目录（总深度最多三层：根 → 组 → 设置页）。
+条目多的组（书库 / 阅读 / 系统 / 维护）在组页里按分类分节平铺，不另开一层目录（总深度最多三层：根 → 组 → 设置页）。
 分类只影响展示，不改 group / 配置键；表见 GROUP_FOLDERS。
 根页与各页面由「条目」按层级（分组 → 页面 → 分节）合并而成，规则见 tree.lua。
 本文件只声明核心条目；feature 的条目在各自的 setting.lua，扫描得到。各设置项实现位于 desktop/pages/setting/。
@@ -164,6 +164,14 @@ local function coreEntries(desktop)
                     callback = function() require("source.cleanup").pick(desktop) end,
                 })
             end,
+        },
+        {
+            group = "library", order = 80, id = "store_zlib",
+            row = function(iw) return Source.storeShortcut(desktop, plugin, "zlib")(iw) end,
+        },
+        {
+            group = "library", order = 81, id = "store_opds",
+            row = function(iw) return Source.storeShortcut(desktop, plugin, "opds")(iw) end,
         },
         {
             group = "appearance", order = 10, id = "appearance", icon = "palette", title = _("主题与字体"),
@@ -344,6 +352,15 @@ end
 --- 大组才拆分类（只影响展示，不改 group / 配置键）。未点名的落入 default=true 的那一类。
 --- match 写条目 id：核心裸 id；feature 页面是 feature:<name>:<id>；feature 直接行是自己写的 id。
 local GROUP_FOLDERS = {
+    library = {
+        {
+            id = "sources", title = _("书库"), default = true,
+        },
+        {
+            id = "store", title = _("书城"),
+            match = { "store_zlib", "store_opds" },
+        },
+    },
     desktop = {
         {
             id = "bar", icon = "web_asset", title = _("顶栏与底栏"),

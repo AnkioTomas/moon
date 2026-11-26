@@ -103,6 +103,14 @@ package.preload["desktop.pages.setting.source"] = function()
     return {
         configSections = function() return {} end,
         storeSections = function() return { { title = "书城", rows = {} } } end,
+        storeShortcut = function(_desktop, _plugin, id)
+            return function(width)
+                return require("ui.themes.widgets.row").widget({
+                    width = width, kind = "nav",
+                    title = id == "zlib" and "Z-Library" or "OPDS",
+                })
+            end
+        end,
         displayName = function(name) return name end,
     }
 end
@@ -271,10 +279,11 @@ Assert.is_true(auto_update_row.status_on)
 -- 书库组：启用的书源（多选）/ 当前书库 / 账号（书架显示已迁到桌面 → 图书馆）
 local library = openRoot("书库")
 Assert.eq(library.id, "group:library")
+Assert.eq(sectionTitles(library), "书库,书城")
 local library_rows = buildSectionRows(library)
 local library_titles = {}
 for _, row in ipairs(library_rows) do library_titles[#library_titles + 1] = row.title end
-Assert.eq(table.concat(library_titles, ","), "月读同步（WebDAV）,启用的书源,当前书库,账号,第三方书源插件,数据清理")
+Assert.eq(table.concat(library_titles, ","), "月读同步（WebDAV）,启用的书源,当前书库,账号,第三方书源插件,数据清理,Z-Library,OPDS")
 local cleanup_opened = false
 package.loaded["source.cleanup"] = { pick = function(d)
     Assert.eq(d, desktop)

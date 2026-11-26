@@ -283,7 +283,7 @@ function Source.openAccount(desktop, source_id)
 end
 
 --- 账号页：本地书籍与各已启用书源各一行，点开进二级页面。
---- 哪些源出现在这里由书库组顶部的「启用的书源」多选框决定。书城在桌面分组。
+--- 哪些源出现在这里由书库组顶部的「启用的书源」多选框决定。
 ---@param ctx table
 ---@return table
 function Source:configSections(ctx)
@@ -305,7 +305,33 @@ function Source:configSections(ctx)
     }
 end
 
---- 书城页：总开关 + Z-Library / OPDS 后端；挂在设置「桌面」分组。
+--- Z-Library / OPDS。书库组的「书城」分节和桌面书城页共用这一份。
+--- 文案在调用时取，换语言后下一次打开才是新译文。
+---@return table[]
+local function storeBackends()
+    return {
+        { id = "zlib", title = _("Z-Library"), icon = "library_books",
+          subtitle = _("在书城中搜索 Z站；下载后导入本地书库"),
+          entry = _("Z-Library 账号"), entry_icon = "vpn_key" },
+        { id = "opds", title = _("OPDS"), icon = "rss_feed",
+          subtitle = _("在书城中搜索 OPDS；Calibre、Komga、Kavita 等书库，下载后导入本地书库"),
+          entry = _("OPDS 目录"), entry_icon = "link" },
+    }
+end
+
+--- 书库组里的快捷入口：点开就是这个后端的开关和配置。
+---@param desktop table
+---@param plugin table|nil
+---@param id string
+---@return fun(iw: number): table
+function Source.storeShortcut(desktop, plugin, id)
+    for _idx, def in ipairs(storeBackends()) do
+        if def.id == id then return storeRow(desktop, plugin, def) end
+    end
+    error("unknown store " .. tostring(id))
+end
+
+--- 书城页：总开关 + 各后端；挂在设置「桌面」分组。
 ---@param ctx table
 ---@return table
 function Source:storeSections(ctx)
@@ -325,14 +351,7 @@ function Source:storeSections(ctx)
             end,
         })
     end }
-    for _idx, def in ipairs({
-        { id = "zlib", title = _("Z-Library"), icon = "library_books",
-          subtitle = _("在书城中搜索 Z站；下载后导入本地书库"),
-          entry = _("Z-Library 账号"), entry_icon = "vpn_key" },
-        { id = "opds", title = _("OPDS"), icon = "rss_feed",
-          subtitle = _("在书城中搜索 OPDS；Calibre、Komga、Kavita 等书库，下载后导入本地书库"),
-          entry = _("OPDS 目录"), entry_icon = "link" },
-    }) do
+    for _idx, def in ipairs(storeBackends()) do
         stores[#stores + 1] = storeRow(desktop, plugin, def)
     end
     return {
