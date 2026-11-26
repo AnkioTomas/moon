@@ -354,23 +354,40 @@ function Page.manage(desktop, entry, locals)
     }:show()
 end
 
-local function startInstall(desktop, plan, plugin)
-    toast(_("正在下载并安装…"))
-    MarketInstall.perform(plan, {}, function(ok, detail)
-        if ok then
-            local installed_name = type(detail) == "string" and detail or Installed.pluginDir(plugin)
-            if plugin and installed_name then
-                local installed_ver = (plan.version ~= "" and plan.version) or (plan.tag ~= "" and plan.tag) or nil
-                local remembered, remember_err = Installed.remember(plugin, installed_name, installed_ver)
-                if not remembered then
-                    toast(Page.errorText(remember_err == "write" and "write" or "record"))
-                end
-            end
-            afterInstalled(desktop)
-            return
+local function finishInstall(desktop, plan, plugin, result)
+    if not result.ok then
+        toast(Page.errorText(result.detail))
+        return
+    end
+    local installed_name = type(result.detail) == "string" and result.detail or Installed.pluginDir(plugin)
+    if plugin and installed_name then
+        local installed_ver = (plan.version ~= "" and plan.version) or (plan.tag ~= "" and plan.tag) or nil
+        local remembered, remember_err = Installed.remember(plugin, installed_name, installed_ver)
+        if not remembered then
+            toast(Page.errorText(remember_err == "write" and "write" or "record"))
         end
-        toast(Page.errorText(detail))
-    end)
+    end
+    afterInstalled(desktop)
+end
+
+local function startInstall(desktop, plan, plugin)
+    local key_id = (type(plan.uid) == "string" and plan.uid ~= "") and plan.uid or plan.archive
+    require("workers.ui.task_dialog").start{
+        key = "plugin\0" .. key_id,
+        kind = "download",
+        title = plan.title,
+        cancellable = true,
+        run = function(report, done)
+            return MarketInstall.perform(plan, {
+                on_progress = function(bytes, total)
+                    report(_("正在下载并安装…"), bytes, total)
+                end,
+            }, function(ok, detail)
+                done({ ok = ok == true, detail = detail })
+            end)
+        end,
+        on_done = function(result) finishInstall(desktop, plan, plugin, result) end,
+    }
 end
 
 local function confirmAsset(desktop, plugin, asset)

@@ -103,4 +103,31 @@ Assert.eq(#downloaded, 0)
 Assert.eq(MarketInstall.pluginsParent(root), "/koreader/plugins")
 Assert.is_true(MarketInstall.isReservedName("book.koplugin"))
 
+-- 取消打到当前下载，之后的完成回调不再回传；忙标记放开，下一次安装还能开始
+ran = {}
+local late
+local handle = MarketInstall.perform(plan, {
+    download = function(_url, _dest, cb)
+        late = cb
+        return { cancel = function() late = nil end }
+    end,
+    run = function() return true, "nice.koplugin" end,
+}, function(ok, detail)
+    ran.ok, ran.detail = ok, detail
+end)
+Assert.eq(type(handle.cancel), "function")
+handle.cancel()
+if late then late(true) end
+Assert.is_nil(ran.ok, "取消后不得再回调")
+
+ran = {}
+MarketInstall.perform(plan, {
+    download = function(_url, _dest, cb) cb(true) return { cancel = function() end } end,
+    run = function() return true, "nice.koplugin" end,
+}, function(ok, detail)
+    ran.ok, ran.detail = ok, detail
+end)
+Assert.is_true(ran.ok, "取消后应能再次安装")
+Assert.eq(ran.detail, "nice.koplugin")
+
 return true

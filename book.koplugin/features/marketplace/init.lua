@@ -57,6 +57,7 @@ end
 function Marketplace.onExit()
     Marketplace.cancelAutoRefresh()
     require("features.marketplace.catalog").cancel()
+    require("workers.tasks").cancelPrefixed("plugin")
     require("features.marketplace.install").cancel()
     require("features.marketplace.readme").cancel()
     local Page = require("features.marketplace.page")

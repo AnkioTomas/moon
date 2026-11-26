@@ -194,6 +194,43 @@ Assert.eq(shown[1].ok_text, "安装")
 Assert.is_true(shown[1].text:find("第三方代码", 1, true) ~= nil)
 Assert.is_true(shown[1].text:find("SHA-256", 1, true) ~= nil)
 
+-- 确认安装后交给下载任务：进度窗可转后台，取消打到 perform 返回的句柄
+shown = {}
+local started
+local captured
+package.loaded["workers.ui.task_dialog"] = {
+    start = function(spec) started = spec end,
+}
+local MarketInstall = require("features.marketplace.install")
+local real_perform = MarketInstall.perform
+MarketInstall.perform = function(plan, opts, cb)
+    captured = { plan = plan, opts = opts, cb = cb }
+    return { cancel = function() end }
+end
+Page.installPlugin(desktop, p_single)
+shown[1].ok_callback()
+Assert.eq(started.kind, "download")
+Assert.eq(started.title, "阅读统计")
+Assert.is_true(started.cancellable == true)
+Assert.eq(started.key, "plugin\0github:Acme/nice-plugin")
+local reported
+local finished
+local task_handle = started.run(function(text, count, total)
+    reported = { text = text, count = count, total = total }
+end, function(result)
+    finished = result
+end)
+Assert.eq(type(task_handle.cancel), "function")
+captured.opts.on_progress(10, 100)
+Assert.eq(reported.text, "正在下载并安装…")
+Assert.eq(reported.count, 10)
+Assert.eq(reported.total, 100)
+captured.cb(true, "nice.koplugin")
+Assert.is_true(finished.ok)
+Assert.eq(finished.detail, "nice.koplugin")
+MarketInstall.perform = real_perform
+shown = {}
+
 -- 多包安装：先弹选择安装包列表，选中后再弹确认框
 shown = {}
 Page.installPlugin(desktop, p_multi)

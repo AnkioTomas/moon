@@ -119,25 +119,29 @@ function MarketInstall.plan(plugin, asset, plugin_root)
 end
 
 function MarketInstall.cancel()
-    if job_handle and job_handle.cancel then job_handle:cancel() end
+    local handle = job_handle
     job_handle = nil
+    if handle and handle.cancel then handle.cancel() end
     busy = false
 end
 
 --- 下载并安装。成功回调 cb(true, installed_dir_name)；失败回调 cb(false, err)。
+--- 立刻返回 { cancel }。句柄始终打到当前阶段（下载或解压），取消后不再回调。
 --- 测试可注入 download / run，避免真实拉取或解压外部包。
 ---@param plan table
 ---@param opts { download?: function, run?: function, on_progress?: function }|nil
 ---@param cb fun(ok: boolean, detail: string|nil)
+---@return { cancel: fun() }
 function MarketInstall.perform(plan, opts, cb)
     opts = opts or {}
+    local idle = { cancel = function() end }
     if busy then
         cb(false, "busy")
-        return
+        return idle
     end
     if type(plan) ~= "table" or not isSafeHttpUrl(plan.url) then
         cb(false, "unsafe_url")
-        return
+        return idle
     end
     busy = true
     Paths.ensureDir(Paths.root())
@@ -145,12 +149,43 @@ function MarketInstall.perform(plan, opts, cb)
     os.remove(archive)
     os.remove(archive .. ".part")
 
+    local cancelled = false
+    local stage = idle
+    local handle
+    handle = {
+        cancel = function()
+            if cancelled then return end
+            cancelled = true
+            stage.cancel()
+            os.remove(archive)
+            os.remove(archive .. ".part")
+            if job_handle == handle then job_handle = nil end
+            busy = false
+        end,
+    }
+    job_handle = handle
+
     local function done(ok, detail)
+        if cancelled then return end
         os.remove(archive)
         os.remove(archive .. ".part")
-        job_handle = nil
+        if job_handle == handle then job_handle = nil end
         busy = false
         cb(ok, detail)
+    end
+
+    --- 下载回调可能在 download() 返回前同步发生，这时不能再用下载句柄盖掉解压句柄。
+    local phase = "download"
+    local function adopt(job)
+        if cancelled then
+            if job and job.cancel then job:cancel() end
+            return
+        end
+        if job and job.cancel then
+            stage = { cancel = function() job:cancel() end }
+        else
+            stage = idle
+        end
     end
 
     local function runInstall()
@@ -163,7 +198,7 @@ function MarketInstall.perform(plan, opts, cb)
             end
             return
         end
-        job_handle = Job.run(function()
+        adopt(Job.run(function()
             local installed, detail = InstallCore.run(archive, plan.parent, nil, {
                 verify = function(name)
                     if MarketInstall.isReservedName(name) or not Installed.isPluginDir(name) then
@@ -179,7 +214,7 @@ function MarketInstall.perform(plan, opts, cb)
             timeout = 120,
             on_done = function(installed_name) done(true, installed_name) end,
             on_failed = function(err) done(false, tostring(err):match("[^\n]*")) end,
-        })
+        }))
     end
 
     local download = opts.download or function(url, dest, dcb)
@@ -192,13 +227,17 @@ function MarketInstall.perform(plan, opts, cb)
             on_progress = opts.on_progress,
         }, dest, dcb)
     end
-    job_handle = download(plan.url, archive, function(ok, err)
+    local fetched = download(plan.url, archive, function(ok, err)
+        if cancelled then return end
         if not ok then
             done(false, err or "download")
             return
         end
+        phase = "install"
         runInstall()
     end)
+    if phase == "download" then adopt(fetched) end
+    return handle
 end
 
 return MarketInstall
