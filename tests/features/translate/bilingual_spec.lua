@@ -462,7 +462,11 @@ do
     package.loaded["ui/network/manager"] = nil
     package.preload["ui/translator"] = function() return { getTargetLanguage = function() return "zh" end } end
     package.preload["features.translate.languages"] = function()
-        return { displayName = function(_translator, code) return code end }
+        return {
+            displayName = function(_translator, code) return code end,
+            pickerItems = function() return { { text = "zh", value = "zh" } } end,
+            applyTarget = function() end,
+        }
     end
     package.preload["ai"] = function() return { isConfigured = function() return false end } end
     local started, followed, running
@@ -479,9 +483,14 @@ do
         getXPointer = function() return "/body/p[1]" end,
     } }
     Bilingual.show(ui)
-    local sheet = Themed.last("sheet")
-    Assert.eq(sheet.items[2].text, "用 Edge 翻译全书")
-    sheet.items[2].callback()
+    local form = Themed.last("settings")
+    local fields = form.items(form)
+    Assert.eq(fields[2].title, "对照方式")
+    Assert.eq(fields[2].current, "paragraph")
+    fields[2].on_select("sentence")
+    local buttons = form.buttons(form)
+    Assert.eq(buttons[#buttons].text, "开始")
+    buttons[#buttons].callback()
     Assert.eq(started.key, "bilingual\0local\0/books/bilingual-entry.epub")
     Assert.eq(started.kind, "convert")
     Assert.eq(started.title, "书（双语）")

@@ -38,6 +38,31 @@ local out, count = Markup.inject(html, {
     ["Same"] = "Same",
 })
 Assert.eq(count, 1)
+
+-- 源站译文节点整段去掉；原文、换行译文、class 里只是子串的都留着。
+local embedded = table.concat({
+    '<link href="../wereadstyle/wrtranslation.css" rel="stylesheet" type="text/css"/>',
+    '<h1 class="firstTitle">CHAPTER</h1>\n',
+    '<h1 class="wr-translation firstTitle">第一章</h1>\n',
+    '<p class="content">Mr and Mrs Dursley</p>\n',
+    '<p class="wr-translation content">德思礼\n夫妇</p>',
+    '<p class="wr-translation-extra">keep</p>',
+}, "")
+local stripped, bilingual = Markup.splitEmbedded(embedded)
+Assert.is_true(Markup.hasEmbedded(embedded))
+Assert.is_nil(stripped:find("wrtranslation.css", 1, true))
+Assert.is_nil(stripped:find("第一章", 1, true))
+Assert.is_true(stripped:find("CHAPTER", 1, true) ~= nil)
+Assert.is_true(stripped:find("Mr and Mrs Dursley", 1, true) ~= nil)
+Assert.is_true(stripped:find("wr-translation-extra", 1, true) ~= nil)
+Assert.is_nil(stripped:find("德思礼", 1, true))
+Assert.eq(Markup.stripEmbedded("<p>Hello</p>"), "<p>Hello</p>")
+Assert.is_true(bilingual:find('class="moon-tr"', 1, true) ~= nil)
+Assert.is_true(bilingual:find("第一章", 1, true) ~= nil)
+Assert.is_true(bilingual:find("德思礼\n夫妇", 1, true) ~= nil)
+Assert.is_nil(bilingual:find("wr-translation firstTitle", 1, true))
+Assert.is_true(bilingual:find("CHAPTER<br/>", 1, true) ~= nil)
+Assert.is_true(bilingual:find("Dursley<br/>", 1, true) ~= nil)
 Assert.eq(out, '<body><p class="x">Hello <i>world</i><br/><span class="moon-tr" style="display:block">你好 &lt;世界&gt; &amp; 人</span></p>'
     .. "<p>Same</p><p>Missing</p></body>")
 
@@ -67,3 +92,24 @@ local navdoc = '<nav epub:type="toc"><ol><li><a href="a.xhtml">Chapter</a></li><
 Assert.eq(#Markup.blocks(navdoc), 1)
 Assert.eq((Markup.inject(navdoc, { Chapter = "章", Body = "正文" })),
     '<nav epub:type="toc"><ol><li><a href="a.xhtml">Chapter</a></li></ol></nav><p>Body<br/><span class="moon-tr" style="display:block">正文</span></p>')
+
+-- 默认按段落：一整段一条译文，贴在段尾。
+local para = "<p>Mr. Dursley was proud. They were normal.</p>"
+Assert.eq(Markup.points("Mr. Dursley was proud. They were normal.", "paragraph")[1].key,
+    "Mr. Dursley was proud. They were normal.")
+Assert.eq((Markup.inject(para, { ["Mr. Dursley was proud. They were normal."] = "德思礼先生很得意。他们很正常。" })),
+    '<p>Mr. Dursley was proud. They were normal.<br/><span class="moon-tr" style="display:block">德思礼先生很得意。他们很正常。</span></p>')
+
+-- 按句子：句号后插入，缩写和小数点不断开；中文句号同样切开。标签中间的句号插在标签外。
+local function keys(inner)
+    local out = {}
+    for i, point in ipairs(Markup.points(inner, "sentence")) do out[i] = point.key end
+    return table.concat(out, "|")
+end
+Assert.eq(keys("Mr. Dursley was proud. They were normal."), "Mr. Dursley was proud.|They were normal.")
+Assert.eq(keys("Pi is 3.14. Done."), "Pi is 3.14.|Done.")
+Assert.eq(keys("那一年。夏天来了。"), "那一年。|夏天来了。")
+Assert.eq(keys("One sentence"), "One sentence")
+local sentence_html = '<p>Hello <i>world</i>. Next.</p>'
+Assert.eq((Markup.inject(sentence_html, { ["Hello world."] = "你好。", ["Next."] = "下一句。" }, nil, "sentence")),
+    '<p>Hello <i>world</i>.<br/><span class="moon-tr" style="display:block">你好。</span> Next.<br/><span class="moon-tr" style="display:block">下一句。</span></p>')

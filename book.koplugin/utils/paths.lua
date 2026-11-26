@@ -228,6 +228,15 @@ function P.bilingualChapterPath(path)
     return dir .. "/bilingual/" .. idx .. ".html"
 end
 
+--- 章节里自带的译文全文。`.../N.html` → `.../N.embed.html`。
+--- 原章默认去掉译文节点；打开双语对照时读这份。
+---@param path string 原章或带译文的副本
+---@return string
+function P.embedChapterPath(path)
+    local origin = P.chapterOrigin(path)
+    return (origin:gsub("%.html$", ".embed.html"))
+end
+
 --- 旧排版：与原章同目录的 `N.bi-<tag>.html`。只用来探测已经生成的文件，不新建。
 ---@param path string 原章或双语章
 ---@param tag string `<engine>-<lang>`
@@ -237,12 +246,13 @@ function P.legacyBilingualChapterPath(path, tag)
     return (origin:gsub("%.html$", "")) .. ".bi-" .. tag .. ".html"
 end
 
---- 双语章 → 原章。新排版在 bilingual/ 下，旧排版是同目录的 `N.bi-<tag>.html`。其它路径原样返回。
+--- 双语章 → 原章。新排版在 bilingual/ 下，自带译文是同目录的 `N.embed.html`，旧排版是 `N.bi-<tag>.html`。其它路径原样返回。
 ---@param path string
 ---@return string
 function P.chapterOrigin(path)
     local dir, idx = path:match("^(.*)/bilingual/(%d+)%.html$")
     if dir then return dir .. "/" .. idx .. ".html" end
+    path = path:gsub("%.embed%.html$", ".html")
     return (path:gsub("%.bi%-[^/]+%.html$", ".html"))
 end
 

@@ -292,12 +292,15 @@ local function collect(input)
     local f = assert(io.open(pendingPath(input), "wb"))
     eachHtml(input, function(html)
         for _idx, block in ipairs(Markup.blocks(html)) do
-            if not seen[block.text] then
-                seen[block.text] = true
-                total = total + 1
-                if not cached[block.text] then
-                    assert(f:write(JSON.encode(block.text), "\n"))
-                    count = count + 1
+            local inner = html:sub(block.open, block.close - 1)
+            for _point, point in ipairs(Markup.points(inner, input.unit)) do
+                if not seen[point.key] then
+                    seen[point.key] = true
+                    total = total + 1
+                    if not cached[point.key] then
+                        assert(f:write(JSON.encode(point.key), "\n"))
+                        count = count + 1
+                    end
                 end
             end
         end
@@ -324,7 +327,7 @@ local function rewriteEpub(input, map, dest)
     for entry in reader:iterate() do
         if entry.mode == "file" and entry.path ~= "mimetype" then
             local data = assert(reader:extractToMemory(entry.path), reader.err)
-            if isHtml(entry.path) then data = Markup.inject(data, map, input.style) end
+            if isHtml(entry.path) then data = Markup.inject(data, map, input.style, input.unit) end
             assert(writer:addFileFromMemory(entry.path, data, mtime), writer.err)
         end
     end
@@ -355,7 +358,7 @@ local function build(input)
     local map = loadCache(input.cache)
     local tmp = input.dest .. ".part"
     if input.kind == "dom" then
-        local html = Markup.inject(assert(readFile(input.source)), map, input.style)
+        local html = Markup.inject(assert(readFile(input.source)), map, input.style, input.unit)
         if input.chapter then html = nestRefs(html) end
         local f = assert(io.open(tmp, "wb"))
         assert(f:write(html))
@@ -441,6 +444,7 @@ end
 ---@field engine "edge"|"ai"
 ---@field lang string
 ---@field style string|nil 译文附加样式（`Markup.style`），任务开始时取自设置
+---@field unit "paragraph"|"sentence"|nil 对照粒度，翻译时由用户选择；缺省按段落
 
 --- 任务体：分析 → 翻译缺的段落 → 生成双语版 → 写 meta。返回 run(report, done)，done 恰好一次。
 --- run 返回 { cancel }：取消时停掉在途请求与子进程、删半截的 .part 和 pending；已译段落留在缓存，下次接着翻。
@@ -652,14 +656,17 @@ end
 ---@param engine "edge"|"ai"
 ---@param lang string 目标语言
 ---@param chapter { input: BilingualInput, touch: table }|nil 章节源：只翻本章，完成后重开本章
-local function start(ui, identity, engine, lang, chapter)
+---@param unit "paragraph"|"sentence"|nil 这次翻译的对照粒度，缺省按段落
+local function start(ui, identity, engine, lang, chapter, unit)
     local Toast = require("ui.themes.widgets.toast")
     if not require("ui/network/manager"):isConnected() then
         Toast:new{ text = _("网络不可用，请先连接 Wi-Fi") }:show()
         return
     end
     local input = chapter and chapter.input or prepare(ui, identity, engine, lang)
-    input.style = Markup.style(require("utils.settings").get("features.translate"))
+    local translate = require("utils.settings").get("features.translate")
+    input.style = Markup.style(translate)
+    input.unit = unit == "sentence" and "sentence" or nil
     local run = task(input)
     require("workers.ui.task_dialog").start{
         key = taskKey(identity),
@@ -716,7 +723,84 @@ function Bilingual.available(ui)
     return DerivedNote.originOf(ui.document.file) == nil or Bilingual.active(ui)
 end
 
---- 章节源：按书开关。开启后就绪的双语章立即切过去，否则后台翻译；关闭时在双语章上切回原章。
+--- 翻译前的表单：语言、对照方式、引擎当场选，点「开始」才翻。对照方式不进设置。
+---@param opts { lang: string, translator: table, languages: table, embed: boolean|nil, on_open: fun()|nil, on_close: fun()|nil, on_start: fun(engine: string, lang: string, unit: string) }
+local function openForm(opts)
+    local lang = opts.lang
+    local unit = "paragraph"
+    local ai = require("ai").isConfigured()
+    local engines = {}
+    if opts.embed then engines[#engines + 1] = { value = "embed", text = _("书中译文") } end
+    engines[#engines + 1] = { value = "edge", text = "Edge" }
+    if ai then engines[#engines + 1] = { value = "ai", text = _("AI") } end
+    local engine = engines[1].value
+    require("ui.themes.widgets.settings"):new{
+        title = _("双语对照"),
+        items = function(page)
+            local items = {
+                {
+                    title = _("目标语言"),
+                    items = opts.languages.pickerItems(opts.translator, false, lang),
+                    current = lang,
+                    on_select = function(value)
+                        if value == "__all__" then
+                            opts.languages.pick(opts.translator, _("目标语言"), false, lang, function(code)
+                                opts.languages.applyTarget(code)
+                                lang = code
+                                page:updateView()
+                            end)
+                            return false
+                        end
+                        opts.languages.applyTarget(value)
+                        lang = value
+                    end,
+                },
+            }
+            if engine ~= "embed" then
+                items[#items + 1] = {
+                    title = _("对照方式"),
+                    items = {
+                        { value = "paragraph", text = _("按段落") },
+                        { value = "sentence", text = _("按句子") },
+                    },
+                    current = unit,
+                    on_select = function(value) unit = value end,
+                }
+            end
+            if #engines > 1 then
+                items[#items + 1] = {
+                    title = _("翻译引擎"),
+                    items = engines,
+                    current = engine,
+                    on_select = function(value) engine = value end,
+                }
+            end
+            return items
+        end,
+        buttons = function(page)
+            local buttons = { { text = _("取消"), callback = function() page:close() end } }
+            if opts.on_open then
+                buttons[#buttons + 1] = { text = _("打开"), callback = function()
+                    page:close()
+                    opts.on_open()
+                end }
+            end
+            if opts.on_close then
+                buttons[#buttons + 1] = { text = _("关闭"), callback = function()
+                    page:close()
+                    opts.on_close()
+                end }
+            end
+            buttons[#buttons + 1] = { text = _("开始"), variant = "primary", callback = function()
+                page:close()
+                opts.on_start(engine, lang, unit)
+            end }
+            return buttons
+        end,
+    }:show()
+end
+
+--- 章节源：按书开关。按段落且本章已有双语稿就直接打开；按句子则按所选粒度翻译。
 ---@param ui table
 ---@param identity BookIdentity
 local function showChapter(ui, identity)
@@ -732,47 +816,42 @@ local function showChapter(ui, identity)
     local lang = translator:getTargetLanguage() --[[@as string]]
     local origin = Paths.chapterOrigin(ui.document.file)
     local touch = { chapter_idx = tonumber(identity.chapter_idx) }
-    local items = {
-        { text = T(_("目标语言：%1"), Languages.displayName(translator, lang)), callback = function()
-            Languages.pick(translator, _("目标语言"), false, lang, function(code)
-                Languages.applyTarget(code)
-                Bilingual.show(ui)
-            end)
-        end },
-    }
-    -- 与整书同一流程：本章双语章就绪直接切过去，否则进度窗翻译本章（可转后台），完成询问重开。
-    local function enable(engine)
-        local conf = { engine = engine, lang = lang }
-        ChapterBi.set(identity, conf)
-        local dest = touch.chapter_idx and ChapterBi.resolve(identity, touch.chapter_idx, origin)
-        if dest then
-            if dest ~= ui.document.file then
-                switchTo(ui, identity, dest, originalXPointer(ui.document, ui.document:getXPointer()), touch)
-            end
-            return
+    local function openAt(dest)
+        if dest and dest ~= ui.document.file then
+            switchTo(ui, identity, dest, originalXPointer(ui.document, ui.document:getXPointer()), touch)
         end
-        start(ui, identity, engine, lang, { input = ChapterBi.input(identity, origin, conf), touch = touch })
     end
-    if ChapterBi.get(identity) then
-        items[#items + 1] = { text = _("关闭双语对照"), callback = function()
+    local current = ChapterBi.get(identity)
+    openForm{
+        lang = lang, translator = translator, languages = Languages,
+        embed = ChapterBi.embedFile(origin) ~= nil,
+        on_close = current and function()
             ChapterBi.set(identity, nil)
-            if origin ~= ui.document.file then
-                switchTo(ui, identity, origin, originalXPointer(ui.document, ui.document:getXPointer()), touch)
+            ChapterBi.materialize(origin)
+            openAt(origin)
+        end or nil,
+        on_start = function(engine, picked, unit)
+            if engine == "embed" then
+                ChapterBi.set(identity, { engine = "embed", lang = picked })
+                local dest = touch.chapter_idx and ChapterBi.resolve(identity, touch.chapter_idx, origin)
+                openAt(dest or origin)
+                return
             end
-        end }
-    end
-    items[#items + 1] = { text = _("用 Edge 开启双语对照"), callback = function() enable("edge") end }
-    local ai = require("ai").isConfigured()
-    items[#items + 1] = {
-        text = ai and _("用 AI 开启双语对照") or _("用 AI 开启双语对照（未配置 AI）"),
-        enabled = ai,
-        callback = function() enable("ai") end,
+            local conf = { engine = engine, lang = picked }
+            if unit == "sentence" then conf.unit = "sentence" end
+            ChapterBi.set(identity, conf)
+            local dest = touch.chapter_idx and ChapterBi.resolve(identity, touch.chapter_idx, origin)
+            if dest and unit ~= "sentence" then
+                openAt(dest)
+                return
+            end
+            start(ui, identity, engine, picked, { input = ChapterBi.input(identity, origin, conf), touch = touch }, unit)
+        end,
     }
-    require("ui.themes.widgets.sheet"):new{ title = _("双语对照"), items = items }:show()
 end
 
 --- 快捷面板入口：读双语版时直接切回原文；这本书正在翻译时跟随进度；
---- 否则选择打开已有双语版或用某个引擎翻译全书。
+--- 否则弹出表单，选好语言、对照方式和引擎后开始。
 ---@param ui table
 function Bilingual.show(ui)
     local identity = require("reader.session").current().identity
@@ -790,28 +869,16 @@ function Bilingual.show(ui)
     end
     local Languages = require("features.translate.languages")
     local translator = require("ui/translator")
-    local lang = translator:getTargetLanguage() --[[@as string]]
-    local items = {
-        { text = T(_("目标语言：%1"), Languages.displayName(translator, lang)), callback = function()
-            Languages.pick(translator, _("目标语言"), false, lang, function(code)
-                Languages.applyTarget(code)
-                Bilingual.show(ui)
-            end)
-        end },
-    }
-    if meta and meta.origin == ui.document.file then
-        items[#items + 1] = { text = _("打开双语对照"), callback = function()
+    openForm{
+        lang = translator:getTargetLanguage() --[[@as string]],
+        translator = translator, languages = Languages,
+        on_open = meta and meta.origin == ui.document.file and function()
             switchTo(ui, identity, meta.file, xpointer)
-        end }
-    end
-    items[#items + 1] = { text = _("用 Edge 翻译全书"), callback = function() start(ui, identity, "edge", lang) end }
-    local ai = require("ai").isConfigured()
-    items[#items + 1] = {
-        text = ai and _("用 AI 翻译全书") or _("用 AI 翻译全书（未配置 AI）"),
-        enabled = ai,
-        callback = function() start(ui, identity, "ai", lang) end,
+        end or nil,
+        on_start = function(engine, lang, unit)
+            start(ui, identity, engine, lang, nil, unit)
+        end,
     }
-    require("ui.themes.widgets.sheet"):new{ title = _("双语对照"), items = items }:show()
 end
 
 Bilingual.switchTo = switchTo

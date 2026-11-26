@@ -36,6 +36,8 @@ Assert.eq(Paths.bilingualChapterPath("/w/3.html"), "/w/bilingual/3.html")
 Assert.eq(Paths.chapterOrigin("/w/bilingual/3.html"), "/w/3.html")
 Assert.eq(Paths.chapterOrigin("/w/3.bi-edge-en.html"), "/w/3.html")
 Assert.eq(Paths.chapterOrigin("/w/3.html"), "/w/3.html")
+Assert.eq(Paths.chapterOrigin("/w/3.embed.html"), "/w/3.html")
+Assert.eq(Paths.embedChapterPath("/w/bilingual/3.html"), "/w/3.embed.html")
 Assert.eq(Paths.chapterOrigin("/w/bilingual/book.epub"), "/w/bilingual/book.epub")
 
 local identity = { source_id = "wechat", stable_id = "chapter-bi-spec" }
@@ -98,4 +100,21 @@ end
 -- 关闭。
 ChapterBi.set(identity, nil)
 Assert.is_nil(ChapterBi.get(identity))
+
+-- 自带译文：默认拆掉，原章只剩原文；打开双语对照才读副本。
+local ch2 = Paths.chapterPath(identity.stable_id, 2, identity.source_id)
+write(ch2, '<h1 class="firstTitle">CHAPTER</h1><h1 class="wr-translation firstTitle">第一章</h1>'
+    .. '<p class="content">Hello</p><p class="wr-translation content">你好</p>')
+Assert.is_nil(ChapterBi.resolve(identity, 2, ch2))
+Assert.is_nil(read(ch2):find("wr-translation", 1, true))
+Assert.is_true(read(ch2):find("Hello", 1, true) ~= nil)
+local embed = read(Paths.embedChapterPath(ch2))
+Assert.is_true(embed:find("你好", 1, true) ~= nil)
+Assert.is_true(embed:find('class="moon-tr"', 1, true) ~= nil)
+Assert.is_nil(embed:find("wr-translation", 1, true))
+Assert.eq(ChapterBi.variants(identity, ch2)[1], Paths.embedChapterPath(ch2))
+ChapterBi.set(identity, { engine = "embed", lang = "zh" })
+Assert.eq(ChapterBi.resolve(identity, 2, ch2), Paths.embedChapterPath(ch2))
+ChapterBi.set(identity, nil)
+Assert.is_nil(ChapterBi.resolve(identity, 2, ch2))
 require("ffi/util").purgeDir(work)
