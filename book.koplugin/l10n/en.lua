@@ -1447,6 +1447,7 @@ return {
     ["段评下划线位置（负数靠近文字）"] = "Review underline position (negative = closer to text)",
     ["段评下划线灰度"] = "Review underline gray level",
     ["段评下划线透明度"] = "Review underline opacity",
+    ["段评气泡透明度"] = "Review bubble opacity",
     ["点状"] = "Dotted",
     ["未联网，无法加载段评"] = "Offline; cannot load reviews",
     ["正在加载评论…"] = "Loading reviews…",

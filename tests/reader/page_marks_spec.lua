@@ -2,7 +2,22 @@
 
 local Assert = require("support.assert")
 
-package.preload["ffi/blitbuffer"] = function() return { COLOR_DARK_GRAY = 1, COLOR_WHITE = 0, Color8 = function(v) return v end, ColorRGB32 = function(v) return v end } end
+package.preload["ffi/blitbuffer"] = function()
+    return {
+        COLOR_DARK_GRAY = 1, COLOR_WHITE = 0, TYPE_BB8 = 1,
+        Color8 = function(v) return v end, ColorRGB32 = function(v) return v end,
+        new = function(w, h)
+            return {
+                getWidth = function() return w end,
+                getHeight = function() return h end,
+                fill = function() end,
+                free = function() end,
+                getPixel = function() return { getColor8 = function() return { a = 255 } end } end,
+                setPixel = function() end,
+            }
+        end,
+    }
+end
 package.preload["ui/size"] = function() return { line = { thick = 2 } } end
 local reported = {}
 package.preload["ui.guard"] = function()
@@ -181,6 +196,24 @@ do
     Assert.is_true(inst:onTap({ pos = { x = rect.x + 1, y = rect.y + 1 } }))
     Assert.eq(tapped, 1)
     Assert.is_false(inst:onTap({ pos = { x = 12, y = 25 } }), "气泡之外不响应")
+end
+
+do
+    -- 气泡透明度：半透明时白底叠到黑底上变灰，缺省不透明时仍是纯白。
+    local ui = newUi()
+    PageMarks.add(ui, "reviews", 20, layer({ {
+        boxes = { { x = 10, y = 40, w = 185, h = 20 } },
+        badge = "9",
+        alpha = 128,
+    } }))
+    local pixels = {}
+    local bb = newBB()
+    bb.getWidth = function() return 200 end
+    bb.getHeight = function() return 200 end
+    bb.getPixel = function() return { getColor8 = function() return { a = 0 } end } end
+    bb.setPixel = function(_bb, x, y, color) pixels[x .. "," .. y] = color end
+    ui._book_page_marks:paintTo(bb)
+    Assert.eq(pixels["187,50"], 128, "气泡中心按透明度与底色混合")
 end
 
 --- 白底上若干行墨迹。rows[y] = true 表示这一行有字。

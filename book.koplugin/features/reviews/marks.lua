@@ -418,12 +418,14 @@ function ReviewMarks:marks()
     self:updateView()
     local conf = require("utils.settings").get("features.reviews")
     local style, gray, alpha, offset = MarkStyle.resolve(conf, require("features.reviews.setting").KEYS)
+    local bubble = math.floor(conf.bubble_opacity * 255 / 100 + 0.5)
     for i = #self.current, 1, -1 do
         local mark = self.current[i]
         if mark.spot.total == 0 and not mark.heading then
             table.remove(self.current, i)
         else
-            mark.style, mark.gray, mark.alpha, mark.offset = style, gray, alpha, offset
+            mark.style, mark.gray, mark.offset = style, gray, offset
+            mark.alpha = mark.badge and bubble or alpha
         end
     end
     return self.current

@@ -36,12 +36,14 @@ end
 -- book_reviews_mark_style：dashed 虚线 / solid 实线 / dotted 点状。
 -- mark_offset：线相对默认位置的上下微调（像素，-10–10，负数靠近文字）。
 -- mark_gray：线的灰度（深浅，0 白–100 黑）；mark_opacity：线的不透明度（10–100），与底色混合。
+-- bubble_opacity：段评数量气泡的不透明度（10–100）。所有书源共用，不按源分开。
 -- font_scale：段评列表正文字号百分比（80–200，设置页「段评字号」调整）。
 -- chapter_links：章会话的书（微信读书、京东读书）借段评用的关联，按「源 id\0书目 id」记，见 features.reviews.linked。
 Setting.defaults = {
     book_reviews_mark_style = "dashed",
     mark_gray = 73,
     mark_opacity = 100,
+    bubble_opacity = 100,
     mark_offset = 0,
     font_scale = 100,
     replies_pos = "left",
@@ -101,6 +103,24 @@ function Setting.entries(desktop)
                         gray = _("段评下划线灰度"),
                         opacity = _("段评下划线透明度"),
                     }, redraw)
+                    rows[#rows + 1] = function(iw)
+                        return Row.widget({
+                            width = iw, chevron = true, kind = "nav", icon = "chat_bubble",
+                            title = _("段评气泡透明度"),
+                            status = reviews.bubble_opacity .. "%",
+                            callback = function()
+                                require("ui.themes.widgets.spin"):new{
+                                    title = _("段评气泡透明度"),
+                                    fields = { { value = reviews.bubble_opacity, min = 10, max = 100, step = 5,
+                                        format = function(v) return v .. "%" end } },
+                                    callback = function(pct)
+                                        reviews.bubble_opacity = pct
+                                        redraw()
+                                    end,
+                                }:show()
+                            end,
+                        })
+                    end
                     rows[#rows + 1] = function(iw)
                         return Row.widget({
                             width = iw, chevron = true,

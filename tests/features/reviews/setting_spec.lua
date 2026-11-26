@@ -26,7 +26,7 @@ package.preload["ui.themes.widgets.row"] = function()
         end,
     }
 end
-local conf = { book_reviews_mark_style = "dashed", mark_gray = 73, mark_opacity = 100, mark_offset = 0, font_scale = 100 }
+local conf = { book_reviews_mark_style = "dashed", mark_gray = 73, mark_opacity = 100, bubble_opacity = 100, mark_offset = 0, font_scale = 100 }
 local sources = { wechat = {}, qidian = { show_paragraph_reviews = true }, zhihu = {} }
 local saved = {}
 package.preload["utils.settings"] = function()
@@ -61,6 +61,7 @@ local desktop = { updateView = function() updates = updates + 1 end }
 
 local Setting = require("features.reviews.setting")
 Assert.eq(Setting.defaults.book_reviews_mark_style, "dashed")
+Assert.eq(Setting.defaults.bubble_opacity, 100)
 local entries = Setting.entries(desktop)
 Assert.len(entries, 1)
 Assert.eq(entries[1].group, "reader")
@@ -84,7 +85,7 @@ Assert.eq(entries[1].page.sections()[1].rows[1](600).status, "开")
 
 local style = sections[2]
 Assert.eq(style.title, "段评")
-Assert.len(style.rows, 6)
+Assert.len(style.rows, 7)
 Assert.eq(style.rows[1](600).status, "虚线")
 
 style.rows[1](600).callback()
@@ -103,8 +104,10 @@ Assert.eq(conf.book_reviews_mark_style, "dashed")
 Assert.eq(style.rows[2](600).status, "+0 px")
 Assert.eq(style.rows[3](600).status, "73%")
 Assert.eq(style.rows[4](600).status, "100%")
+Assert.eq(style.rows[5](600).title, "段评气泡透明度")
+Assert.eq(style.rows[5](600).status, "100%")
 
-local size = entries[1].page.sections()[2].rows[5](600)
+local size = entries[1].page.sections()[2].rows[6](600)
 Assert.eq(size.status, "100%")
 local spin
 package.preload["ui.themes.widgets.spin"] = function()
@@ -123,7 +126,7 @@ zhihu.callback()
 Assert.is_true(sources.zhihu.show_paragraph_reviews)
 Assert.eq(entries[1].page.sections()[1].rows[3](600).status, "开")
 
-local pos = entries[1].page.sections()[2].rows[6](600)
+local pos = entries[1].page.sections()[2].rows[7](600)
 Assert.eq(pos.title, "回复按钮位置")
 Assert.eq(pos.status, "左侧")
 Assert.eq(pos.kind, "nav")
@@ -152,4 +155,4 @@ Assert.eq(conf.replies_pos, "right")
 Assert.eq(saved[#saved], "features.reviews")
 Assert.eq(dirty[1], reader.dialog)
 Assert.eq(updates, updates_before + 1, "选定后刷新设置页状态")
-Assert.eq(entries[1].page.sections()[2].rows[6](600).status, "右侧")
+Assert.eq(entries[1].page.sections()[2].rows[7](600).status, "右侧")

@@ -347,6 +347,10 @@ Assert.len(marks:marks(), 1)
 Assert.eq(end_source.calls, 1, "翻页不重拉评论")
 Assert.eq(marks.current[1].badge, "4")
 Assert.eq(marks.current[1].heading, "章节评论")
+local review_conf = require("utils.settings").get("features.reviews")
+review_conf.bubble_opacity = 40
+Assert.eq(marks:marks()[1].alpha, math.floor(40 * 255 / 100 + 0.5), "气泡透明度跟全局配置，不跟下划线")
+review_conf.bubble_opacity = 100
 Assert.eq(marks.current[1].boxes[1].y, 50, "旧缓存的入口在正文下方，不贴在最后一行上")
 marks.current[1].tap()
 Assert.eq(opened.identity, identity)

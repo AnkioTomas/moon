@@ -20,7 +20,7 @@ local Guard = require("ui.guard")
 ---@field style "dashed"|"solid"|"dotted"|nil 下划线样式
 ---@field gray integer|nil 线色灰度 0（黑）–255（白），缺省深灰 0x44
 ---@field offset integer|nil 下划线上下微调（像素，负数靠近文字），缺省 0
----@field alpha integer|nil 线的不透明度 0–255，缺省 255（不混合底色）
+---@field alpha integer|nil 不透明度 0–255，缺省 255。下划线是线的透明度；带 badge 时是气泡的透明度
 ---@field badge string|nil 有则不画下划线，在末行文字右侧画带这行字的气泡（只用最后一个框），点按气泡
 ---@field heading string|nil 有则在框内画独立分隔线、标题和数量气泡，整行可点
 ---@field tap fun() 点按回调
@@ -392,6 +392,7 @@ end
 local BUBBLE_SCALE = 0.55
 
 --- 带抗锯齿地画气泡：圆角矩形 + 左侧菱形尖角的并集轮廓（1px 灰线，内部填白），按有向距离算每个像素的覆盖率再与底色混合。
+--- alpha 缺省或 255 时与原先不透明画法相同；更低时整颗气泡（含描边）再与底色混合。
 ---@param bb any Blitbuffer
 ---@param x number 矩形左
 ---@param y number 矩形上
@@ -399,9 +400,11 @@ local BUBBLE_SCALE = 0.55
 ---@param h number
 ---@param radius number
 ---@param tail number 尖角伸出长度
-local function paintBubbleShape(bb, x, y, w, h, radius, tail)
+---@param alpha integer|nil 0–255
+local function paintBubbleShape(bb, x, y, w, h, radius, tail, alpha)
     local Blitbuffer = require("ffi/blitbuffer")
     local dark = 0x88
+    local fade = alpha and alpha < 255
     local cx, cy = x + w / 2, y + h / 2
     local hx, hy = w / 2 - radius, h / 2 - radius
     local bw, bh = bb:getWidth(), bb:getHeight()
@@ -418,10 +421,49 @@ local function paintBubbleShape(bb, x, y, w, h, radius, tail)
                 local base = bb:getPixel(px, py):getColor8().a
                 local v = base * (1 - fill) + 255 * fill
                 v = v * (1 - line) + dark * line
+                if fade then v = (base * (255 - alpha) + v * alpha) / 255 end
                 bb:setPixel(px, py, Blitbuffer.Color8(math.floor(v + 0.5)))
             end
         end
     end
+end
+
+--- 气泡里的数字。不透明时直接画；半透明时先画到白底再按覆盖率叠回，避免字形把底色盖死。
+---@param bb any
+---@param label table
+---@param x number
+---@param y number
+---@param alpha integer|nil
+local function paintLabel(bb, label, x, y, alpha)
+    if not alpha or alpha >= 255 then
+        label:paintTo(bb, x, y)
+        return
+    end
+    local Blitbuffer = require("ffi/blitbuffer")
+    local size = label:getSize()
+    if size.w <= 0 or size.h <= 0 then return end
+    local tmp = Blitbuffer.new(size.w, size.h, Blitbuffer.TYPE_BB8)
+    tmp:fill(Blitbuffer.COLOR_WHITE)
+    label:paintTo(tmp, 0, 0)
+    local dark, span = 0x88, 255 - 0x88
+    local bw, bh = bb:getWidth(), bb:getHeight()
+    for py = 0, size.h - 1 do
+        local dy = y + py
+        if dy >= 0 and dy < bh then
+            for px = 0, size.w - 1 do
+                local dx = x + px
+                local ink = tmp:getPixel(px, py):getColor8().a
+                local cover = (255 - ink) / span
+                if cover > 1 then cover = 1 end
+                if dx >= 0 and dx < bw and cover > 0 then
+                    local base = bb:getPixel(dx, dy):getColor8().a
+                    local v = base + (dark - base) * cover * alpha / 255
+                    bb:setPixel(dx, dy, Blitbuffer.Color8(math.floor(v + 0.5)))
+                end
+            end
+        end
+    end
+    tmp:free()
 end
 
 --- 在末行文字末尾画对话气泡（圆角描边框，左侧一个朝左的小尖角指向文字末），返回点按矩形；超出右边缘就整体左移。
@@ -429,8 +471,9 @@ end
 ---@param box table 末行屏幕框
 ---@param text string
 ---@param body_size number|nil 正文字号；气泡字号取其 BUBBLE_SCALE，缺省按行高估
+---@param alpha integer|nil 气泡不透明度 0–255
 ---@return table rect
-local function bubble(bb, box, text, body_size)
+local function bubble(bb, box, text, body_size, alpha)
     local label = require("ui/widget/textwidget"):new{
         text = text,
         face = require("ui/font"):getFace("cfont", math.max(6, math.floor(body_size and body_size * BUBBLE_SCALE or box.h * 0.2))),
@@ -446,8 +489,8 @@ local function bubble(bb, box, text, body_size)
     local x = math.min(box.x + box.w + 2 + tail, bb:getWidth() - w - 2)
     local cy = box.y + math.floor(box.h / 2)
     local y = cy - math.floor(h / 2)
-    paintBubbleShape(bb, x, y, w, h, radius, tail)
-    label:paintTo(bb, x + pad, cy - math.floor(size.h * 0.42 + 0.5))
+    paintBubbleShape(bb, x, y, w, h, radius, tail, alpha)
+    paintLabel(bb, label, x + pad, cy - math.floor(size.h * 0.42 + 0.5), alpha)
     label:free()
     return { x = x - tail, y = y, w = w + tail, h = h }
 end
@@ -470,7 +513,7 @@ local function section(bb, box, mark, body_size)
     local title = { x = box.x + gap, y = box.y + gap, w = dimen.w + gap, h = dimen.h }
     label:paintTo(bb, title.x, title.y)
     label:free()
-    bubble(bb, title, mark.badge, body_size)
+    bubble(bb, title, mark.badge, body_size, mark.alpha)
     return { x = box.x, y = box.y, w = box.w, h = gap + dimen.h + gap }
 end
 
@@ -516,7 +559,7 @@ local function drawGroup(group, bb, delta, thick, painted, body_size)
         local pieces
         if item.badge then
             pieces = { item.mark.heading and section(bb, item.badge, item.mark, body_size)
-                or bubble(bb, item.badge, item.mark.badge, body_size) }
+                or bubble(bb, item.badge, item.mark.badge, body_size, item.mark.alpha) }
         else
             pieces = item.pieces
             for _piece_idx, piece in ipairs(pieces) do underline(bb, piece, item.mark, delta, thick) end
