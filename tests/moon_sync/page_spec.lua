@@ -6,13 +6,15 @@
 
 local Assert = require("support.assert")
 
-local moon = { migrated = true, sync_fonts = false }
-local local_cfg = {
+local moon = {
+    migrated = true,
+    sync_fonts = false,
     webdav_url = "https://dav.example/dav",
     webdav_username = "user",
     webdav_password = "secret",
     webdav_path = "Books",
 }
+local local_cfg = {}
 
 package.preload["utils.settings"] = function()
     return {
@@ -50,9 +52,9 @@ Assert.eq(table.concat(titles, ","), table.concat({
 local path_row = sections[1].rows[4](100)
 Assert.eq(path_row.title, "WebDAV 目录")
 Assert.eq(path_row.status, "Books")
-local_cfg.webdav_path = ""
+moon.webdav_path = ""
 Assert.eq(sections[1].rows[4](100).status, "Apps/Books", "没填目录就用静读天下的默认路径")
-local_cfg.webdav_path = "Books"
+moon.webdav_path = "Books"
 
 local fonts = sections[2].rows[1](100)
 Assert.eq(fonts.status, "关")

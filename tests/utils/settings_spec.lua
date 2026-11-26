@@ -163,3 +163,41 @@ do
     Assert.is_nil(data.dropped, "磁盘上没有的键被清掉")
     os.remove(path)
 end
+
+-- 月读同步的连接键：旧分区和本地源都会搬进 moon_sync；源文件里的当前值优先；书库目录留在本地源
+do
+    legacy("common", { webdav_username = "from-common" })
+    local source = LuaSettings:open(Paths.sourcePath("local"))
+    source.data.webdav_url = "https://current.example/dav"
+    source.data.webdav_password = "pw"
+    source.data.path = "/books"
+    source:flush()
+    local moon_file = LuaSettings:open(Paths.sectionPath("moon_sync"))
+    moon_file:reset({ sync_fonts = true })
+    moon_file:flush()
+    reload()
+    local cfg = Settings.get("moon_sync")
+    Assert.eq(cfg.webdav_url, "https://current.example/dav", "本地源里的当前地址优先于旧分区")
+    Assert.eq(cfg.webdav_username, "from-common")
+    Assert.eq(cfg.webdav_password, "pw")
+    Assert.is_true(cfg.sync_fonts)
+    Assert.is_nil(cfg.path, "书库目录不是连接键")
+    reload()
+    Assert.is_nil(legacyData("common").webdav_username)
+    local kept = LuaSettings:open(Paths.sourcePath("local")).data
+    Assert.is_nil(kept.webdav_url)
+    Assert.is_nil(kept.webdav_password)
+    Assert.eq(kept.path, "/books")
+
+    kept.webdav_url = "https://stale"
+    LuaSettings:open(Paths.sourcePath("local")):flush()
+    -- 上面这份和框架缓存不是同一个实例，直接改缓存里的表再落盘。
+    Settings.getSource("local").webdav_url = "https://stale"
+    Settings.saveSource("local")
+    Settings.get("moon_sync").webdav_url = "https://keep"
+    Settings.save("moon_sync")
+    reload()
+    Assert.eq(Settings.get("moon_sync").webdav_url, "https://keep", "新文件已有的值优先")
+    Assert.is_nil(Settings.getSource("local").webdav_url)
+    Assert.eq(Settings.getSource("local").path, "/books")
+end

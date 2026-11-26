@@ -1,5 +1,5 @@
 --[[--
-月读同步设置页。WebDAV 连接写本地源的 webdav_*。字体开关写 moon_sync。
+月读同步设置页。WebDAV 连接和字体开关都写 moon_sync。
 上传书籍在本地书源账号里。阅读数据没有开关。
 
 @module koplugin.book.moon_sync.page
@@ -9,8 +9,6 @@ local _ = require("gettext")
 local Text = require("utils.text")
 
 local Page = {}
-
-local SOURCE_ID = "local"
 
 ---@param cfg table
 ---@return string
@@ -36,7 +34,7 @@ function Page.sections(desktop)
     local Row = require("ui.themes.widgets.row")
 
     local function edit(key, title, password, present)
-        local cfg = Settings.getSource(SOURCE_ID)
+        local cfg = MoonSync.config()
         local raw = tostring(cfg[key] or "")
         require("ui.themes.widgets.input"):new{
             title = title,
@@ -53,7 +51,7 @@ function Page.sections(desktop)
                 next_cfg[key] = next_value
                 local function save()
                     cfg[key] = next_value
-                    Settings.saveSource(SOURCE_ID, cfg)
+                    Settings.save("moon_sync", cfg)
                 end
                 if before ~= fingerprint(next_cfg) then
                     if not require("source.logout").replaceWebdav(save) then
@@ -71,7 +69,7 @@ function Page.sections(desktop)
 
     local function valueRow(key, title, password, icon, present)
         return function(iw)
-            local value = Settings.getSource(SOURCE_ID)[key] or ""
+            local value = MoonSync.config()[key] or ""
             local shown = present and present(value) or value
             return Row.widget({
                 width = iw, chevron = true, kind = "nav", icon = icon, title = title,
@@ -94,8 +92,7 @@ function Page.sections(desktop)
                     dismissable = false,
                 }
                 waiting:show()
-                local client = require("source.local.client").new(Settings.getSource(SOURCE_ID))
-                client:testWebdavAsync(function(ok, err)
+                MoonSync.testAsync(function(ok, err)
                     waiting:close()
                     require("ui.themes.widgets.toast"):new{
                         text = ok and _("WebDAV 连接正常，可读写") or err,

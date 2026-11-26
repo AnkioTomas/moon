@@ -29,13 +29,14 @@ Source.__index = Source
 ---@return LocalSource
 function Local.new()
     local cfg = require("utils.settings").getSource("local")
+    local conn = require("moon_sync").config()
     local meta = Local.meta()
     local self = setmetatable({
         id = meta.id,
         name = meta.name,
         type = meta.type,
         cfg = cfg,
-        _client = Client.new(cfg),
+        _client = Client.new(cfg, conn),
     }, Source)
     return self
 end
@@ -137,7 +138,7 @@ local skipped = SourceBase.skipped
 --- 桌面打开触发的自动同步节流（秒）：反复开桌面不重复扫盘、不重复跑整轮 WebDAV。
 local AUTO_SYNC_INTERVAL = 60
 
---- 书架同步。WebDAV 地址就是这份 webdav_url。
+--- 书架同步。WebDAV 地址在月读同步的 webdav_url。
 --- 地址非空就走静读天下流水线（它自己合并本机目录）；再并行扫一遍盘会和收编打架。
 --- WebDAV：force=逐目录核对远端文件、dirty_only=只推本地删除与书目改动、否则日常同步；
 --- 有本地改动没推上去时整轮仍算成功，原因放在 push_error。纯本地目录：轻扫盘（不开文档）+ 后台补齐封面。

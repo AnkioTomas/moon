@@ -1,19 +1,19 @@
 --[[--
-月读同步配置：WebDAV 连接只在本地源，这里不另存一份。
+月读同步配置：WebDAV 连接在 moon_sync，本地源不再存一份。
 
 @module tests.moon_sync.config_spec
 --]]
 
 local Assert = require("support.assert")
 
-local moon = { sync_fonts = false }
-local local_cfg = {
+local moon = {
+    sync_fonts = false,
     webdav_url = "https://dav.example/dav",
     webdav_username = "user",
     webdav_password = "secret",
     webdav_path = "Books",
-    webdav_upload_local = false,
 }
+local local_cfg = { webdav_upload_local = false }
 local saved_moon, saved_local, replaced = 0, 0, 0
 
 package.preload["utils.settings"] = function()
@@ -58,19 +58,18 @@ local MoonSync = require("moon_sync")
 Assert.is_true(MoonSync.configured())
 Assert.eq(MoonSync.path(""), "Apps/Books")
 Assert.eq(MoonSync.path("/Apps/Books/"), "Apps/Books")
-Assert.is_nil(moon.url)
-Assert.eq(saved_moon, 0, "读连接不写月读同步配置")
+Assert.eq(saved_moon, 0, "读连接不落盘")
+Assert.eq(saved_local, 0)
 
-local changed = MoonSync.applyRemote(local_cfg, { webdav_password = "next" })
+local changed = MoonSync.applyRemote(moon, { webdav_password = "next" })
 Assert.is_true(changed)
-Assert.eq(local_cfg.webdav_password, "next")
+Assert.eq(moon.webdav_password, "next")
 Assert.eq(replaced, 0, "只改密码不换库")
-Assert.eq(saved_local, 1)
-Assert.eq(saved_moon, 0)
-Assert.is_nil(moon.url)
-Assert.is_nil(moon.password)
+Assert.eq(saved_moon, 1)
+Assert.eq(saved_local, 0)
+Assert.eq(local_cfg.webdav_upload_local, false, "上传开关仍在本地源")
 
-local_cfg.webdav_path = ""
-Assert.is_false(MoonSync.applyRemote(local_cfg, { webdav_path = "Apps/Books" }))
-Assert.eq(local_cfg.webdav_path, "")
+moon.webdav_path = ""
+Assert.is_false(MoonSync.applyRemote(moon, { webdav_path = "Apps/Books" }))
+Assert.eq(moon.webdav_path, "")
 Assert.eq(replaced, 0, "默认目录和空目录是同一条路径")

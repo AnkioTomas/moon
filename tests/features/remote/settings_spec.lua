@@ -149,11 +149,12 @@ do
     Assert.eq(err, "准备本地同步失败")
     Assert.eq(store.moon.base_url, moon_url)
     Assert.eq(store.moon.token, moon_token)
-    local webdav_url = store["local"].webdav_url
+    local webdav_url = store.moon_sync.webdav_url
     result, err = SettingsApi.apply({ ["local"] = { webdav_url = "https://failed.dav" } })
     Assert.is_nil(result)
     Assert.eq(err, "准备本地同步失败")
-    Assert.eq(store["local"].webdav_url, webdav_url)
+    Assert.eq(store.moon_sync.webdav_url, webdav_url)
+    Assert.eq(store["local"].path, "/mnt/books", "换库失败不碰本地书库目录")
     Assert.eq(reloads, 0)
     Assert.eq(invalidated, 0)
     replace_ok = true
@@ -258,10 +259,10 @@ do
     } })
     Assert.is_true(result.changed)
     Assert.eq(invalidated, 1)
-    local cfg = store["local"]
+    local cfg = store.moon_sync
     Assert.eq(cfg.webdav_url, "https://dav.test/dav")
     Assert.eq(cfg.webdav_password, "dav-secret")
-    Assert.eq(cfg.path, "/mnt/books")
+    Assert.eq(store["local"].path, "/mnt/books", "书库目录仍在本地源")
     Assert.eq(result.settings["local"].webdav_password, SettingsApi.MASK)
     Assert.eq(result.settings["local"].webdav_path, "/books")
 

@@ -6,7 +6,10 @@ local cfg = {}
 local pushes = {}
 local webdav_opened = {}
 package.preload["utils.settings"] = function()
-    return { getSource = function() return cfg end }
+    return {
+        getSource = function() return cfg end,
+        get = function() return {} end,
+    }
 end
 package.preload["source.local.client"] = function()
     return {

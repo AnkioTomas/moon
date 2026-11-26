@@ -57,3 +57,14 @@ Assert.is_nil(files.keyboard.data.enabled, "旧键删掉")
 Assert.len(touched, 1)
 Assert.eq(touched[1], files.keyboard)
 Assert.len(Legacy.migrate(ime, { "hide_key" }, open), 0, "第二次没东西可搬")
+
+-- 额外路径排在旧分区前面：当前文件里的值优先，两边的键都删掉
+open("settings/local.lua").data = { webdav_url = "https://current", path = "/books" }
+open("common").data.webdav_url = "https://stale"
+local sync = open("moon_sync")
+touched = Legacy.migrate(sync, { "webdav_url" }, open, { "settings/local.lua" })
+Assert.eq(sync.data.webdav_url, "https://current", "源配置比旧分区新，先搬它")
+Assert.is_nil(files["settings/local.lua"].data.webdav_url)
+Assert.eq(files["settings/local.lua"].data.path, "/books", "没点名的键留在源配置")
+Assert.is_nil(files.common.data.webdav_url, "旧分区里的同名键也删掉")
+Assert.eq(#touched, 2)

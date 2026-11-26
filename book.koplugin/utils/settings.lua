@@ -7,8 +7,9 @@
   - 落盘到 settings/<路径末段>.lua；末段重名直接报错（与源配置 settings/<源 id>.lua 同目录，也别撞源 id）。
   - 读 `get(owner)`（返回表可就地改），写 `save(owner)`。
   - 每个进程首次打开时：先经 `utils.settings_legacy` 从拆分前的旧分区搬键（键名不变），再补默认值。
+  - `adopt_sources` 列出源 id：同名键再从 settings/<id>.lua 搬过来（源文件里已有的当前值优先于旧分区）。
 
-源 / 书城的独立配置走 getSource / saveSource（settings/<id>.lua，无默认值）。
+源 / 书城的独立配置走 getSource / saveSource（settings/<id>.lua，无默认值，不搬迁）。
 
 @module koplugin.book.utils.settings
 --]]
@@ -71,7 +72,11 @@ local function adopt(owner, name, file)
     local keys = {}
     for key in pairs(spec.defaults or {}) do keys[#keys + 1] = key end
     for _idx, key in ipairs(spec.keys or {}) do keys[#keys + 1] = key end
-    local touched = Legacy.migrate(file, keys, openFile)
+    local extras = {}
+    for _idx, source_id in ipairs(spec.adopt_sources or {}) do
+        extras[#extras + 1] = Paths.sourcePath(source_id)
+    end
+    local touched = Legacy.migrate(file, keys, openFile, extras)
     if fillDefaults(file.data, spec.defaults) or #touched > 0 then file:flush() end
     for _idx, legacy in ipairs(touched) do legacy:flush() end
 end

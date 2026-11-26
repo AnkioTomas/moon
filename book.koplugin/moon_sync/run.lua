@@ -250,15 +250,19 @@ function Run.start(report, done, interactive)
         finish({ ok = false, err = _("未配置 WebDAV") })
         return handle
     end
+    local cfg = MoonSync.config()
+    dav = require("http.webdav").new({
+        url = cfg.webdav_url,
+        username = cfg.webdav_username,
+        password = cfg.webdav_password,
+    })
+    root = MoonSync.path(cfg.webdav_path)
+    device = require("utils.device_id").ensure()
     local source = require("source.registry").resolve("local")
-    local client = source and source._client
-    if not client then
+    if not source then
         finish({ ok = false, err = _("未配置 WebDAV") })
         return handle
     end
-    dav = client.dav
-    root = client:webdavPath()
-    device = require("utils.device_id").ensure()
 
     report(_("正在同步"), 0, 4)
     -- 以前把锁写在书库根上，静读天下会把它当成自己的锁。内容是本机设备 id 才删。

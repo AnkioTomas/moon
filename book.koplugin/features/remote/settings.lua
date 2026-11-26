@@ -115,14 +115,14 @@ local BUILTIN = {
         end,
     },
     {
-        id = "local", name = "月读同步（WebDAV）", invalidate = true,
+        id = "local", owner = "moon_sync", name = "月读同步（WebDAV）", invalidate = true,
         fields = {
             { key = "webdav_url", label = "WebDAV 地址", type = "url", placeholder = "https://dav.example.com/dav" },
             { key = "webdav_username", label = "用户名" },
             { key = "webdav_password", label = "密码", secret = true },
             { key = "webdav_path", label = "目录", placeholder = "Apps/Books", default = "Apps/Books" },
         },
-        -- 连接在本地源。空目录和 Apps/Books 是同一条路径，只改密码不换库。
+        -- 连接在 moon_sync。空目录和 Apps/Books 是同一条路径，只改密码不换库。
         commit = function(cfg, values)
             return require("moon_sync").applyRemote(cfg, values)
         end,

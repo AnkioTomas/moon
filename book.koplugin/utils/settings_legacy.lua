@@ -23,8 +23,9 @@ local RENAMED = {
 ---@param file table 拥有者的 LuaSettings（与它同路径的旧分区跳过）
 ---@param keys string[]
 ---@param open fun(path: string): table 调用方的 LuaSettings 缓存（同一路径必须同一实例）
+---@param extras string[]|nil 还要从这些路径搬同名键（当前存放处，排在旧分区前面）
 ---@return table[] touched 删过键的旧分区
-function Legacy.migrate(file, keys, open)
+function Legacy.migrate(file, keys, open, extras)
     local touched = {}
     --- 旧分区 legacy 的 old_key 搬到 file 的 key。
     ---@return boolean moved
@@ -33,6 +34,14 @@ function Legacy.migrate(file, keys, open)
         if file.data[key] == nil then file.data[key] = legacy.data[old_key] end
         legacy.data[old_key] = nil
         return true
+    end
+    for _idx, path in ipairs(extras or {}) do
+        local legacy = open(path)
+        local dirty = false
+        for _i, key in ipairs(keys) do
+            dirty = move(legacy, key, key) or dirty
+        end
+        if dirty then touched[#touched + 1] = legacy end
     end
     for _idx, section in ipairs(SECTIONS) do
         local legacy = open(section == "common" and Paths.commonPath() or Paths.sectionPath(section))

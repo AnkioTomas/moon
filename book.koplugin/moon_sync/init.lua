@@ -1,8 +1,8 @@
 --[[--
 月读同步（WebDAV）。
 
-WebDAV 连接只存在本地源的 webdav_* 上，静读天下客户端读的就是那一份。
-这里只多记字体开关。阅读数据没有开关：书源自己有接口的走它的云，没有的由这一轮兜底。
+WebDAV 连接在 settings/moon_sync.lua（`get("moon_sync")`，首次打开自动从旧分区和本地源搬键）。
+这一轮用这些字段自己建 http.webdav。阅读数据没有开关：书源自己有接口的走它的云，没有的由这一轮兜底。
 
 书架流水线不改。地址非空时本地源照旧跑静读天下（它会合并本机目录）；
 本模块在那之外传设置、字体、每本书的自定义设置，以及书源自己交过来的阅读数据。
@@ -15,7 +15,6 @@ local Text = require("utils.text")
 
 local MoonSync = {}
 
-local SOURCE_ID = "local"
 local DEFAULT_PATH = "Apps/Books"
 
 --- 空目录就是静读天下的 Apps/Books。首尾斜杠不算另一条路径。
@@ -36,13 +35,13 @@ end
 ---@param cfg table|nil
 ---@return boolean
 function MoonSync.configured(cfg)
-    cfg = cfg or Settings.getSource(SOURCE_ID)
+    cfg = cfg or MoonSync.config()
     return Text.trim(cfg.webdav_url or "") ~= ""
 end
 
---- 远程配置页提交的是本地源字段名。只写本地源。换库沿用原来的 replaceWebdav。
+--- 远程配置页提交的是连接字段。写月读同步自己的配置。换库沿用原来的 replaceWebdav。
 --- 空目录和 Apps/Books 是同一条路径，这种提交不算改动。
----@param cfg table 本地源配置（就地改）
+---@param cfg table 月读同步配置（就地改，就是 get("moon_sync") 那张表）
 ---@param values table<string, string> 本次提交的键
 ---@return boolean|nil changed false 表示没变化；nil 表示准备同步失败
 ---@return string|nil err
@@ -75,7 +74,7 @@ function MoonSync.applyRemote(cfg, values)
         cfg.webdav_username = next_cfg.webdav_username
         cfg.webdav_password = next_cfg.webdav_password
         cfg.webdav_path = next_cfg.webdav_path
-        Settings.saveSource(SOURCE_ID, cfg)
+        Settings.save("moon_sync", cfg)
     end
     local library_before = table.concat({
         Text.trim(cfg.webdav_url or ""), MoonSync.path(cfg.webdav_path), Text.trim(cfg.webdav_username or ""),
@@ -92,6 +91,28 @@ function MoonSync.applyRemote(cfg, values)
     save()
     require("source.registry").invalidate()
     return true
+end
+
+--- 连通性：用当前连接往目录写一个探针、读回、再删掉。
+---@param cb fun(ok: boolean, err: string|nil)
+---@return { cancel: fun() }
+function MoonSync.testAsync(cb)
+    local _ = require("gettext")
+    local cfg = MoonSync.config()
+    local url = Text.trim(cfg.webdav_url or "")
+    if url == "" then
+        cb(false, _("未配置 WebDAV 地址"))
+        return { cancel = function() end }
+    end
+    if not url:match("^https?://") then
+        cb(false, _("WebDAV 地址必须以 http:// 或 https:// 开头"))
+        return { cancel = function() end }
+    end
+    return require("http.webdav").new({
+        url = url,
+        username = cfg.webdav_username,
+        password = cfg.webdav_password,
+    }):probeAsync(MoonSync.path(cfg.webdav_path), cb)
 end
 
 ---@return boolean
