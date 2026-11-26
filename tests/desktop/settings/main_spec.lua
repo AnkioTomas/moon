@@ -421,6 +421,30 @@ host:updateView()
 Assert.eq(host.settings_overlay.updated, 1)
 Assert.eq(require("desktop.pages.setting").host({ desktop = desktop }), desktop)
 
+-- 登录重载留在账号页并刷新；换源才关掉叠层。
+local reg = package.loaded["source.registry"]
+local landing = false
+function reg.reloadLanding() return landing end
+local overlay_mod = package.loaded["desktop.pages.setting.overlay"]
+local closed = 0
+function overlay_mod.closeAll() closed = closed + 1 end
+local refreshed = 0
+desktop.settings_overlay = {
+    spec = { source_id = "fanqie" },
+    updateView = function() refreshed = refreshed + 1 end,
+}
+settings.page = 3
+landing = true
+settings:onEvent("source_changed")
+settings:activate(true)
+Assert.eq(closed, 0, "登录重载不关账号页")
+Assert.eq(refreshed, 1)
+Assert.eq(settings.page, 3)
+landing = false
+settings:onEvent("source_changed")
+Assert.eq(closed, 1, "换源关掉叠层")
+Assert.eq(settings.page, 1)
+
 _G.G_reader_settings = previous_settings
 
 return true

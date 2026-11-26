@@ -46,10 +46,16 @@ function Settings:new(opts)
     return setmetatable({ desktop = opts.desktop, page = 1, source = Source }, self)
 end
 
---- 由 Tab 切换恢复时关掉叠层；系统唤醒时保留。
+--- 登录 / 改连接的 reload 正在同步广播。这时不能把账号页拆掉。
+---@return boolean
+local function reloading()
+    return type(SourceRegistry.reloadLanding) == "function" and SourceRegistry.reloadLanding()
+end
+
+--- 由 Tab 切换恢复时关掉叠层；系统唤醒时保留。登录重载留在当前账号页。
 ---@param changed boolean|nil TAB 点击时传 boolean；桌面唤醒时不重置
 function Settings:activate(changed)
-    if changed == nil then return end
+    if changed == nil or reloading() then return end
     self:reset()
 end
 
@@ -62,10 +68,15 @@ function Settings:reset()
     Overlay.closeAll(self.desktop)
 end
 
---- 换源后关掉叠层，避免停在过期的来源页。
+--- 换活跃源后关掉叠层，避免停在过期的来源页。登录 / 改连接只刷新当前账号页。
 ---@param event string 父组件转发的事件名称或事件对象
 function Settings:onEvent(event, payload)
     if event == "source_changed" then
+        if reloading() then
+            local overlay = self.desktop.settings_overlay
+            if overlay and overlay.updateView then overlay:updateView() end
+            return
+        end
         self:reset()
     elseif event == "swipe" and (payload.direction == "west" or payload.direction == "east") then
         self.page = Input.page(self.page + (payload.direction == "west" and 1 or -1), self.pages or 1)

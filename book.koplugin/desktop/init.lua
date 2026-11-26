@@ -284,10 +284,64 @@ function Desktop:onEvent(event, payload)
     broadcast(self, "onEvent", event, payload)
 end
 
+--- 这些源没有「登录」：configured() 要么恒真，要么只表示本地目录。
+local NOT_LOGIN = { ["local"] = true, kindle = true, ["18ta"] = true }
+
+--- 叠层链上最近一层账号页的书源。
+---@param desktop BookDesktop
+---@return string|nil
+local function accountSourceId(desktop)
+    local overlay = desktop.settings_overlay
+    while overlay do
+        local id = overlay.spec and overlay.spec.source_id
+        if type(id) == "string" and id ~= "" then return id end
+        overlay = overlay.parent
+    end
+end
+
+--- 这个源是不是用户登录过的账号。拷贝漫画的 configured() 只表示有默认站点，不算登录。
+---@param id string
+---@return boolean
+local function sourceLoggedIn(id)
+    if NOT_LOGIN[id] then return false end
+    local Registry = require("source.registry")
+    if id == "copymanga" then
+        return require("source.copymanga.auth").hasSession() == true
+    end
+    if type(Registry.resolve) ~= "function" then return false end
+    local source = Registry.resolve(id)
+    return source ~= nil and type(source.configured) == "function" and source:configured() == true
+end
+
+--- 启用的源里，只有这一个登录过。
+---@param id string
+---@return boolean
+local function soleLogin(id)
+    local Registry = require("source.registry")
+    if type(Registry.listEnabled) ~= "function" then return false end
+    local found
+    for _idx, meta in ipairs(Registry.listEnabled()) do
+        if sourceLoggedIn(meta.id) then
+            if found then return false end
+            found = meta.id
+        end
+    end
+    return found == id
+end
+
 --- KOReader 事件 SourceChanged（`source.registry` 的 notifyChanged / reload 广播）：
 --- 换成当前源并复位各页，再让新源做桌面打开维护。
+--- 登录 / 改连接不离开账号页。只有这一个源登录过时，才把它设为当前源。
 function Desktop:onSourceChanged()
-    local source = require("source.registry").current()
+    local Registry = require("source.registry")
+    local from_reload = type(Registry.reloadLanding) == "function" and Registry.reloadLanding()
+    if from_reload then
+        local id = accountSourceId(self)
+        if id and soleLogin(id) and type(Registry.setActive) == "function" then
+            Registry.setActive(id)
+        end
+    end
+    local source = Registry.current()
     logger.info("book source changed", source and source.id or "unavailable")
     applySource(self, source)
     Sync.open(self)

@@ -37,6 +37,7 @@ local _ = require("gettext")
 ---@field nav (fun(width: number): table)|nil 标题栏下的横向导航（如内容区下划线页签），全宽贴边，不用预览卡片
 ---@field preview (fun(width: number): table)|nil
 ---@field sections fun(): BookThemeSection[]
+---@field source_id string|nil 账号页对应的书源。登录重载时桌面据此判断要不要改当前源
 ---@field docs string|nil 官网手册路径（相对 moon.ankio.net）；有则页底追加「查看指南」
 ---@field searchable boolean|nil false 时「搜索设置」只索引页面入口，不展开页面内部行（动态长目录用）
 ---@field on_close (fun())|nil

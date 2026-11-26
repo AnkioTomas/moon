@@ -190,6 +190,7 @@ local function entryRow(desktop, plugin, mod, title, icon, source_id)
                 require("desktop.pages.setting.overlay").push(desktop, {
                     title = title,
                     docs = docs,
+                    source_id = source_id,
                     sections = function()
                         return accountSections(mod, plugin, title)
                     end,
@@ -274,6 +275,7 @@ function Source.openAccount(desktop, source_id)
     Overlay.push(desktop, {
         title = title,
         docs = require("utils.docs").source(source_id),
+        source_id = source_id,
         sections = function()
             return accountSections(mod, desktop.plugin, title)
         end,

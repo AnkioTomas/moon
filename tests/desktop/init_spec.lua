@@ -288,6 +288,64 @@ do -- 换源：广播给各子件，留在当前页签
     Assert.eq(desk.store.last_payload, source)
 end
 
+do -- 登录重载：只有这一个源登录过，才把它设为当前源，人留在设置页
+    desk:switchTab("settings")
+    drain()
+    local active
+    local source = { id = "local" }
+    desk.settings_overlay = { spec = { source_id = "fanqie" }, updateView = function() end }
+    package.loaded["source.registry"] = {
+        reloadLanding = function() return true end,
+        listEnabled = function()
+            return { { id = "local" }, { id = "18ta" }, { id = "fanqie" } }
+        end,
+        resolve = function(id)
+            return { configured = function() return id == "fanqie" end }
+        end,
+        setActive = function(id)
+            active = id
+            source = { id = id }
+            return source
+        end,
+        current = function() return source end,
+    }
+    desk:onSourceChanged()
+    Assert.eq(active, "fanqie")
+    Assert.eq(desk.tab, "settings", "登录成功不跳书库")
+    Assert.eq(desk.source.id, "fanqie")
+    package.loaded["source.registry"] = nil
+    desk.settings_overlay = nil
+    drain()
+end
+
+do -- 已经登录过别的源：不改当前源
+    desk:switchTab("settings")
+    drain()
+    local active
+    local source = { id = "moon" }
+    desk.settings_overlay = { spec = { source_id = "fanqie" }, updateView = function() end }
+    package.loaded["source.registry"] = {
+        reloadLanding = function() return true end,
+        listEnabled = function()
+            return { { id = "moon" }, { id = "fanqie" } }
+        end,
+        resolve = function()
+            return { configured = function() return true end }
+        end,
+        setActive = function(id) active = id end,
+        current = function() return source end,
+    }
+    desk:onSourceChanged()
+    Assert.is_nil(active)
+    Assert.eq(desk.tab, "settings")
+    Assert.eq(desk.source.id, "moon")
+    package.loaded["source.registry"] = nil
+    desk.settings_overlay = nil
+    drain()
+    desk:switchTab("home")
+    drain()
+end
+
 do -- KOReader 系统事件沿控件树直达顶栏控件，桌面不截留、不转成子页 onEvent
     local Event = require("ui/event")
     Assert.is_nil(desk.onCharging)

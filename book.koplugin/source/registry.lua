@@ -310,9 +310,22 @@ function Registry.notifyChanged()
 end
 
 --- 登录态或连接配置变了：作废源实例（下次 current() 按新配置重建），再通知桌面。
+--- 广播期间 reloadLanding() 为真。桌面用它和「换活跃源」分开：
+--- 登录 / 改连接留在当前书源账号页；换源才关掉设置叠层。
+local reloading = false
+
 function Registry.reload()
     Registry.invalidate()
-    Registry.notifyChanged()
+    reloading = true
+    local ok, err = pcall(Registry.notifyChanged)
+    reloading = false
+    if not ok then error(err, 0) end
+end
+
+--- 当前这次 SourceChanged 是不是 reload() 同步广播出来的。
+---@return boolean
+function Registry.reloadLanding()
+    return reloading
 end
 
 --- 按 id 取源实例（缓存复用，首次创建）。阅读与书籍操作按书的属主源解析，不切换活跃源。
