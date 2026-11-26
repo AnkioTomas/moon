@@ -290,15 +290,30 @@ local function coreEntries(desktop)
             },
         },
         {
-            group = "reader", order = 55, id = "ai", icon = "psychology", title = _("AI 接口"),
-            subtitle = _("X-Ray 使用的大模型接口"),
+            group = "ai", order = 30, id = "ai", icon = "psychology", title = _("智能"),
             page = {
-                title = _("AI 接口"),
+                title = _("智能"),
                 docs = "/manual/reader/smart/ai",
                 sections = function() return {{ title = _("AI"), rows = AISettings:rows(desktop) }} end,
             },
         },
         network,
+        {
+            -- 智能在根目录。这里只留跳过去的入口，返回仍回到阅读。
+            group = "reader", order = 55, id = "ai_link",
+            row = function(iw)
+                return Row.widget({
+                    width = iw, kind = "nav", icon = "psychology",
+                    title = _("智能"),
+                    callback = function()
+                        for _idx, group in ipairs(Settings.groups(desktop)) do
+                            local entry = group.id == "ai" and group.entries[1]
+                            if entry and entry.page then Overlay.push(desktop, entry.page) return end
+                        end
+                    end,
+                })
+            end,
+        },
         { group = "maintenance", order = 80, id = "refresh_diagnostics", row = Maintenance:refreshDiagRow(desktop) },
         { group = "maintenance", order = 90, id = "close_desktop", row = Maintenance:closeRow(desktop) },
     }
@@ -392,8 +407,7 @@ local GROUP_FOLDERS = {
         },
         {
             id = "smart", icon = "psychology", title = _("智能"),
-            subtitle = _("X-Ray、AI、翻译"),
-            match = { "ai", "feature:xray", "feature:translate" },
+            match = { "feature:xray", "feature:translate", "ai_link" },
         },
     },
     system = {
@@ -542,6 +556,7 @@ function Settings.groups(desktop)
         { id = "desktop", title = _("桌面"), icon = "home" },
         { id = "games", title = _("游戏"), icon = "sports_esports" },
         { id = "reader", title = _("阅读"), icon = "menu_book" },
+        { id = "ai", title = _("智能"), icon = "psychology" },
         { id = "system", title = _("系统"), icon = "settings" },
         { id = "security", title = _("安全"), icon = "lock" },
         { id = "maintenance", title = _("维护"), icon = "handyman" },
@@ -612,6 +627,10 @@ function Settings:updateView()
             for _i, entry in ipairs(group.entries) do
                 device_rows[#device_rows + 1] = entry.row or navRow(desktop, entry, false)
             end
+        elseif group.id == "ai" then
+            -- 只有智能这一页，直接挂在根上，不再套一层分组目录。
+            local entry = group.entries[1]
+            if entry then group_rows[#group_rows + 1] = entry.row or navRow(desktop, entry, false) end
         else
             local row = groupRow(desktop, group)
             if row then group_rows[#group_rows + 1] = row end

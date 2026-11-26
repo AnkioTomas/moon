@@ -63,6 +63,21 @@ function Setting.entries(desktop)
                 end,
             },
         },
+        {
+            id = "reader",
+            group = "reader",
+            order = 81,
+            icon = "wallpaper",
+            title = _("阅读背景"),
+            subtitle = _("下次打开书生效，仅 EPUB / TXT 等排版文档；建议调低透明度"),
+            page = {
+                title = _("阅读背景"),
+                docs = "/manual/appearance/wallpaper",
+                sections = function()
+                    return require("features.wallpaper.page").readerSections(desktop)
+                end,
+            },
+        },
     }
 end
 

@@ -1,6 +1,6 @@
 ---@diagnostic disable: undefined-field, missing-fields, redundant-parameter, missing-parameter, inject-field, assign-type-mismatch, param-type-mismatch, cast-type-mismatch, return-type-mismatch, cast-local-type
 
---[[-- 设置根页：搜索 + 分组目录；点分组进叠层列条目，阅读组再分三类。 --]]
+--[[-- 设置根页：搜索 + 分组目录；点分组进叠层列条目。智能直接挂在根上。 --]]
 
 local Assert = require("support.assert")
 
@@ -133,6 +133,7 @@ package.preload["features.wallpaper.page"] = function()
     return {
         spec = function() return { title = "wallpaper", sections = function() return {} end } end,
         preview = function() return { dimen = { h = 20 } } end,
+        readerSections = function() return { { title = "阅读背景", rows = {} } } end,
     }
 end
 package.preload["desktop.pages.setting.desktop"] = function()
@@ -234,13 +235,14 @@ desktop.settings = settings
 settings:updateView()
 -- 根页：搜索行没有分组标题；下面是设备分组（我的设备、插件市场），再是分类。
 Assert.eq(table.concat(section_titles, ","), "设备,分类")
-Assert.len(built_rows, 10)
+Assert.len(built_rows, 11)
 Assert.eq(built_rows[1].title, "搜索设置")
 Assert.eq(built_rows[2].title, "我的设备")
 Assert.eq(built_rows[3].title, "插件市场")
 local root_groups = {}
 for i = 4, #built_rows do root_groups[#root_groups + 1] = built_rows[i].title end
-Assert.eq(table.concat(root_groups, ","), "书库,外观,桌面,阅读,系统,安全,维护")
+Assert.eq(table.concat(root_groups, ","), "书库,外观,桌面,阅读,智能,系统,安全,维护")
+Assert.is_nil(built_rows[8].subtitle, "根上的智能不带副标题")
 
 local function sectionTitles(page)
     local titles = {}
@@ -293,11 +295,11 @@ Assert.is_false(cleanup_opened)
 library_rows[6].callback()
 Assert.is_true(cleanup_opened, "点清理入口才打开选择器，不自动清理")
 
--- 阅读组：同一页三个分节，不再多点一层分类
+-- 阅读组：三节。智能只留跳转；阅读背景在阅读界面。
 local reader = openRoot("阅读")
 Assert.eq(reader.id, "group:reader")
 Assert.eq(sectionTitles(reader), "阅读界面,划词与词典,智能")
-local fontmap_row, behavior_row, lookup_titles, smart_titles = nil, nil, {}, {}
+local fontmap_row, behavior_row, ai_link, bg_link, lookup_titles, smart_titles = nil, nil, nil, nil, {}, {}
 local section_of = {}
 for _, section in ipairs(reader.sections()) do
     for _, build in ipairs(section.rows) do
@@ -306,10 +308,12 @@ for _, section in ipairs(reader.sections()) do
         if section.title == "阅读界面" then
             if row.title == "书内字体映射" then fontmap_row = row end
             if row.title == "阅读行为" then behavior_row = row end
+            if row.title == "阅读背景" then bg_link = row end
         elseif section.title == "划词与词典" then
             lookup_titles[#lookup_titles + 1] = row.title
         else
             smart_titles[#smart_titles + 1] = row.title
+            if row.title == "智能" then ai_link = row end
         end
     end
 end
@@ -319,8 +323,16 @@ Assert.eq(fontmap_row.status_on, false)
 Assert.is_true(behavior_row ~= nil)
 Assert.eq(section_of["段评"], "阅读界面")
 Assert.eq(section_of["翻译"], "智能")
+Assert.eq(section_of["阅读背景"], "阅读界面")
 Assert.eq(table.concat(lookup_titles, ","), "词典,百科,文字识别（OCR）,查词,划词菜单,行间标注")
-Assert.eq(table.concat(smart_titles, ","), "X-Ray,翻译,AI 接口")
+Assert.eq(table.concat(smart_titles, ","), "X-Ray,翻译,智能")
+Assert.is_nil(ai_link.subtitle, "阅读里的智能入口不带副标题")
+ai_link.callback()
+Assert.eq(opened.id, "ai")
+Assert.eq(opened.title, "智能")
+bg_link.callback()
+Assert.eq(opened.title, "阅读背景")
+Assert.eq(sectionTitles(opened), "阅读背景")
 
 behavior_row.callback()
 Assert.eq(opened.id, "reader_behavior")

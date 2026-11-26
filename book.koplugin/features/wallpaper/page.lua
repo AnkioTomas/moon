@@ -209,7 +209,19 @@ function Page.spec(desktop)
     }
 end
 
---- 某个界面的子页；返回时回到主页。
+--- 阅读设置里的「阅读背景」：同一份阅读页壁纸项，返回回到阅读分组。
+---@param desktop table
+---@return table[]
+function Page.readerSections(desktop)
+    for _idx, scope in ipairs(SCOPES) do
+        if scope.id == "reader" then
+            return { { title = _("阅读背景"), rows = scopeRows(desktop, scope) } }
+        end
+    end
+    return {}
+end
+
+--- 某个界面的子页；返回时回到壁纸主页。
 ---@param desktop table
 ---@param scope BookWallpaperScope
 local function openScope(desktop, scope)
