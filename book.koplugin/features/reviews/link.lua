@@ -1,5 +1,5 @@
 --[[--
-关联微信读书书目：按书名搜索、选一本存进本书 sidecar；已关联时可更换或解除。
+关联书目：按书名、作者搜索，选一本存进本书 sidecar；已关联时可更换或解除。
 
 @module koplugin.book.features.reviews.link
 --]]
@@ -65,7 +65,7 @@ local function choose(ui, source, book, identity)
     end
 end
 
---- 输入书名 → 搜索 → 选书。
+--- 输入书名和作者 → 搜索 → 选书。作者可空，用来从同名书里收窄。
 ---@param ui table
 ---@param source ParagraphReviewSource
 ---@param identity BookIdentity|nil
@@ -73,13 +73,21 @@ local function search(ui, source, identity)
     local props = ui.doc_props or {}
     require("ui.themes.widgets.input"):new{
         title = T(_("搜索%1书目"), require("features.reviews.lender").label(source.id)),
-        fields = { { text = props.title or "", hint = _("书名") } },
-        callback = function(keyword)
+        fields = {
+            { text = props.title or "", hint = _("书名") },
+            { hint = _("作者") },
+        },
+        callback = function(title, author)
+            local Text = require("utils.text")
+            if Text.trim(title or "") == "" and Text.trim(author or "") == "" then
+                toast(_("请输入书名或作者"))
+                return
+            end
             if not require("ui/network/manager"):isConnected() then
                 toast(_("未联网，无法搜索"))
                 return
             end
-            require("features.reviews.lender").search(source, keyword, function(books, err)
+            require("features.reviews.lender").search(source, title, function(books, err)
                 if not books then
                     toast(err or _("搜索失败"))
                     return
@@ -97,7 +105,7 @@ local function search(ui, source, identity)
                     }
                 end
                 require("ui.themes.widgets.list"):new{ title = T(_("选择%1书目"), require("features.reviews.lender").label(source.id)), items = items }:show()
-            end)
+            end, author)
         end,
     }:show()
 end

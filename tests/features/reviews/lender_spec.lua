@@ -34,3 +34,31 @@ do
     Lender.search({ searchBooksAsync = function(_, _, cb) cb({ { book_id = "9" } }) end }, "x", function(books) direct = books end)
     Assert.eq(direct[1].book_id, "9")
 end
+
+-- 作者和书名一起搜：第三参交给来源，回来再按作者收窄。只填作者时用作者当关键字。
+do
+    local calls = {}
+    local source = {
+        searchBooksAsync = function(_, keyword, cb, author)
+            calls[#calls + 1] = { keyword, author }
+            cb({
+                { book_id = "1", title = "活着", author = "余华" },
+                { book_id = "2", title = "活着", author = "别人" },
+                { book_id = "3", title = "Harry Potter", author = "J.K. Rowling" },
+            })
+        end,
+    }
+    local got
+    Lender.search(source, "活着", function(books) got = books end, "余华")
+    Assert.eq(calls[1][1], "活着")
+    Assert.eq(calls[1][2], "余华")
+    Assert.len(got, 1)
+    Assert.eq(got[1].book_id, "1")
+    Lender.search(source, "  ", function(books) got = books end, "rowling")
+    Assert.eq(calls[2][1], "rowling")
+    Assert.is_nil(calls[2][2])
+    Assert.eq(got[1].book_id, "3")
+    Lender.search(source, "", function(books) got = books end, "  ")
+    Assert.len(got, 0)
+    Assert.len(calls, 2)
+end

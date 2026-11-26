@@ -1467,6 +1467,7 @@ return {
     ["段评"] = "Reviews",
     ["未联网，无法搜索"] = "Offline; cannot search",
     ["没有找到这本书"] = "Book not found",
+    ["请输入书名或作者"] = "Enter a title or author",
     ["已关联「%1」"] = "Linked to \"%1\"",
     ["已关联：%1"] = "Linked: %1",
     ["更换关联"] = "Change link",

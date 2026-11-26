@@ -28,7 +28,7 @@ local RETRY = 60
 ---@field loadTocAsync fun(self: ParagraphReviewSource, identity: BookIdentity, cb: fun(toc: BookChapter[]|nil, err: string|nil)): { cancel: fun() }|nil
 ---@field refreshTocAsync fun(self: ParagraphReviewSource, identity: BookIdentity, cb: fun(toc: BookChapter[]|nil, err: string|nil)): { cancel: fun() }|nil
 ---@field isTocCurrent fun(self: ParagraphReviewSource, toc: BookChapter[]|nil): boolean
----@field searchBooksAsync fun(self: ParagraphReviewSource, keyword: string, cb: fun(books: WechatSearchBook[]|nil, err: string|nil)): { cancel: fun() }|nil
+---@field searchBooksAsync fun(self: ParagraphReviewSource, keyword: string, cb: fun(books: WechatSearchBook[]|nil, err: string|nil), author: string|nil): { cancel: fun() }|nil
 ---@field paragraphHotspotsAsync fun(self: ParagraphReviewSource, identity: BookIdentity, cb: fun(hotspots: WechatReviewHotspot[]|nil, err: string|nil)): { cancel: fun() }
 ---@field chapterReviewHotspotsAsync (fun(self: ParagraphReviewSource, identity: BookIdentity, cb: fun(hotspots: WechatReviewHotspot[]|nil, err: string|nil)): { cancel: fun() })|nil
 ---@field locateHotspots fun(self: ParagraphReviewSource, hotspots: WechatReviewHotspot[], html: string): WechatReviewSpot[]

@@ -5,6 +5,8 @@
 @module koplugin.book.features.reviews.lender
 --]]
 
+local Text = require("utils.text")
+
 local Lender = {}
 
 ---@return { id: string, label: string }[]
@@ -55,23 +57,48 @@ function Lender.label(id)
     return item and item.label or ""
 end
 
---- 按书名搜可关联的书目。来源有 `searchBooksAsync` 用它，否则退到通用书城搜索 `searchAsync`（Book → { book_id, title, author }）。
+--- 作者名是否包含用户输入。大小写不敏感，按字面匹配。
+---@param name string|nil
+---@param author string
+---@return boolean
+local function authorHit(name, author)
+    if author == "" then return true end
+    return (name or ""):lower():find(author:lower(), 1, true) ~= nil
+end
+
+--- 按书名搜可关联的书目，作者非空时再滤一遍。
+--- 来源有 `searchBooksAsync` 用它，否则退到通用书城搜索 `searchAsync`（Book → { book_id, title, author }）。
+--- 书名和作者都有时，作者作为第三参交给来源（旧插件忽略多出来的参数）。只填作者时用作者当关键字。
 ---@param source ParagraphReviewSource
 ---@param keyword string
 ---@param cb fun(books: { book_id: string, title: string, author: string|nil }[]|nil, err: string|nil)
+---@param author string|nil
 ---@return { cancel: fun() }|nil
-function Lender.search(source, keyword, cb)
-    if source.searchBooksAsync then return source:searchBooksAsync(keyword, cb) end
-    return source:searchAsync(keyword, function(res, err)
-        if not res then cb(nil, err); return end
+function Lender.search(source, keyword, cb, author)
+    keyword = Text.trim(keyword or "")
+    author = Text.trim(author or "")
+    local query = keyword ~= "" and keyword or author
+    if query == "" then cb({}); return nil end
+    local api_author = (keyword ~= "" and author ~= "") and author or nil
+    local function finish(books, err)
+        if not books or author == "" then cb(books, err); return end
+        local kept = {}
+        for _idx, book in ipairs(books) do
+            if authorHit(book.author, author) then kept[#kept + 1] = book end
+        end
+        cb(kept)
+    end
+    if source.searchBooksAsync then return source:searchBooksAsync(query, finish, api_author) end
+    return source:searchAsync(query, function(res, err)
+        if not res then finish(nil, err); return end
         local books = {}
         for _idx, book in ipairs(res.data or {}) do
-            local author = book.authors or book.author
-            if type(author) == "table" then author = table.concat(author, " / ") end
-            books[#books + 1] = { book_id = tostring(book.stable_id), title = book.title or "", author = author }
+            local name = book.authors or book.author
+            if type(name) == "table" then name = table.concat(name, " / ") end
+            books[#books + 1] = { book_id = tostring(book.stable_id), title = book.title or "", author = name }
         end
-        cb(books)
-    end)
+        finish(books)
+    end, api_author)
 end
 
 return Lender
