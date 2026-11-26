@@ -40,7 +40,7 @@ end
 local function isCurrent(cred)
     local saved = Client.credential()
     if not saved then return cred.token == nil and cred.cookie == nil end
-    return saved ~= nil and saved.token == cred.token and saved.cookie == cred.cookie
+    return saved.token == cred.token and saved.cookie == cred.cookie
 end
 
 --- 嵌套表按 PHP 的 `a[b]` 写法摊平成表单键（数组用 0 基下标，PHP 侧才是列表）；布尔 / 数字转字符串，nil 丢弃。
@@ -194,7 +194,11 @@ function Client.chaptersAsync(row, cb)
             if cancelled then return end
             if not validRows(data, "title") then cb(nil, err or _("响应无效")); return end
             for _idx, chapter in ipairs(data) do all[#all + 1] = chapter end
-            if #data > 0 and wire and wire.hasMore then page(n + 1); return end
+            if #data > 0 and wire and wire.hasMore then
+                -- 服务端一直说 hasMore 时不能无限翻：最多 100 页，超了报错，不交残缺目录。
+                if n >= 100 then cb(nil, _("响应无效")); return end
+                page(n + 1); return
+            end
             if #all == 0 then cb(nil, _("iRead 目录为空")); return end
             cb(all)
         end)

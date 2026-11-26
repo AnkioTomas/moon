@@ -171,7 +171,7 @@ do
     Assert.eq(books[2].cover, "http://img/b.jpg")
 end
 
--- 阅读位置：第 0 章 0 偏移且没时间戳算没读过；目录 uid 是 0 基序号并带回章节原 JSON。
+-- 阅读位置：第 0 章 0 偏移且没时间戳算没读过；目录 uid 是 0 基序号，不存章节原 JSON（开章不用）。
 do
     Assert.is_nil(Mapper.readPos({ durChapterIndex = 0, durChapterPos = 0, durChapterTime = 0 }))
     Assert.eq(Mapper.readPos({ durChapterIndex = 0, durChapterPos = 0, durChapterTime = 5 }).index, 0)
@@ -179,7 +179,7 @@ do
     local toc = Mapper.toc({ { title = "序", url = "a" }, { title = "一", url = "b" } })
     Assert.eq(toc[2].idx, 2)
     Assert.eq(toc[2].uid, "1")
-    Assert.matches(toc[2].raw, '"url":"b"')
+    Assert.is_nil(toc[2].raw)
 end
 
 -- 正文带 HTML 标签时剥掉，纯文本原样。

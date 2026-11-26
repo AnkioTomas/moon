@@ -122,23 +122,6 @@ function Fit.dimensions(path, data)
     return Image.dimensions(path)
 end
 
----@param dir string
----@return boolean
----@return string|nil
-local function ensureDir(dir)
-    local attr = lfs.attributes(dir)
-    if attr and attr.mode == "directory" then return true end
-    if attr then return false, _("无法保存漫画文件") end
-    local parent = dir:match("(.+)/[^/]+$")
-    if parent and parent ~= dir then
-        local ok, err = ensureDir(parent)
-        if not ok then return false, err end
-    end
-    local ok, err = lfs.mkdir(dir)
-    if not ok then return false, err or _("无法保存漫画文件") end
-    return true
-end
-
 local function freeBB(bb)
     if bb and bb.free then pcall(function() bb:free() end) end
 end
@@ -306,11 +289,9 @@ end
 
 ---@param src_w integer
 ---@param out_w integer
----@param band_src_h integer
----@param bpp integer
 ---@return integer num
 ---@return integer denom
-local function jpegScale(src_w, out_w, band_src_h, bpp)
+local function jpegScale(src_w, out_w)
     local chosen_num, chosen_denom = 1, 1
     for i = 1, #JPEG_SCALES do
         local num, denom = JPEG_SCALES[i][1], JPEG_SCALES[i][2]
@@ -319,12 +300,7 @@ local function jpegScale(src_w, out_w, band_src_h, bpp)
             chosen_num, chosen_denom = num, denom
         end
     end
-    -- 在仍不小于目标宽的档里，挑带宽内存最小的（也就是最小的那档，上面循环已落到最小）。
-    local scaled_w = math.max(1, math.floor(src_w * chosen_num / chosen_denom))
-    local scaled_h = math.max(1, math.floor(band_src_h * chosen_num / chosen_denom))
-    if scaled_w * scaled_h * bpp > Fit.DECODE_BUDGET then
-        -- 即使超预算也用这档：再小就要放大了。
-    end
+    -- 仍不小于目标宽的档里取最小的（循环已落到最小）：超出解码预算也用它，再小就要放大了。
     return chosen_num, chosen_denom
 end
 
@@ -407,7 +383,7 @@ local function decodeJpegSliceCrop(data, src_w, src_h, plan, slice, color)
     local bpp = color and 3 or 1
     local num, denom = 1, 1
     if turbo_scale then
-        num, denom = jpegScale(src_w, plan.width, src_band_h, bpp)
+        num, denom = jpegScale(src_w, plan.width)
     end
     local dec_w = math.max(1, math.floor(src_w * num / denom))
     local dec_y = math.floor(src_y * num / denom)
@@ -471,7 +447,7 @@ local function decodeJpegSliceBand(data, src_w, src_h, plan, slice, color)
     ---@type { bb: table, y: integer, h: integer }[]
     local pieces = {}
     local function abandon()
-        for _, piece in ipairs(pieces) do
+        for _idx, piece in ipairs(pieces) do
             freeBB(piece.bb)
         end
     end
@@ -620,8 +596,8 @@ function Fit.materialize(path, dest_dir, start_index, screen_w, screen_h)
         local ext = Image.suffix(path) or Image.file(path) or ".jpg"
         return { { path = path, name = Fit.pageName(start_index, ext), temp = false } }
     end
-    local ok_dir, dir_err = ensureDir(dest_dir)
-    if not ok_dir then return nil, dir_err end
+    local ok_dir, dir_err = require("utils.paths").ensureDir(dest_dir)
+    if not ok_dir then return nil, dir_err or _("无法保存漫画文件") end
 
     if backend and backend.writeSlices then
         return backend.writeSlices(path, dest_dir, start_index, plan)

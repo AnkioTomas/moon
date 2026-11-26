@@ -96,10 +96,7 @@ local function decodeBooksSync(raw)
     if ok_json then
         return decoded
     end
-    local ok_zlib, Zlib = pcall(require, "ffi/zlib")
-    if not ok_zlib then
-        return nil
-    end
+    local Zlib = require("ffi/zlib")
     for _idx, size in ipairs({ 65536, 262144, 1048576, 4194304, 16777216 }) do
         local inflated_ok, inflated = pcall(Zlib.zlib_uncompress, raw, size)
         if inflated_ok then
@@ -199,35 +196,6 @@ local function entryRel(folder_path, entry)
     return path
 end
 
---- 有限并发异步遍历：最多 limit 路同时 step；step 同步回调时也能排空。
----@param list any[]
----@param limit integer
----@param step fun(item: any, next: fun(), index: integer)
----@param done fun()
-local function eachAsyncLimit(list, limit, step, done)
-    if #list == 0 then return done() end
-    local next_i, live, finished, pumping = 1, 0, false, false
-    local function pump()
-        if finished or pumping then return end
-        pumping = true
-        while live < limit and next_i <= #list do
-            local i = next_i
-            next_i = next_i + 1
-            live = live + 1
-            step(list[i], function()
-                live = live - 1
-                pump()
-            end, i)
-        end
-        pumping = false
-        if next_i > #list and live == 0 then
-            finished = true
-            done()
-        end
-    end
-    pump()
-end
-
 --- 书架上已有的 WebDAV 书（相对路径），列目录失败时保留，不能误当成远端删除。
 ---@return table<string, boolean>
 local function knownRemoteFiles()
@@ -314,7 +282,7 @@ local function listBooks(self, run, done)
 
     local function walkEntries(path, prefix, depth, entries, finish)
         local dirs = collect(path, prefix, entries, depth)
-        eachAsyncLimit(dirs, LIST_CONCURRENCY, function(dir, next_dir, index)
+        eachAsync(dirs, function(dir, next_dir, index)
             if run.cancelled then return end
             run.report(T(_("正在列出远端目录 %1"), dir.path), index, #dirs)
             local job, completed
@@ -332,7 +300,7 @@ local function listBooks(self, run, done)
                 walkEntries(dir.path, dir.rel, depth + 1, child, next_dir)
             end, { timeout = folder_timeout, connect_timeout = folder_connect })
             if job and not completed then list_jobs[job] = true end
-        end, finish)
+        end, finish, LIST_CONCURRENCY)
     end
 
     local function finishList(err)
@@ -750,9 +718,9 @@ local function indexLocal(self, run, done)
             end
             next_item()
         end)
-    end, function(err)
+    end, function()
         if first_err then run.push_error = T(_("本地书入库失败：%1"), tostring(first_err)) end
-        done(err)
+        done()
     end)
 end
 
@@ -846,11 +814,11 @@ local function uploadLocal(self, run, done)
                     next_item()
                 end)
             end)
-    end, function(err)
+    end, function()
         if failed > 0 then
             run.push_error = T(_("%1 本书上传失败：%2"), failed, tostring(first_err))
         end
-        done(err)
+        done()
     end)
 end
 
@@ -889,8 +857,7 @@ local function writeBooksSync(self, list, remote_version, cb)
     local version = math.max(remote_version or 0, knownVersion(self) or 0) + 1
     local device = require("utils.device_id").ensure()
     for _idx, entry in ipairs(list) do entry.syncVersion, entry.syncDevice = version, device end
-    local ok_zlib, Zlib = pcall(require, "ffi/zlib")
-    local data = ok_zlib and Zlib.zlib_compress(JSON.encode(#list > 0 and list or JSON.util.InitArray({})))
+    local data = require("ffi/zlib").zlib_compress(JSON.encode(#list > 0 and list or JSON.util.InitArray({})))
     if not data then return defer(cb, false, _("无法生成 WebDAV 书目文件")) end
     return putText(self, self:layout():catalog(self), self:webdavCacheRoot() .. "/.books.sync.upload", data,
         function(ok, err)

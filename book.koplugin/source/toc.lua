@@ -26,7 +26,7 @@ local logger = require("utils.log")
 ---@type table<string, SourceTocEntry>
 local cache = {}
 local count = 0
-local CACHE_LIMIT = 32
+local CACHE_LIMIT = 8
 
 --- 开书 / 临近章末拉新最短间隔（秒）。成功看 fetched_at，失败看本进程上次尝试时间。
 Toc.REFRESH_INTERVAL = 5 * 60

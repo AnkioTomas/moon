@@ -140,9 +140,11 @@ end
 ---@return { cancel: fun() }
 local function authed(go, cb, cfg)
     local user, password = credentials(cfg)
-    if not user then return go(nil, cb) end
+    local base = Client.base(cfg)
+    -- 配置里可能只剩账号密码：没地址时交给 go 报「未配置」。
+    if not user or not base then return go(nil, cb) end
     local auth_session = cfg and {} or session
-    local key = Client.base(cfg) .. "\0" .. user .. "\0" .. password
+    local key = base .. "\0" .. user .. "\0" .. password
     local expired_msg = _("打开「设置 → 书库 → 账号 → 开源阅读 → 阅读服务地址」。账号和密码重新填一遍，地址不用改，点「保存」。阅读 App 里如果改过密码，这里填新密码。")
     ---@type boolean, CancelHandle|nil
     local cancelled, job = false, nil

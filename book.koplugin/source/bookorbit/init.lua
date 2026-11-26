@@ -160,7 +160,10 @@ function Source:syncBooksAsync(opts, cb)
             function(data, err)
                 if cancelled then return end
                 if not data then return cb(nil, err) end
-                for _idx, item in ipairs(data.items or {}) do
+                -- 空体会被 Client:json 交成 {}；拿缺页的书单对账会把本地书判成远端已删。
+                if type(data.items) ~= "table" then return cb(nil, _("响应无效")) end
+                for _idx, item in ipairs(data.items) do
+                    if item.id == nil then return cb(nil, _("响应无效")) end
                     books[#books + 1] = {
                         stable_id = tostring(item.id),
                         title = item.title,

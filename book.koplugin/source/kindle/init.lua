@@ -191,16 +191,18 @@ end
 ---@param cb fun(path: string|nil, err: string|nil, meta: table|nil)
 ---@return table handle
 local function promptMissingHelper(cb)
-    pcall(function()
+    -- 跳账号页只是顺手引导：失败了下面的提示照样给出，记一行日志即可。
+    local ok, err = pcall(function()
         local function instance(name)
-            local ok, mod = pcall(require, name)
-            return ok and mod and mod.instance or nil
+            local loaded, mod = pcall(require, name)
+            return loaded and mod and mod.instance or nil
         end
         local ui = instance("apps/filemanager/filemanager") or instance("apps/reader/readerui")
         local plugin = ui and not ui.tearing_down and ui.book or nil
         require("desktop.pages.setting.source").openAccount(
             require("desktop.pages.setting").host(plugin), "kindle")
     end)
+    if not ok then require("utils.log").warn("book kindle open account page failed", err) end
     local version = require("source.kindle.plugin_update").target.installed()
     local text
     if not version then

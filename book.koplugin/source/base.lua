@@ -272,15 +272,7 @@ function SourceBase:deleteBookAsync(identity, cb)
     if not require("book.store").markDeleted(self.id, identity.stable_id) then
         return SourceBase.defer(cb, false, _("删除本书失败"))
     end
-    local book = identity.book
-    if not book then
-        local BookDB = require("book.books_db")
-        if type(BookDB.get) == "function" then
-            book = BookDB.get(self.id, identity.stable_id)
-        end
-    end
-    require("utils.log").info("book delete", self.id, identity.stable_id,
-        book and (book.title or book.stable_id) or identity.stable_id)
+    require("utils.log").info("book delete", self.id, identity.stable_id, identity.book and identity.book.title)
     if not self:configured() then
         if not require("book.books_db").remove(self.id, identity.stable_id) then
             require("utils.log").warn("book tombstone remove failed", self.id, identity.stable_id)
@@ -296,10 +288,10 @@ end
 --- 没远端的域（jjwxc / kindle 的进度、大多数源的笔记统计）不算脏，否则每次唤醒都入队一条空任务。
 local DOMAINS = {
     { method = "syncBooksAsync", capability = "shelf_push",
-        dirty = function(id) return #require("book.books_db").unsynced(id) > 0 end },
+        dirty = function(id) return require("book.books_db").hasUnsynced(id) end },
     { method = "syncNotesAsync", push = "pushNotesAsync", dirty = function(id) return require("book.note_db").hasUnsynced(id) end },
     { method = "syncStatsAsync", push = "pushStatsAsync", dirty = function(id) return #require("book.stats_db").unsyncedBySource(id, 1) > 0 end },
-    { method = "syncProgressAsync", push = "putProgressAsync", dirty = function(id) return #require("book.progress_db").unsynced(id) > 0 end },
+    { method = "syncProgressAsync", push = "putProgressAsync", dirty = function(id) return require("book.progress_db").hasUnsynced(id) end },
 }
 
 --- 本源能推且有脏行的域。只列有脏行的：书架没脏行就不调用，免得走成全量 pull。

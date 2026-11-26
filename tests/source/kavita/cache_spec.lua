@@ -798,20 +798,6 @@ Cache.status(6001)
 Cache.index()
 Assert.len(logs, 0, "读路径零日志")
 
--- settings 模块加载失败是真故障：降级成未配置，但不能静默。
-local settings_preload = package.preload["utils.settings"]
-package.loaded["utils.settings"] = nil
-package.preload["utils.settings"] = function() error("settings module broken") end
-resetLogs()
-Cache.reset()
-Assert.is_nil(Cache.shelf())
-Assert.is_nil(Cache.shelf())
-Assert.eq(countLines("kavita cache settings unavailable"), 1, "配置模块故障只记一次")
-Assert.eq(logs[1] and logs[1].level, "warn", "真实故障记警告")
-package.preload["utils.settings"] = settings_preload
-package.loaded["utils.settings"] = nil
-Cache.reset()
-
 -- open 失败同一原因只记一次。
 log_mod.open = function() return nil, "viewer_running" end
 resetLogs()

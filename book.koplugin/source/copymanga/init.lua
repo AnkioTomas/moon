@@ -46,9 +46,11 @@ function Copymanga.new()
     }, { __index = index })
 end
 
+--- 已登录才算配置好：书架、进度都要令牌；书城浏览匿名可用，不看这里。
+--- 未登录时删书当场撕墓碑、不入队推脏行（见 SourceBase:deleteBookAsync）。
 ---@return boolean
 function Source:configured()
-    return self._client:configured()
+    return self._client:configured() and require("source.copymanga.auth").hasSession()
 end
 
 --- API 收藏双向同步，写入后的确认由客户端回读完成。

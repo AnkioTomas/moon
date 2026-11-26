@@ -141,8 +141,9 @@ local function edit()
     }:show()
 end
 
+---@param plugin table|nil
 ---@return table[]
-function Setting.rows()
+function Setting.rows(plugin)
     local rows = {
         function(iw)
             local status, status_on = Setting.rowStatus()
@@ -160,7 +161,7 @@ function Setting.rows()
         end,
     }
     if require("source.legado.client").mode() == "app" then
-        rows[#rows + 1] = require("source.review_setting").row(SOURCE_ID)
+        rows[#rows + 1] = require("source.review_setting").row(SOURCE_ID, plugin)
     end
     if require("source.legado.client").base() ~= nil then
         rows[#rows + 1] = require("source.logout").row(SOURCE_ID, _("确定退出开源阅读？"), function()

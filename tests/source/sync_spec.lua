@@ -6,7 +6,7 @@ local Assert = require("support.assert")
 
 local books, notes, stats_rows, progress = {}, {}, {}, {}
 package.preload["book.books_db"] = function()
-    return { unsynced = function() return books end }
+    return { hasUnsynced = function() return #books > 0 end }
 end
 package.preload["book.note_db"] = function()
     return { hasUnsynced = function() return #notes > 0 end }
@@ -15,7 +15,7 @@ package.preload["book.stats_db"] = function()
     return { unsyncedBySource = function() return stats_rows end }
 end
 package.preload["book.progress_db"] = function()
-    return { unsynced = function() return progress end }
+    return { hasUnsynced = function() return #progress > 0 end }
 end
 local enqueued = {}
 package.preload["workers.tasks"] = function()

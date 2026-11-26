@@ -7,39 +7,49 @@ source.18ta.client 离线用例：WAF 403 → Set-Cookie → 重发的兜底逻�
 
 local Assert = require("support.assert")
 
--- 脚本化 http.request：get 按序消费 script，headerAll 从 res.headers 取 Set-Cookie。
+-- 脚本化 http.request：get 按序消费 script，headerAll 从 res.headers 取 Set-Cookie；
+-- opts.jar 照真实 Request：发前带 Cookie，回调前（未取消时）收 Set-Cookie。
 local calls = {}
 local script = {}
 package.preload["http.request"] = function()
+    local function headerAll(res, name)
+        local out = {}
+        if name == "Set-Cookie" and res and res.headers then
+            local raw = res.headers["Set-Cookie"]
+            if type(raw) == "table" then
+                for _idx, line in ipairs(raw) do out[#out + 1] = line end
+            elseif type(raw) == "string" then
+                out[1] = raw
+            end
+        end
+        return out
+    end
     return {
         get = function(url, opts, cb)
-            local call = { url = url, headers = opts and opts.headers or {}, cb = cb }
+            local headers = {}
+            for key, value in pairs(opts and opts.headers or {}) do headers[key] = value end
+            local jar = opts and opts.jar
+            if jar then headers.Cookie = jar:header(url) end
+            local call = { url = url, headers = headers }
+            local function deliver(body, err, res)
+                if jar and res and not call.cancelled then jar:absorb(url, headerAll(res, "Set-Cookie")) end
+                cb(body, err, res)
+            end
+            call.cb = deliver
             calls[#calls + 1] = call
             local step = table.remove(script, 1) or { code = 200, body = "" }
             local handle = { cancel = function() call.cancelled = true end }
             if step.delayed then return handle end
             if step.err then
-                cb(nil, step.err, nil)
+                deliver(nil, step.err, nil)
             elseif step.code and step.code ~= 200 then
-                cb(nil, "HTTP " .. step.code, { code = step.code, headers = step.headers or {} })
+                deliver(nil, "HTTP " .. step.code, { code = step.code, headers = step.headers or {} })
             else
-                cb(step.body, nil, { code = 200, body = step.body, headers = step.headers or {} })
+                deliver(step.body, nil, { code = 200, body = step.body, headers = step.headers or {} })
             end
             return handle
         end,
-        headerAll = function(res, name)
-            local out = {}
-            if name == "Set-Cookie" and res and res.headers then
-                local raw = res.headers["Set-Cookie"]
-                if type(raw) == "table" then
-                    for _idx, line in ipairs(raw) do out[#out + 1] = line end
-                elseif type(raw) == "string" then
-                    out[1] = raw
-                end
-
-            end
-            return out
-        end,
+        headerAll = headerAll,
     }
 end
 
@@ -76,7 +86,7 @@ do
     script = { { code = 200, body = "OK" } }
     calls = {}
     local client = Client.new()
-    client.cookies.k = "v"
+    client.jar:seed("k=v")
     local body = run(client, "/akshtml123.html")
     Assert.eq(body, "OK")
     Assert.eq(#calls, 1)
@@ -139,5 +149,5 @@ do
     Assert.is_true(calls[2].cancelled)
     calls[2].cb("late", nil, { headers = { ["Set-Cookie"] = "waf=late; Path=/" } })
     Assert.eq(completed, 0)
-    Assert.eq(client.cookies.waf, "pending")
+    Assert.eq(client.jar:get("waf"), "pending")
 end

@@ -20,7 +20,7 @@ local SOURCE_ID = "moon"
 ---@param row table
 ---@return Book|nil
 function Mapper.book(row)
-    if row.filename == "" then
+    if type(row) ~= "table" or type(row.filename) ~= "string" or row.filename == "" then
         return nil
     end
     local book = {
@@ -33,14 +33,15 @@ function Mapper.book(row)
         series = row.series,
         cover = row.coverUrl,
     }
-    if row.description ~= "" then book.intro = Text.stripHtml(row.description) end
+    if type(row.description) == "string" and row.description ~= "" then book.intro = Text.stripHtml(row.description) end
     return book
 end
 
---- 列表 wire → BookListResult。
+--- 列表 wire → BookListResult；data 不是数组返回 nil（不能拿残缺书单对账）。
 ---@param wire table
----@return BookListResult
+---@return BookListResult|nil
 function Mapper.list(wire)
+    if type(wire.data) ~= "table" then return nil end
     local out = {}
     for _idx, row in ipairs(wire.data) do
         out[#out + 1] = Mapper.book(row)
@@ -48,14 +49,16 @@ function Mapper.list(wire)
     return Catalog.listResult(out, wire.count)
 end
 
---- 进度 wire → ProgressPosition；云端没有进度（data 为 null）返回 nil。
+--- 进度 wire → ProgressPosition；云端没有进度（data 为 null）返回 nil，percent 不是数字算响应无效。
 ---@param wire table
----@return ProgressPosition|nil
+---@return ProgressPosition|nil, boolean|nil invalid
 function Mapper.progress(wire)
     local node = wire.data
     if type(node) ~= "table" then
         return nil
     end
+    if type(node.percent) ~= "number" then return nil, true end
+    local timestamp = tonumber(node.timestamp)
     return {
         fraction = Progress.clampFraction(node.percent / 100),
         chapter_idx = node.spine,
@@ -63,7 +66,7 @@ function Mapper.progress(wire)
         -- 服务端在 locator 过期时回空串；归一成 nil，免得下游到处判空串。
         locator = node.locator ~= "" and node.locator or nil,
         extra = { offset = node.offset },
-        updated_at = math.floor(node.timestamp / 1000),
+        updated_at = timestamp and math.floor(timestamp / 1000) or nil,
     }
 end
 

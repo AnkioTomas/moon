@@ -102,7 +102,6 @@ local function query(opts, key) return opts.url:match("[?&]" .. key .. "=([^&]*)
 -- 书库：books 行（path）、目录缓存、本地进度。
 local books, tocs, stale, progress, remembered, touched, reconciled = {}, {}, {}, {}, {}, {}, nil
 local fixed = {}
-local dropped = {}
 -- 脏行（sync_status=0）：漫画走 kamare 时只写 upsertRemote，任何 upsert 都是回归。
 local dirty = {}
 local toc_fresh = true
@@ -155,10 +154,6 @@ package.loaded["book.progress_db"] = {
         fixed[id] = at
         return true
     end,
-    dropRemote = function(_sid, id)
-        dropped[#dropped + 1] = id
-        return true
-    end,
 }
 package.loaded["book.store"] = {
     touch = function(path, ref)
@@ -194,6 +189,7 @@ os.remove(require("datastorage"):getSettingsDir() .. "/moonsource_kavita_meta.lu
 local STATS_STATE = require("datastorage"):getSettingsDir() .. "/moonsource_kavita_stats.lua"
 for _idx, suffix in ipairs({ "", ".old" }) do os.remove(STATS_STATE .. suffix) end
 os.execute("rm -rf '" .. WORK .. "'")
+package.loaded["utils.db"] = { transaction = function(fn) return fn() end }
 package.loaded["utils.paths"] = {
     ensureBookWork = function(id) os.execute("mkdir -p '" .. WORK .. "/" .. id .. "'") end,
     bookWorkDir = function(id) return WORK .. "/" .. id end,
@@ -1971,7 +1967,7 @@ progress["710:7101"] = { fraction = 0.3, updated_at = os.time() - 3600 }
 progress["710"] = { fraction = 0.5, updated_at = os.time() - 3600 }
 books["710"] = { title = "多卷书", authors = "甲", intro = "简介", category = "书籍" }
 routes["POST /api/Series/all-v2"] = read_route
-written, dropped = {}, {}
+written = {}
 local vol_result = run("syncBooksAsync", { force = true })
 Assert.eq(written["700"].fraction, 0.25)
 Assert.is_nil(written["700"].page, "epub 不写页码：Kavita 的页是 spine")
@@ -1985,7 +1981,6 @@ Assert.eq(written["710"].updated_at, 1770062706, "容器行带最近阅读时间
 Assert.eq(written_opts["710"] and written_opts["710"].reset_updated_at, true,
     "回填聚合要能回落时间戳（旧版本存过未来时间 / 0）")
 Assert.is_nil(written["710"].page, "容器行只写聚合 fraction")
-Assert.eq(#dropped, 0, "不再删容器行")
 Assert.eq(remembered["710:7101"].authors, "甲", "读过的卷行继承容器作者，不再显示未知作者")
 Assert.eq(remembered["710:7101"].title, "多卷书 · 上")
 Assert.eq(remembered["710:7101"].category, "书籍")
@@ -1996,9 +1991,6 @@ Assert.eq(vol_result.pulled, 7, "卷行元数据对齐算一次变更，首页�
 books["710:7101"] = remembered["710:7101"]
 local vol_again = run("syncBooksAsync", { force = true })
 Assert.eq(vol_result.pulled - vol_again.pulled, 1, "已对齐的卷行不再重复计入变更")
-dropped = {}
-run("syncBooksAsync", { force = true })
-Assert.eq(#dropped, 0, "容器行保留（离线读过的量级回连后不被抹回未读）")
 -- 卷行齐全时容器行按卷级聚合（不是服务端页比）：(0 读完 + 在读卷 0.3) / 2 卷 = 0.15
 progress["710:7102"] = { fraction = 0 }
 written = {}

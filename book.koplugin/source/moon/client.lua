@@ -95,10 +95,7 @@ end
 function Client:_jsonAsync(method, path, opts, cb)
     opts = opts or {}
     local url, cfg_err = self:_url(path, opts.query)
-    if not url then
-        cb(nil, cfg_err)
-        return nil
-    end
+    if not url then return require("source.base").defer(cb, nil, cfg_err) end
     local cache_ttl = opts.cache_ttl or 0
     local cache_key
     if method == "GET" and cache_ttl > 0 then
@@ -118,8 +115,7 @@ function Client:_jsonAsync(method, path, opts, cb)
         if opts.json then
             ok, encoded = pcall(JSON.encode, opts.body)
             if not ok or type(encoded) ~= "string" then
-                cb(nil, _("JSON 编码失败"))
-                return nil
+                return require("source.base").defer(cb, nil, _("JSON 编码失败"))
             end
             headers["Content-Type"] = "application/json"
         else
@@ -174,7 +170,8 @@ function Client:_jsonAsync(method, path, opts, cb)
                 done(nil, data.msg or T(_("错误码 %1"), tostring(data.code)))
                 return
             end
-            Auth.ok("moon")
+            -- Auth.ok 会重绘打开着的设置叠层，只在从失效恢复时调。
+            if Auth.expired("moon") then Auth.ok("moon") end
             done(data)
         end)
     end, cb)
@@ -274,10 +271,7 @@ end
 ---@return { cancel: fun() }|nil
 function Client:downloadBookAsync(filename, dest, on_progress, cb)
     local url, cfg_err = self:_url("/index/book/file", { filename = filename })
-    if not url then
-        cb(false, cfg_err)
-        return nil
-    end
+    if not url then return require("source.base").defer(cb, false, cfg_err) end
     return Request.download({
         url = url,
         method = "GET",

@@ -148,15 +148,15 @@ end
 package.preload["source.kavita.cache"] = function() return Cache end
 -- 后台任务登记：这里只记调用与静音状态；真实轮询见 cache_task_spec 与 tasks_e2e_spec。
 package.preload["source.kavita.cache_task"] = function()
-    return {
-        track = function(opts)
-            local handle = { opts = opts, adds = {} }
-            handle.mute = function(value) handle.muted = value ~= false end
-            handle.add = function(entries) handle.adds[#handle.adds + 1] = entries end
-            tracked[#tracked + 1] = handle
-            return handle
-        end,
-    }
+    local CacheTask = dofile(PLUGIN .. "/cache_task.lua")
+    CacheTask.track = function(opts)
+        local handle = { opts = opts, adds = {} }
+        handle.mute = function(value) handle.muted = value ~= false end
+        handle.add = function(entries) handle.adds[#handle.adds + 1] = entries end
+        tracked[#tracked + 1] = handle
+        return handle
+    end
+    return CacheTask
 end
 package.preload["source.kavita.volume_list"] = function()
     return dofile(PLUGIN .. "/volume_list.lua")

@@ -429,7 +429,7 @@ function Band.parse(data)
                 local dest = data:byte(p + 1)
                 if id == nil or dest == nil then return nil end
                 local found = false
-                for _, comp in ipairs(components) do
+                for _idx, comp in ipairs(components) do
                     if comp.id == id then
                         comp.td = math.floor(dest / 16)
                         comp.ta = dest % 16
@@ -513,7 +513,7 @@ end
 ---@param info CbzJpegInfo
 local function finishInfo(info)
     local max_h, max_v = 1, 1
-    for _, comp in ipairs(info.components) do
+    for _idx, comp in ipairs(info.components) do
         if comp.h > max_h then max_h = comp.h end
         if comp.v > max_v then max_v = comp.v end
     end
@@ -542,7 +542,7 @@ local function rewriteHeaders(headers, width, height, components)
         if headers:sub(i, i + 3) == "SOF0" then
             local nf = #components
             local sof = "\255\192" .. put16(8 + 3 * nf) .. string.char(8) .. put16(height) .. put16(width) .. string.char(nf)
-            for _, comp in ipairs(components) do
+            for _idx, comp in ipairs(components) do
                 sof = sof .. string.char(comp.id, comp.h * 16 + comp.v, comp.qt)
             end
             out[#out + 1] = sof
@@ -649,8 +649,8 @@ function Band.extract(data, y, h)
     for c = 1, #info.components do
         enc_preds[c] = 0
     end
-    for _, row_mcus in ipairs(kept) do
-        for _, mcu in ipairs(row_mcus) do
+    for _row, row_mcus in ipairs(kept) do
+        for _col, mcu in ipairs(row_mcus) do
             local block_i = 1
             for c, comp in ipairs(info.components) do
                 local dc_table = info.dc[comp.td]

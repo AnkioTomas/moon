@@ -296,6 +296,7 @@ function Source:syncBooksAsync(opts, cb)
             if cancelled then return end
             if not wire then cb(nil, err); return end
             local mapped = Mapper.list(wire)
+            if not mapped then cb(nil, _("响应无效")); return end
             for _idx, book in ipairs(mapped.data) do books[#books + 1] = book end
             if #books < mapped.count and #wire.data > 0 then
                 report(T(_("正在拉取书架（第 %1 页）"), page), #books, mapped.count)
@@ -357,10 +358,13 @@ function Source:pullStatsAsync(cb)
             cb(nil, err)
             return
         end
+        local stats = type(wire.data) == "table" and wire.data.stats
+        if type(stats) ~= "table" then cb(nil, _("响应无效")); return end
         local rows = {}
         -- data.stats[] = { book_filename, start_time, duration, page, total_pages }，按书按天聚合
-        for _idx, item in ipairs(wire.data.stats) do
-            if item.duration > 0 then
+        for _idx, item in ipairs(stats) do
+            if type(item) == "table" and type(item.book_filename) == "string" and type(item.duration) == "number"
+                and item.duration > 0 then
                 rows[#rows + 1] = {
                     source_id = self.id,
                     stable_id = item.book_filename,
@@ -400,7 +404,9 @@ function Source:pullNotesAsync(identity, cb)
             cb(nil, err)
             return
         end
-        cb(wire.data.annotations, nil, { authoritative = true })
+        local annotations = type(wire.data) == "table" and wire.data.annotations
+        if type(annotations) ~= "table" then cb(nil, _("响应无效")); return end
+        cb(annotations, nil, { authoritative = true })
     end)
 end
 
@@ -414,9 +420,11 @@ function Source:getProgressAsync(identity, cb)
             cb(nil, err)
             return
         end
-        local pos = Mapper.progress(wire)
+        local pos, invalid = Mapper.progress(wire)
         if pos then
             cb(pos)
+        elseif invalid then
+            cb(nil, _("响应无效"))
         else
             cb(nil, nil, { empty = true })
         end

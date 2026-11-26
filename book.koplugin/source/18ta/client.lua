@@ -16,41 +16,13 @@ local TIMEOUT = require("http.timeout").net(1)
 local UA = "Mozilla/5.0"
 
 ---@class T18taClient
----@field cookies table<string, string>
+---@field jar CookieJar 会话 Cookie（WAF 下发，随响应刷新）
 local Client = {}
 Client.__index = Client
 
 ---@return T18taClient
 function Client.new()
-    return setmetatable({ cookies = {} }, Client)
-end
-
---- 把响应里的 Set-Cookie 收进本地 Cookie 表。
----@param res table|nil
----@return boolean 是否收到新 Cookie
-function Client:absorbCookies(res)
-    local got = false
-    for _idx, line in ipairs(Request.headerAll(res, "Set-Cookie")) do
-        local name, value = line:match("^%s*([^=;%s]+)=([^;]*)")
-        if name then
-            self.cookies[name] = value
-            got = true
-        end
-    end
-    return got
-end
-
----@return table<string, string>
-function Client:requestHeaders()
-    local headers = { ["User-Agent"] = UA }
-    local parts = {}
-    for name, value in pairs(self.cookies) do
-        parts[#parts + 1] = name .. "=" .. value
-    end
-    if #parts > 0 then
-        headers.Cookie = table.concat(parts, "; ")
-    end
-    return headers
+    return setmetatable({ jar = require("http.cookie_jar").new() }, Client)
 end
 
 --- GET（WAF 兜底：403 且拿到 Cookie 时重发一次）。
@@ -70,15 +42,15 @@ function Client:get(path, cb)
         cb(body, err, res)
     end
     local function request(retry)
-        local pending = true
+        local pending, seq = true, self.jar.seq
         local inner = Request.get(url, {
-            headers = self:requestHeaders(), timeout = TIMEOUT, cache_ttl = 0,
+            headers = { ["User-Agent"] = UA }, jar = self.jar, timeout = TIMEOUT,
         }, function(body, err, res)
             pending = false
             if cancelled or finished then return end
             job = nil
-            local got = self:absorbCookies(res)
-            if not body and res and res.code == 403 and got and not retry then
+            -- 回调前 Request 已把 Set-Cookie 收进罐：seq 变了就是拿到了新 Cookie。
+            if not body and res and res.code == 403 and self.jar.seq ~= seq and not retry then
                 request(true)
                 return
             end
@@ -112,15 +84,7 @@ function Client:bookAsync(book_id, cb)
     return self:get("/akshtml" .. book_id .. ".html", cb)
 end
 
---- 章节正文页。href 取自目录（/aks/<group>/<id>/<ch>.html）或完整 URL。
----@param path string
----@param cb fun(body: string|nil, err: string|nil)
----@return { cancel: fun() }
-function Client:chapterAsync(path, cb)
-    return self:get(path, cb)
-end
-
---- 一章可能拆成多页；只在同章所有页成功后交付正文。
+--- 一章可能拆成多页；只在同章所有页成功后交付正文。path 取自目录（/aks/<group>/<id>/<ch>.html）或完整 URL。
 ---@param path string
 ---@param cb fun(html: string|nil, err: string|nil)
 ---@return { cancel: fun() }
@@ -128,7 +92,7 @@ function Client:contentAsync(path, cb)
     local handle, parts = {}, {}
     local function fetch(current)
         local pending = true
-        local inner = self:chapterAsync(current, function(html, err)
+        local inner = self:get(current, function(html, err)
             pending = false
             if handle.cancelled then return end
             handle.inner = nil

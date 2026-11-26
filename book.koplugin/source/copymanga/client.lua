@@ -296,8 +296,7 @@ end
 function Client:setCollectAsync(comic_id, collect, cb)
     -- 自动重登后新 token 只写进设置，这里先取最新的，免得拿旧 token 收藏失败。
     if self:_latestToken() == "" then
-        cb(nil, _("请先登录拷贝漫画账号"))
-        return { cancel = function() end }
+        return require("source.base").defer(cb, nil, _("请先登录拷贝漫画账号"))
     end
     local body = Text.formEncode({
         comic_id = comic_id,
@@ -330,8 +329,7 @@ local COLLECT_PAGE = 50
 ---@return { cancel: fun() }
 function Client:collectAllAsync(cb)
     if self:_latestToken() == "" then
-        cb(nil, _("请先登录拷贝漫画账号"))
-        return { cancel = function() end }
+        return require("source.base").defer(cb, nil, _("请先登录拷贝漫画账号"))
     end
     local cancelled, rows, offset = false, {}, 0
     ---@type { cancel: fun() }

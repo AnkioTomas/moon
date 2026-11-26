@@ -10,8 +10,6 @@ kamare 仍是唯一的执行者与写入者：这里不下载、不取消队列�
   handle.add(more)    -- 同一部又有卷入队 / 重试失败项：并进同一条任务，终态清掉重新观察
   handle.cancel()     -- 只停轮询，不动 kamare 队列（队列控制仍走 Cache.queuePause/Resume/Retry）
 
-没有 `workers.tasks`（旧核或单独装扩展）时 track 返回 nil，调用方退回页内进度框。
-
 @module source.kavita.cache_task
 --]]
 
@@ -27,15 +25,9 @@ local PAUSED_SECONDS = 5
 --- 连续这么多拍都看不到本批的队列项、也没落地：kamare 重启 / 队列被清，按中断收尾。
 local MAX_IDLE_TICKS = 5
 
---- 函数内 require：旧核没有 workers.tasks 时返回 nil，不抛错。
----@return table|nil
-local function tasksModule()
-    local ok, mod = pcall(require, "workers.tasks")
-    if ok and type(mod) == "table" and type(mod.enqueue) == "function" and type(mod.get) == "function" then
-        return mod
-    end
-    return nil
-end
+--- 队列任务 → 本批状态与句柄；同 key 再入队时并进去。弱键：任务出队后随之回收。
+---@type table<BookTask, { st: table, handle: table }>
+local tracked = setmetatable({}, { __mode = "k" })
 
 ---@param text string|nil
 local function toast(text)
@@ -46,7 +38,7 @@ end
 --- 队列条目按 chapterId 归一成字符串键（kamare 的键可能是数字）。
 ---@param queue table|nil
 ---@return table
-local function queueEntries(queue)
+function CacheTask.queueEntries(queue)
     local out = {}
     for key, entry in pairs(type(queue) == "table" and queue.entries or {}) do
         out[tostring(key)] = entry
@@ -56,7 +48,7 @@ end
 
 ---@param queue table|nil
 ---@return boolean
-local function queuePaused(queue)
+function CacheTask.queuePaused(queue)
     return type(queue) == "table" and (queue.state == "paused" or queue.pause_reason ~= nil)
 end
 
@@ -72,13 +64,11 @@ end
 local function schedule(st)
     if st.settled or st.timer then return end
     local delay = st.paused and PAUSED_SECONDS or POLL_SECONDS
-    local timer
-    timer = function()
+    st.timer = require("ui.guard").wrap("kavita cache task poll", function()
         st.timer = nil
         st:poll()
-    end
-    st.timer = timer
-    require("ui/uimanager"):scheduleIn(delay, timer)
+    end)
+    require("ui/uimanager"):scheduleIn(delay, st.timer)
 end
 
 --- 本批任务的可变状态：track / 轮询 / handle 共用一份。
@@ -169,7 +159,7 @@ local function newState(opts)
         self.timer = nil
         if self.settled then return end
         local queue = Cache.queueState()
-        local entries = queueEntries(queue)
+        local entries = CacheTask.queueEntries(queue)
         local remaining, queued_any = 0, false
         for _idx, id in ipairs(self.ids) do
             local key = tostring(id)
@@ -192,7 +182,7 @@ local function newState(opts)
             if self.landed[key] and not self.failed[key] then ok_count = ok_count + 1 end
         end
         self.ok_count = ok_count
-        self.paused = queuePaused(queue)
+        self.paused = CacheTask.queuePaused(queue)
         if remaining <= 0 then return self:settle() end
         if self.paused then
             self.idle = 0
@@ -222,16 +212,15 @@ function CacheTask.track(opts)
     local entries = type(opts.entries) == "table" and opts.entries or {}
     if #entries == 0 then return nil end
     if not Cache.available("queue") then return nil end
-    local Tasks = tasksModule()
-    if not Tasks then return nil end
+    local Tasks = require("workers.tasks")
     local series = type(opts.series) == "table" and opts.series or {}
     local key = "cache\0kavita\0" .. tostring(opts.key or series.stable_id or series.title or "series")
 
-    local live = Tasks.get(key)
-    if live and live._cache_state then
-        live._cache_state:add(entries)
-        live._cache_state:emit(nil)
-        return live._cache_handle
+    local live = tracked[Tasks.get(key) or false]
+    if live then
+        live.st:add(entries)
+        live.st:emit(nil)
+        return live.handle
     end
 
     local st = newState(opts)
@@ -260,8 +249,7 @@ function CacheTask.track(opts)
     }
     local queued = Tasks.enqueue(task)
     if not queued then return nil end
-    queued._cache_state = st
-    queued._cache_handle = handle
+    tracked[queued] = { st = st, handle = handle }
     handle.task = queued
     return handle
 end

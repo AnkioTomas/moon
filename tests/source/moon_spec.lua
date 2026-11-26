@@ -52,6 +52,7 @@ package.preload["book.books_db"] = function()
         unsynced = function()
             return rec.marked_deleted and not rec.removed and { rec.marked_deleted } or {}
         end,
+        hasUnsynced = function() return rec.marked_deleted ~= nil and not rec.removed end,
         markSynced = function() return true end,
         get = function() return rec.stored_book end,
         setRead = function(source_id, stable_id, is_read)
@@ -88,6 +89,7 @@ package.preload["book.progress_db"] = function()
             return true
         end,
         unsynced = function() return {} end,
+        hasUnsynced = function() return false end,
     }
 end
 -- 推脏只查脏行存在性：笔记 / 统计这两张表这里没有脏行

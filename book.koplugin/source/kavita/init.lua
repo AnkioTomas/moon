@@ -36,6 +36,7 @@ local VolumeList = require("source.kavita.volume_list")
 local SourceBase = require("source.base")
 local Normalize = require("book.note.normalize")
 local logger = require("utils.log")
+local Text = require("utils.text")
 local _ = require("l10n").get("source.kavita")
 local T = require("ffi/util").template
 
@@ -160,7 +161,7 @@ end
 ---@return string|nil
 local function title(value)
     if type(value) ~= "string" then return nil end
-    value = require("utils.text").trim(value)
+    value = Text.trim(value)
     if value == "" or value:match("^%-?%d+$") then return nil end
     return value
 end
@@ -171,7 +172,7 @@ end
 ---@return string|nil
 local function summary(value)
     if type(value) ~= "string" then return nil end
-    value = require("utils.text").trim(value)
+    value = Text.trim(value)
     return value ~= "" and value or nil
 end
 
@@ -704,7 +705,7 @@ function Source:backfillMeta(series_ids, opts)
     end
     state:saveSetting("done", done)
 
-    local started, index, fails, cancelled, job, timer = os.time(), 0, 0, false, nil, nil
+    local started, index, fails, cancelled, job, timer, guarded_step = os.time(), 0, 0, false, nil, nil, nil
     local writes, last_notify, notify_pending = 0, nil, false
 
     local function notify()
@@ -751,7 +752,7 @@ function Source:backfillMeta(series_ids, opts)
                 -- 单本失败不拖住后面：不推进 checked_at，下次同步接着补。
                 fails = fails + 1
                 if fails >= 3 then return stop() end
-                timer = step
+                timer = guarded_step
                 UIManager:scheduleIn(0.3, timer)
                 return
             end
@@ -768,10 +769,11 @@ function Source:backfillMeta(series_ids, opts)
             notify_pending = true
             if writes % META_FLUSH_EVERY == 0 then state:flush() end
             notify()
-            timer = step
+            timer = guarded_step
             UIManager:scheduleIn(0.3, timer)
         end)
     end
+    guarded_step = require("ui.guard").wrap("kavita backfill meta", step)
 
     self.backfill = { cancel = function()
         cancelled = true
@@ -1013,7 +1015,11 @@ function Source:syncBooksAsync(opts, cb)
         -- 否则没补到的书永远停在「未知作者」。
         self:backfillMeta(ids, { force = opts.force, on_changed = opts.on_changed })
         -- 服务端已读进度同理：网页端 / 别的设备读过，书架也得进「最近阅读」与「已读」。
-        result.pulled = result.pulled + backfillRead(self.id, reads)
+        -- 逐行写各自成败，包一层只为合成一次提交。
+        require("utils.db").transaction(function()
+            result.pulled = result.pulled + backfillRead(self.id, reads)
+            return true
+        end)
         -- 书架投影预热：开桌面必跑本方法，进书架时命中记忆（05 A1）。失败不影响同步结果，
         -- 但不能静默：同一故障本进程只记一行（缓存模块异常通常意味着 kamare 侧坏了）。
         local function settle(changed)
@@ -1258,42 +1264,13 @@ local function tocFromVolumes(series, volumes)
     return #toc > 0 and toc or nil
 end
 
---- 按需刷新目录：点开系列时立刻问一次服务器（各卷 pagesRead / 卷名 / 卷摘要），
---- 绕过 6 小时目录缓存，但不拉 series metadata（那是开书补资料的事）。
---- 失败不打扰用户：调用方继续用缓存。
+--- 在线拉目录并落缓存；默认顺带补 series metadata。
+--- 点开系列时的按需刷新传 skip_meta：只要各卷 pagesRead / 卷名 / 卷摘要，失败时调用方继续用缓存。
 ---@param series_id string
 ---@param cb fun(toc: BookChapter[]|nil, err: string|nil)
+---@param skip_meta boolean|nil
 ---@return { cancel: fun() }
-function Source:refreshToc(series_id, cb)
-    local cancelled = false
-    ---@type HttpJob
-    local job
-    local function done(toc, err)
-        if not cancelled then cb(toc, err) end
-    end
-    job = self.client:json("GET", "/api/Series/" .. series_id, nil, nil, function(series, err)
-        if not series then return done(nil, err) end
-        job = self.client:json("GET", "/api/Series/volumes", { seriesId = series_id }, nil,
-            function(volumes, verr)
-                if not volumes then return done(nil, verr) end
-                local toc = tocFromVolumes(series, volumes)
-                if not toc then return done(nil, _("这本书在 Kavita 上没有可读的卷")) end
-                if not require("source.toc").put(self.id, series_id, toc) then
-                    return done(nil, _("章节目录保存失败"))
-                end
-                done(toc)
-            end)
-    end)
-    return { cancel = function()
-        cancelled = true
-        if job and job.cancel then job:cancel() end
-    end }
-end
-
----@param series_id string
----@param cb fun(toc: BookChapter[]|nil, err: string|nil)
----@return { cancel: fun() }
-function Source:fetchToc(series_id, cb)
+function Source:fetchToc(series_id, cb, skip_meta)
     local cancelled = false
     ---@type HttpJob
     local job
@@ -1311,6 +1288,7 @@ function Source:fetchToc(series_id, cb)
             if not require("source.toc").put(self.id, series_id, toc) then
                 return cb(nil, _("章节目录保存失败"))
             end
+            if skip_meta then return cb(toc) end
             step("GET", "/api/Series/metadata", { seriesId = series_id }, function(metadata)
                 if metadata then
                     require("book.store").rememberMany({
@@ -1683,10 +1661,10 @@ function Source:openBookAsync(identity, _opts, cb)
         -- 点开系列 = 想看最新进度：目录缓存 6 小时内不会自己更新，这里立刻问一次服务器
         -- （各卷 pagesRead），拿到后原地刷新选卷列表；离线 / 失败继续用缓存，不打断选择。
         if cached_toc and picker and type(picker.refreshToc) == "function" and online() then
-            job = self:refreshToc(series_id, function(fresh)
+            job = self:fetchToc(series_id, function(fresh)
                 if cancelled or not fresh then return end
                 picker.refreshToc(fresh)
-            end)
+            end, true)
         end
     end)
     return { cancel = function()
@@ -2060,19 +2038,7 @@ end
 -- 绝不把没验过的坐标写进 doc_settings（错位的划线比不画更糟）。
 -- ---------------------------------------------------------------------------
 
---- crengine 的 `.N` 单位是 codepoint（lChar32），不是 UTF-8 字节；
---- LuaJIT 没有 utf8 库，只能数前导字节。
----@param s string
----@return integer
-local function codepointLength(s)
-    local count, i, len = 0, 1, #s
-    while i <= len do
-        local byte = s:byte(i)
-        if byte < 0x80 or byte >= 0xC0 then count = count + 1 end
-        i = i + 1
-    end
-    return count
-end
+-- crengine 的 `.N` 单位是 codepoint（lChar32），不是 UTF-8 字节：偏移一律用 Text.len 数。
 
 ---@param s string
 ---@param i integer
@@ -2214,11 +2180,11 @@ local function mapRange(nodes, start_byte, end_byte)
         local seg_start, seg_end = acc + 1, acc + #node.text
         if not k0 and start_byte >= seg_start and start_byte <= seg_end then
             k0 = node.k
-            off0 = codepointLength(node.text:sub(1, start_byte - seg_start))
+            off0 = Text.len(node.text:sub(1, start_byte - seg_start))
         end
         if end_byte >= seg_start and end_byte <= seg_end then
             k1 = node.k
-            off1 = codepointLength(node.text:sub(1, end_byte - seg_start + 1))
+            off1 = Text.len(node.text:sub(1, end_byte - seg_start + 1))
         end
         acc = seg_end
     end
@@ -2267,7 +2233,7 @@ local function locatePrefix(document, element, selected)
     local nodes = textNodes(document, element)
     if #nodes == 0 then return nil end
     local concat = concatNodes(nodes)
-    local total = codepointLength(selected)
+    local total = Text.len(selected)
     local element_end = trimEndByte(concat)
     for take = total, 1, -1 do
         local prefix = codepointSub(selected, 1, take)
@@ -2299,7 +2265,7 @@ local function locateTail(document, element, selected)
     local nodes = textNodes(document, element)
     if #nodes == 0 then return nil end
     local concat = concatNodes(nodes)
-    local total = codepointLength(selected)
+    local total = Text.len(selected)
     local element_start = trimStartByte(concat)
     for take = total, 1, -1 do
         local suffix = codepointSub(selected, total - take + 1, total)
@@ -2586,7 +2552,7 @@ local function annotationPayload(dto)
     local text = dto.selectedText
     -- 没有选中文本的条目（Kavita 自己也不许这么建）画不出来，但**保留成未定位占位**：
     -- 它的 id 必须进远端全量集合，否则 mergeAnnotations 会把本地带该 id 的那条当成「远端已删」抹掉。
-    local blank = type(text) ~= "string" or require("utils.text").trim(text) == ""
+    local blank = type(text) ~= "string" or Text.trim(text) == ""
     if blank then text = "" end
     local drawer
     if not blank then drawer = "lighten" end
@@ -2681,7 +2647,7 @@ end
 ---@return integer
 local function utf16Length(s)
     local n = 0
-    for ch in s:gmatch("[%z\1-\127\194-\244][\128-\191]*") do n = n + (#ch == 4 and 2 or 1) end
+    for ch in s:gmatch(Text.UTF8_CHAR) do n = n + (#ch == 4 and 2 or 1) end
     return n
 end
 

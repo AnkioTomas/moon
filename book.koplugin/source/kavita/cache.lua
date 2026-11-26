@@ -11,6 +11,7 @@ kamare 的模块一律在函数内 `pcall(require, …)`，绝不顶层 require�
 local _ = require("l10n").get("source.kavita")
 local T = require("ffi/util").template
 local logger = require("utils.log")
+local Text = require("utils.text")
 
 local Cache = {}
 
@@ -56,15 +57,6 @@ local function logOnce(key, text)
     if logged[key] then return end
     logged[key] = true
     logger.info(text)
-end
-
---- 记一行警告；同一 key 在本进程内只记一次（真实故障不能静默，也不能刷屏）。
----@param key string
----@param text string
-local function warnOnce(key, text)
-    if logged[key] then return end
-    logged[key] = true
-    logger.warn(text)
 end
 
 --- 能力名清单（排序后按分隔符拼接），日志与设置页共用一份口径。
@@ -300,36 +292,26 @@ function Cache.available(cap)
 end
 
 --- 源配置：只读 base_url / api_key，其它键与缓存无关。
---- settings 模块加载失败是真故障（打包 / 安装坏了）：照旧降级成「未配置」，但要留一行日志。
 ---@return table
 local function config()
-    local ok, settings = pcall(require, "utils.settings")
-    if not ok or type(settings) ~= "table" or type(settings.getSource) ~= "function" then
-        warnOnce("config", "kavita cache settings unavailable")
-        return {}
-    end
-    local value = settings.getSource("kavita")
+    local value = require("utils.settings").getSource("kavita")
     return type(value) == "table" and value or {}
 end
 
---- 与 Client.new 同口径：去尾斜杠、去首尾空白。
+--- 与 Client.new 同口径：去尾斜杠、去首尾空白；空串当未给。
 ---@param url any
 ---@return string|nil
 local function normBase(url)
-    if type(url) ~= "string" then return nil end
-    local text = url:gsub("^%s+", ""):gsub("%s+$", ""):gsub("/+$", "")
-    if text == "" then return nil end
-    return text
+    local text = Text.rtrimSlashes(Text.trim(url))
+    return text ~= "" and text or nil
 end
 
 --- API Key 里的空白一律去掉（粘贴时常带换行 / 空格）。
 ---@param key any
 ---@return string|nil
 local function normKey(key)
-    if type(key) ~= "string" then return nil end
-    local text = key:gsub("%s+", "")
-    if text == "" then return nil end
-    return text
+    local text = Text.stripWhitespace(key)
+    return text ~= "" and text or nil
 end
 
 --- 当前服务器；未配置返回 nil（调用方按 unknown_server 静默降级）。
@@ -355,30 +337,19 @@ local KAMARE = {
 }
 
 --- 取能力对应的函数：缺能力 / 缺函数一律 unsupported（调用点不各写一套）。
+--- 队列控制是同一个能力（queue_control）下的三个动作，由 fn_name 指定函数。
 ---@param name string
+---@param fn_name string|nil 缺省为 KAMARE[name]
 ---@return table|nil mod, string|nil code, function|nil fn
-local function capability(name)
+local function capability(name, fn_name)
     local probe = Cache.probe()
     if not probe.ok then return nil, "unsupported" end
     if (probe.capabilities or {})[name] ~= true then return nil, "unsupported" end
     local mod = loadModule("kamarecache")
     if not mod then return nil, "unsupported" end
-    local fn = mod[KAMARE[name]]
+    local fn = mod[fn_name or KAMARE[name]]
     if type(fn) ~= "function" then return nil, "unsupported" end
     return mod, nil, fn
-end
-
---- 队列控制是同一个能力下的三个动作。
----@param fn_name string
----@return table|nil mod, string|nil code, function|nil fn
-local function queueControl(fn_name)
-    local probe = Cache.probe()
-    if not probe.ok or (probe.capabilities or {}).queue_control ~= true then
-        return nil, "unsupported"
-    end
-    local mod = loadModule("kamarecache")
-    if not mod or type(mod[fn_name]) ~= "function" then return nil, "unsupported" end
-    return mod, nil, mod[fn_name]
 end
 
 --- 写：把 moon 的服务器地址 + API Key 镜像给 kamare（幂等、不联网、不传 name）。
@@ -705,7 +676,7 @@ end
 function Cache.queuePause()
     local base_url = targetBase()
     if not base_url then return nil, "unknown_server" end
-    local mod, code, fn = queueControl("queue_pause")
+    local mod, code, fn = capability("queue_control", "queue_pause")
     if not mod then return nil, code end
     ensureMirror(true)
     local ok, err, message = fn(base_url)
@@ -719,7 +690,7 @@ end
 function Cache.queueResume()
     local base_url = targetBase()
     if not base_url then return nil, "unknown_server" end
-    local mod, code, fn = queueControl("queue_resume")
+    local mod, code, fn = capability("queue_control", "queue_resume")
     if not mod then return nil, code end
     ensureMirror(true)
     local ok, err, message = fn(base_url)
@@ -734,7 +705,7 @@ end
 function Cache.queueRetry(chapter_ids)
     local base_url = targetBase()
     if not base_url then return nil, "unknown_server" end
-    local mod, code, fn = queueControl("queue_retry")
+    local mod, code, fn = capability("queue_control", "queue_retry")
     if not mod then return nil, code end
     ensureMirror(true)
     local ok, err, message = fn(base_url, chapter_ids)

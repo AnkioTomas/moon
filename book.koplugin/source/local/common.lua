@@ -144,19 +144,15 @@ local function stem(rel)
     return (sidecarKey(rel):gsub("%.[^.]+$", ""))
 end
 
-local readFile = require("utils.fs").read
+local Fs = require("utils.fs")
+local readFile = Fs.read
 
 ---@param path string
 ---@param data string
 ---@return boolean
 local function writeFile(path, data)
     ensureParent(path)
-    local file = io.open(path, "wb")
-    local written = file and file:write(data)
-    local closed = file and file:close()
-    if written and closed then return true end
-    os.remove(path)
-    return false
+    return Fs.write(path, data) == true
 end
 
 ---@param v any
@@ -169,12 +165,6 @@ end
 --- 一位小数的百分比只给静读天下显示。它跳转看的是 `#` 后面的章内字符数；写成 0 会把书拉回章首。
 --- 没有真实偏移时省略 `@分卷#偏移`。固定版式没有字符偏移，页码放在章号那个位置，和百分比一起写。
 local PAGED_EXT = { pdf = true, djvu = true, cbz = true, cbt = true, xps = true }
-
-local function utf8len(text)
-    local count = 0
-    for _ch in text:gmatch(Text.UTF8_CHAR) do count = count + 1 end
-    return count
-end
 
 local function encodeProgress(pos)
     local ts = tonumber(pos.updated_at) or os.time()
@@ -246,7 +236,7 @@ local function captureProgress(pos, ui)
     local extra = type(pos.extra) == "table" and pos.extra or {}
     extra.chapter_idx = idx
     extra.volume = tonumber(extra.volume) or 0
-    extra.offset = utf8len(text)
+    extra.offset = Text.len(text)
     extra.at_fraction = tonumber(pos.fraction) or 0
     pos.extra = extra
     return pos
@@ -301,7 +291,7 @@ local function refineFlow(pos, doc)
         if not ok_xp or type(xp) ~= "string" then return nil end
         local ok_text, text = pcall(doc.getTextFromXPointers, doc, start_xp, xp)
         if not ok_text or type(text) ~= "string" then return nil end
-        return utf8len(text)
+        return Text.len(text)
     end
     local last = math.max(start_page, end_page - 1)
     local end_count = charsUntil(last)
@@ -342,21 +332,34 @@ local function refinePosition(pos, ui)
 end
 
 
---- 逐项串行异步遍历：step(item, next, index) 处理完一项调 next()，全部处理完调 done()。
+--- 有限并发异步遍历：step(item, next, index) 处理完一项调 next()，全部处理完调 done()。
+--- 最多 limit 路同时 step（缺省 1 即串行）；step 同步回调 next 时在循环里排空，不递归、不涨栈。
 ---@param list any[]
 ---@param step fun(item: any, next: fun(), index: integer)
----@param done fun(err: any)
-local function eachAsync(list, step, done)
-    local index = 0
-    local function next_item()
-        index = index + 1
-        local item = list[index]
-        if item == nil then
-            return done()
+---@param done fun()
+---@param limit integer|nil
+local function eachAsync(list, step, done, limit)
+    limit = limit or 1
+    local next_i, live, finished, pumping = 1, 0, false, false
+    local function pump()
+        if finished or pumping then return end
+        pumping = true
+        while live < limit and next_i <= #list do
+            local i = next_i
+            next_i = next_i + 1
+            live = live + 1
+            step(list[i], function()
+                live = live - 1
+                pump()
+            end, i)
         end
-        step(item, next_item, index)
+        pumping = false
+        if next_i > #list and live == 0 then
+            finished = true
+            done()
+        end
     end
-    next_item()
+    pump()
 end
 
 --- 封面缓存路径（存在即封面可用，无需入库）。

@@ -3,7 +3,7 @@ iRead（iread.ankio.net）数据源。
 
 个人 Token 鉴权（setting.lua）。书架是服务端的收藏记录，书城搜索的书加入书库时经 /book/favourite 收藏，本地删除会上行；
 目录 / 正文按章落盘走公共 source/chapter；进度只到章，开书拉取、关书上报。笔记和统计没有接口。
-服务端的书记录（bookUrl / sourceId 等）是目录、正文接口的必要参数，随书籍元数据保存；进度写入仍强制拉新行。
+服务端的书记录（bookUrl / sourceId 等）是目录、正文接口的必要参数，随书籍元数据保存；拉进度强制拉新行，写进度用缓存行（只带 id 与位置）。
 
 @module koplugin.book.source.iread
 --]]
@@ -160,15 +160,8 @@ function Source:searchAsync(keyword, cb)
     return Client.searchAsync(keyword, function(rows, err)
         if not rows then cb(nil, err); return end
         self.found = self.found or {}
-        local uniq, seen = {}, {}
-        for _idx, row in ipairs(rows) do
-            if not seen[row.name] then
-                seen[row.name] = true
-                self.found[row.name] = row
-                uniq[#uniq + 1] = row
-            end
-        end
-        cb({ data = Mapper.shelfList(uniq) })
+        for _idx, row in ipairs(rows) do self.found[row.name] = row end
+        cb({ data = Mapper.shelfList(rows) })
     end)
 end
 
@@ -210,13 +203,7 @@ function Source:browseAsync(opts, cb)
                 for _idx, row in ipairs(rows) do self.found[row.name] = row end
                 done(Mapper.shelfList(rows), nil, paginated)
             end)
-        end, limit, groups, function(result, err)
-            if handle.cancelled then return end
-            if result then
-                for index = #result.data, limit + 1, -1 do result.data[index] = nil end
-            end
-            cb(result, err)
-        end)
+        end, limit, groups, cb)
     end
     local sid = tonumber((opts.node or ""):match("^(%d+):"))
     local cached = sid and self.explore_rules and self.explore_rules[sid]
@@ -243,7 +230,7 @@ function Source:browseAsync(opts, cb)
 end
 
 --- 取书架行再交给 fn(row)（返回它发起的任务，取消时一并取消）；fresh 为真强制重拉书架
---- （上报进度要覆盖整行，不能用旧行）。
+--- （拉云端进度要读最新行）。
 ---@param identity BookIdentity
 ---@param fresh boolean
 ---@param cb function
@@ -289,7 +276,8 @@ end
 
 function Source:putProgressAsync(identity, pos, cb)
     if not self:configured() then return SourceBase.defer(cb, nil, _("未登录 iRead")) end
-    return self:withRow(identity, true, cb, function(row)
+    -- 上报只带书 id 与位置字段，缓存行够用；写后 saveProgressAsync 自己读回书架确认。
+    return self:withRow(identity, false, cb, function(row)
         local idx = tonumber(pos.chapter_idx) or tonumber(identity.chapter_idx)
         if not idx then cb(nil, _("缺少阅读章节位置")); return nil end
         local toc = Toc.read(self.id, identity.stable_id)

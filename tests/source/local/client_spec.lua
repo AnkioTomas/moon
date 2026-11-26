@@ -243,16 +243,6 @@ package.preload["book.books_db"] = function()
                 if row.path == path then return row end
             end
         end,
-        stableIdsByMd5 = function(source_id, md5)
-            local out = {}
-            for _, row in pairs(db_rows) do
-                if row.source_id == source_id and row.md5 == md5 and (row.deleted or 0) == 0 then
-                    out[#out + 1] = row.stable_id
-                end
-            end
-            table.sort(out)
-            return out
-        end,
         moveCandidatesByMd5 = function(source_id, md5)
             local out = {}
             for _, row in pairs(db_rows) do
@@ -421,6 +411,8 @@ for _, name in ipairs({
 end
 
 local Client = require("source.local.client")
+-- books 表是内存假实现，事务只需直通
+require("utils.db").transaction = function(fn) return fn() end
 
 -- 可控时钟：自动扫描节流断言用
 local real_time = os.time
@@ -767,11 +759,8 @@ do
         source_id = "local", stable_id = "/books/old_name.epub", md5 = "digest-a", title = "已有元数据",
     }
     local BookDB = require("book.books_db")
-    -- 模拟扫描发现同 md5 的新路径（partialMD5 在此测试环境恒为 nil，直接调用 DB 层验证原地改名的效果）
-    local by_md5 = BookDB.stableIdsByMd5("local", "digest-a")
-    Assert.eq(by_md5[1], "/books/old_name.epub")
     -- 文件移进 sub/deep：category/series 由新位置派生，随 stable_id 一并刷新
-    BookDB.renameStableId("local", by_md5[1], "/books/sub/deep/new_name.epub", "sub", "deep")
+    BookDB.renameStableId("local", "/books/old_name.epub", "/books/sub/deep/new_name.epub", "sub", "deep")
     Assert.is_nil(db_rows[rowKey("local", "/books/old_name.epub")])
     local renamed = db_rows[rowKey("local", "/books/sub/deep/new_name.epub")]
     Assert.not_nil(renamed)

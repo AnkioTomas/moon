@@ -19,8 +19,26 @@ local function libraryFingerprint(cfg)
     }, "\0")
 end
 
+--- 落盘服务器与令牌。换服务器 / 令牌保留本地记录，先准备同步；否则只 reload。
+---@param cfg table 当前配置（就地改）
+---@param next_cfg { base_url: string|nil, token: string|nil }
+---@return boolean 已保存
+local function apply(cfg, next_cfg)
+    local function save()
+        cfg.base_url, cfg.token = next_cfg.base_url, next_cfg.token
+        require("utils.settings").saveSource(SOURCE_ID, cfg)
+    end
+    if libraryFingerprint(cfg) == libraryFingerprint(next_cfg) then
+        save()
+        require("source.registry").reload()
+        return true
+    end
+    if require("source.logout").replaceLibrary(SOURCE_ID, save) then return true end
+    require("ui.themes.widgets.toast"):new{ text = _("准备本地同步失败"), timeout = 3 }:show()
+    return false
+end
+
 --- 弹出单字段输入框修改 Moon 配置项并落盘。
---- 换服务器 / 令牌保留本地记录，先准备同步；否则只 reload。
 ---@param key string 配置字段名
 ---@param title string 对话框标题
 ---@param hint string 输入框提示
@@ -33,21 +51,9 @@ local function edit(key, title, hint, password, normalize)
         fields = { { text = tostring(cfg[key] or ""), hint = hint, text_type = password and "password" or nil } },
         ok_text = _("保存"),
         callback = function(value)
-            local before = libraryFingerprint(cfg)
             local next_cfg = { base_url = cfg.base_url, token = cfg.token }
             next_cfg[key] = normalize(value)
-            local function save()
-                cfg[key] = next_cfg[key]
-                require("utils.settings").saveSource(SOURCE_ID, cfg)
-            end
-            if before ~= libraryFingerprint(next_cfg) then
-                if not require("source.logout").replaceLibrary(SOURCE_ID, save) then
-                    require("ui.themes.widgets.toast"):new{ text = _("准备本地同步失败"), timeout = 3 }:show()
-                end
-            else
-                save()
-                require("source.registry").reload()
-            end
+            apply(cfg, next_cfg)
         end,
     }:show()
 end
@@ -106,8 +112,7 @@ end
 
 --- 自绘连接表单。
 function Setting.open()
-    local MoonSettings = require("utils.settings")
-    local cfg = MoonSettings.getSource(SOURCE_ID)
+    local cfg = require("utils.settings").getSource(SOURCE_ID)
     require("ui.themes.widgets.input"):new{
         title = _("服务器与令牌"),
         fields = {
@@ -116,22 +121,9 @@ function Setting.open()
         },
         ok_text = _("保存"),
         callback = function(base_url, token)
-            local before = libraryFingerprint(cfg)
-            local next_cfg = { base_url = Text.stripWhitespace(base_url), token = Text.stripWhitespace(token) }
-            local function save()
-                cfg.base_url, cfg.token = next_cfg.base_url, next_cfg.token
-                MoonSettings.saveSource(SOURCE_ID, cfg)
+            if apply(cfg, { base_url = Text.stripWhitespace(base_url), token = Text.stripWhitespace(token) }) then
+                require("ui.themes.widgets.toast"):new{ text = _("已保存"), timeout = 2 }:show()
             end
-            if before ~= libraryFingerprint(next_cfg) then
-                if not require("source.logout").replaceLibrary(SOURCE_ID, save) then
-                    require("ui.themes.widgets.toast"):new{ text = _("准备本地同步失败"), timeout = 3 }:show()
-                    return
-                end
-            else
-                save()
-                require("source.registry").reload()
-            end
-            require("ui.themes.widgets.toast"):new{ text = _("已保存"), timeout = 2 }:show()
         end,
     }:show()
 end

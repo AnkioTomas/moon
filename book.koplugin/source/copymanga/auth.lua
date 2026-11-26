@@ -94,13 +94,12 @@ end
 ---@param username string
 ---@param password string
 ---@param cb fun(ok: boolean|nil, err: string|nil, rejected: boolean|nil) rejected = 服务端拒绝（非网络错误）
----@return { cancel: fun() }|nil
+---@return { cancel: fun() }
 function Auth.loginAsync(username, password, cb)
     username = Text.stripWhitespace(username)
     password = tostring(password or "")
     if username == "" or password == "" then
-        cb(nil, _("请输入账号和密码"))
-        return nil
+        return require("source.base").defer(cb, nil, _("请输入账号和密码"))
     end
 
     local current = cfg()

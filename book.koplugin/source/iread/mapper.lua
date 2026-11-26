@@ -6,7 +6,6 @@ iRead 数据映射（纯函数）。
 @module koplugin.book.source.iread.mapper
 --]]
 
-local JSON = require("json")
 local Text = require("utils.text")
 
 local Mapper = {}
@@ -57,13 +56,13 @@ function Mapper.readPos(row)
     return { index = index, title = type(title) == "string" and title ~= "" and title or nil, offset = offset }
 end
 
---- 目录：按服务端顺序，uid 是 0 基章序号；raw 是章节对象原样 JSON（开章接口要整个带回）。
+--- 目录：按服务端顺序，uid 是 0 基章序号（开章接口只要书 id 与序号）。
 ---@param rows table[]
 ---@return BookChapter[]
 function Mapper.toc(rows)
     local toc = {}
     for i, row in ipairs(rows) do
-        toc[i] = { idx = i, uid = tostring(i - 1), title = row.title, raw = JSON.encode(row) }
+        toc[i] = { idx = i, uid = tostring(i - 1), title = row.title }
     end
     return toc
 end

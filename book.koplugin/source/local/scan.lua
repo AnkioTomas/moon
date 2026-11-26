@@ -156,8 +156,9 @@ end
 ---@param full_snapshot boolean|nil
 ---@param kept Book[]|nil 读不了的子目录下原有的在架行：不在快照里也照留
 ---@param root string|nil 当前书库根；全量对账时用来收新根外的待重匹配行
+---@param moves { [1]: string, [2]: string }[] 收集改名的产物搬迁，提交后再动盘
 ---@return boolean ok, string|nil err
-local function commitFiles(files, known, full_snapshot, kept, root)
+local function writeFiles(files, known, full_snapshot, kept, root, moves)
     local BookDB = require("book.books_db")
     for _idx, f in ipairs(files) do
         local cached = known[f.path]
@@ -169,7 +170,7 @@ local function commitFiles(files, known, full_snapshot, kept, root)
             if not BookDB.renameStableId(SOURCE_ID, from_id, f.path, f.category, f.series) then
                 return false, "rename " .. f.path
             end
-            moveBookArtifacts(from_id, f.path)
+            moves[#moves + 1] = { from_id, f.path }
         end
         if full_snapshot then
             f.source_id = SOURCE_ID
@@ -227,16 +228,31 @@ local function commitFiles(files, known, full_snapshot, kept, root)
     return true
 end
 
---- 把一条 cover_tried 写进 local_scan（补齐逐本落盘，中断后续跑）。
+--- writeFiles 包一个事务（一批几百条语句合成一次提交）；改名的产物在提交成功后才搬。
+---@return boolean ok, string|nil err
+local function commitFiles(files, known, full_snapshot, kept, root)
+    local moves, err = {}, nil
+    local ok = require("utils.db").transaction(function()
+        local done
+        done, err = writeFiles(files, known, full_snapshot, kept, root, moves)
+        return done
+    end)
+    if not ok then return false, err or "commit" end
+    for _idx, move in ipairs(moves) do moveBookArtifacts(move[1], move[2]) end
+    return true
+end
+
+--- 把一批 cover_tried 写进 local_scan（一个事务；补齐中断后按已落盘的续跑）。
 ---@param index LocalScanIndex
----@param path string
----@param fp string|nil
----@param md5 string|nil
-local function markCoverTried(index, path, fp, md5)
-    local was = index[path]
-    ScanDB.save(index, {
-        { path = path, fp = fp or (was and was.fp) or "", md5 = md5 or (was and was.md5), cover_tried = true },
-    }, true)
+---@param items { path: string, fp: string|nil, md5: string|nil }[]
+local function markCoverTried(index, items)
+    local rows = {}
+    for i, item in ipairs(items) do
+        local was = index[item.path]
+        rows[i] = { path = item.path, fp = item.fp or (was and was.fp) or "", md5 = item.md5 or (was and was.md5),
+            cover_tried = true }
+    end
+    if rows[1] then ScanDB.save(index, rows, true) end
 end
 
 --- 补齐：缺封面且未试过的在架本地书，子进程开引擎提封面并升级元数据；已有封面只记 tried。
@@ -275,16 +291,15 @@ function Scan.enrichAsync(self, cb, report)
     local job
     local function start()
         local opening
-        local todo = {}
+        local todo, tried = {}, {}
         for _idx, item in ipairs(pending) do
-            if item.has_cover then
-                markCoverTried(index, item.path, item.fp, item.md5)
-            elseif not skip[item.path] then
-                todo[#todo + 1] = item
+            if item.has_cover or skip[item.path] then
+                tried[#tried + 1] = item
             else
-                markCoverTried(index, item.path, item.fp, item.md5)
+                todo[#todo + 1] = item
             end
         end
+        markCoverTried(index, tried)
         if #todo == 0 then return cb() end
         report(_("正在补齐封面…"), 0, #todo)
         job = Job.run(function(progress)
@@ -312,8 +327,8 @@ function Scan.enrichAsync(self, cb, report)
                 opening = value or nil
             end,
             on_done = function(result)
+                markCoverTried(index, result.books or {})
                 for _idx, f in ipairs(result.books or {}) do
-                    markCoverTried(index, f.path, f.fp, f.md5)
                     local row = f.title and f.title ~= "" and BookDB.get(SOURCE_ID, f.path)
                     local name = f.path:match("([^/]+)$") or f.path
                     -- 只升级仍是文件名兜底的行，用户改过的书名 / 已有元数据不覆盖
@@ -333,7 +348,7 @@ function Scan.enrichAsync(self, cb, report)
                 if opening and not skip[opening] then
                     require("utils.log").warn("book local enrich crashed; skip", opening, err)
                     skip[opening] = true
-                    markCoverTried(index, opening)
+                    markCoverTried(index, { { path = opening } })
                     -- 已完成的书不在 pending 里重做：只留下 opening 之后的
                     local rest = {}
                     local seen_crash = false

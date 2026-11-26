@@ -54,16 +54,13 @@ local _ = require("gettext")
 
 local Chapter = {}
 
---- 章节变体（双语对照）：上层注入 fun(identity, idx, path): string|nil，返回要打开的替代文件。
----@type fun(identity: BookIdentity, idx: integer, path: string): string|nil
-Chapter.variant = nil
-
+--- 章节变体（双语对照等）：经挂点 reader.chapter_variant 取替代文件，没有就开原章。
 ---@param identity BookIdentity
 ---@param idx integer
 ---@param path string
 ---@return string
 local function variant(identity, idx, path)
-    return Chapter.variant and Chapter.variant(identity, idx, path) or path
+    return require("utils.extension").call("reader.chapter_variant", identity, idx, path) or path
 end
 local lfs = require("libs/libkoreader-lfs")
 -- 临时文档（如未购买提示）以此打头：能打开，但不算缓存，下次仍会重新拉正文。
@@ -356,19 +353,8 @@ local function payloadWords(payload)
     else
         return 0
     end
-    local plain = require("utils.text").stripHtml(html)
-    if plain == "" then return 0 end
-    -- 按 UTF-8 字符计：汉字一字符，ASCII 一字符；不追求语言学精度。
-    local n, i = 0, 1
-    while i <= #plain do
-        local c = plain:byte(i)
-        if c < 128 then i = i + 1
-        elseif c < 224 then i = i + 2
-        elseif c < 240 then i = i + 3
-        else i = i + 4 end
-        n = n + 1
-    end
-    return n
+    local Text = require("utils.text")
+    return Text.len(Text.stripHtml(html))
 end
 
 --- 确保第 idx 章正文已在本地：已就绪则直接用，否则拉正文并落盘。

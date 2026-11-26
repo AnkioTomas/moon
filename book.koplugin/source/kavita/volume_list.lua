@@ -18,6 +18,7 @@ Kavita 卷列表：选卷阅读 + 缓存管理（04 A1–A9 / 07 A1–A7）。
 local _ = require("l10n").get("source.kavita")
 local T = require("ffi/util").template
 local Cache = require("source.kavita.cache")
+local CacheTask = require("source.kavita.cache_task")
 local ContinuePoint = require("source.kavita.continue_point")
 
 -- 主题组件一律函数内 require：没有 kamare 的安装（旧「已下载」列表）不该为了加载
@@ -50,30 +51,11 @@ local function deleteBusy(title, ids)
     return require("source.kavita.busy").run(title, function() return Cache.delete(ids) end)
 end
 
---- 后台任务登记模块：旧包 / 安装不完整缺这个文件时退回页内进度框，不拖垮整个卷列表。
----@return table|nil
-local function cacheTask()
-    local ok, mod = pcall(require, "source.kavita.cache_task")
-    if ok and type(mod) == "table" and type(mod.track) == "function" then return mod end
-    return nil
-end
-
 ---@param capabilities table|nil
 ---@param name string
 ---@return boolean
 local function has(capabilities, name)
     return type(capabilities) == "table" and capabilities[name] == true
-end
-
---- 队列条目按 chapterId 归一成字符串键：kamare 的键可能是数字。
----@param queue table|nil
----@return table
-local function queueEntries(queue)
-    local out = {}
-    for key, entry in pairs(type(queue) == "table" and queue.entries or {}) do
-        out[tostring(key)] = entry
-    end
-    return out
 end
 
 --- 队列里还有会自己往前走的项（失败项会留在 entries 里，直到重试）。
@@ -84,12 +66,6 @@ local function queueRunning(queue)
         if entry.state ~= "failed" then return true end
     end
     return false
-end
-
----@param queue table|nil
----@return boolean
-local function queuePaused(queue)
-    return type(queue) == "table" and (queue.state == "paused" or queue.pause_reason ~= nil)
 end
 
 ---@param entry table|nil
@@ -251,9 +227,9 @@ local function scan(toc, series_id, memo, pending, local_reads, opts)
         show_cache = show_cache,
         queue_capable = queue_capable,
         queue = queue,
-        entries = queueEntries(queue),
+        entries = CacheTask.queueEntries(queue),
         pending = pending,
-        paused = queuePaused(queue),
+        paused = CacheTask.queuePaused(queue),
         statuses = statuses,
         reads = reads,
         plan = plan,
@@ -875,10 +851,7 @@ function VolumeList.pick(series, toc, cb, opts)
     --- 从行尾恢复暂停的队列，都要靠它把「下载中 32%」刷成最终状态。
     startPolling = function()
         if timer or not ctx.queue_capable then return end
-        timer = function()
-            timer = nil
-            tick()
-        end
+        timer = require("ui.guard").wrap("kavita volume list poll", tick)
         require("ui/uimanager"):scheduleIn(1, timer)
     end
 
@@ -890,11 +863,8 @@ function VolumeList.pick(series, toc, cb, opts)
         -- 同一部书的这一批进「后台任务」：顶栏能看到、缓存期间不自动休眠、关掉页面后仍有完成提示。
         -- 页面自己的进度框还在时静音任务，避免收尾时两处同时提示（04 A5）。
         if ctx.queue_capable then
-            local CacheTask = cacheTask()
-            if CacheTask then
-                cache_task = CacheTask.track{ series = series, entries = batchEntries(batch.ids) }
-                if cache_task then cache_task.mute(true) end
-            end
+            cache_task = CacheTask.track{ series = series, entries = batchEntries(batch.ids) }
+            if cache_task then cache_task.mute(true) end
         end
         local ProgressDialog = require("ui.themes.widgets.progress_dialog")
         -- 缺 queue_control 时只留「后台运行」（02 A4）。

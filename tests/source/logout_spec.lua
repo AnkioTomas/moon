@@ -106,17 +106,11 @@ Assert.eq(commits, 0, "清库失败不得提交新凭证")
 Assert.eq(reloads, 0, "清库失败不得激活新源")
 
 -- 换 WebDAV：保留 webdav:// 身份，不动纯本地书，也不清文件。
-local webdav = 0
 package.preload["book.store"] = function()
     return {
         forgetSource = function(id)
             order[#order + 1] = "forget"
             forgotten[#forgotten + 1] = id
-            return forget_ok
-        end,
-        forgetWebdav = function()
-            order[#order + 1] = "forgetWebdav"
-            webdav = webdav + 1
             return forget_ok
         end,
     }
@@ -127,7 +121,6 @@ Logout = require("source.logout")
 prepare_ok, order, reloads, commits = true, {}, 0, 0
 Assert.is_true(Logout.replaceWebdav(commit))
 Assert.eq(table.concat(order, ","), "prepare,abort,invalidate,commit")
-Assert.eq(webdav, 0)
 Assert.eq(prepared[#prepared].prefix, "webdav://")
 Assert.eq(reloads, 1)
 Assert.eq(commits, 1)

@@ -40,7 +40,10 @@ package.preload["ui/network/manager"] = function()
     return { isConnected = function() return true end }
 end
 package.preload["ui.guard"] = function()
-    return { call = function(_label, fn, ...) return fn(...) end }
+    return {
+        call = function(_label, fn, ...) return fn(...) end,
+        wrap = function(_label, fn) return fn end,
+    }
 end
 
 -- 假 kamare：队列与章状态都在内存里，由用例推进。

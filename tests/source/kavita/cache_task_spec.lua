@@ -19,7 +19,10 @@ package.preload["ui/network/manager"] = function()
     return { isConnected = function() return true end }
 end
 package.preload["ui.guard"] = function()
-    return { call = function(_label, fn, ...) return fn(...) end }
+    return {
+        call = function(_label, fn, ...) return fn(...) end,
+        wrap = function(_label, fn) return fn end,
+    }
 end
 package.preload["utils.log"] = function()
     return { info = function() end, warn = function() end, err = function() end, dbg = function() end }
@@ -85,17 +88,6 @@ local function reset()
     st.queue_ok = true
     Themed.made = {}
     Kit.scheduled, Kit.unscheduled = {}, {}
-end
-
--- 没装 / 旧核没有 workers.tasks：返回 nil，调用方退回页内进度框。
-do
-    local real = package.loaded["workers.tasks"]
-    package.loaded["workers.tasks"] = nil
-    package.preload["workers.tasks"] = function() error("module not found") end
-    Assert.is_nil(CacheTask.track{ series = series, entries = entries })
-    package.preload["workers.tasks"] = nil
-    package.loaded["workers.tasks"] = real
-    reset()
 end
 
 -- 缺 queue 能力：没有可轮询的队列，不登记（免得后台任务永远挂着）。
