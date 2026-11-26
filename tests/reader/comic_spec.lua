@@ -38,11 +38,6 @@ package.preload["ui.fonts.reader"] = function()
 end
 package.preload["book.store"] = function()
     return {
-        ensureIdentity = function(file)
-            if type(file) == "string" and file:match("^/cache/comic/") then
-                return comic_identity
-            end
-        end,
         identityFor = function(file)
             if file:match("^/cache/comic/") then
                 return comic_identity
@@ -55,6 +50,11 @@ package.preload["utils.log"] = function()
 end
 
 local ReaderPrefs = require("reader.prefs")
+--- 同 Session.onDocSettingsLoad：身份按文件解析一次传进去。
+local function injectComic(doc_settings, document)
+    local identity = document and document.file and require("book.store").identityFor(document.file)
+    return ReaderPrefs.injectComic(doc_settings, document, identity)
+end
 
 local function sidecar(data)
     data = data or {}
@@ -68,16 +68,16 @@ end
 
 -- PDF 和其他格式不改。
 local pdf = sidecar()
-Assert.is_false(ReaderPrefs.injectComic(pdf, { file = "/books/scan.pdf" }))
+Assert.is_false(injectComic(pdf, { file = "/books/scan.pdf" }))
 Assert.is_nil(next(pdf.data))
-Assert.is_false(ReaderPrefs.injectComic(sidecar(), { file = "/books/ch.html" }))
-Assert.is_false(ReaderPrefs.injectComic(sidecar(), { file = "/books/ch.epub" }))
-Assert.is_false(ReaderPrefs.injectComic(sidecar(), {}))
-Assert.is_false(ReaderPrefs.injectComic(sidecar(), nil))
+Assert.is_false(injectComic(sidecar(), { file = "/books/ch.html" }))
+Assert.is_false(injectComic(sidecar(), { file = "/books/ch.epub" }))
+Assert.is_false(injectComic(sidecar(), {}))
+Assert.is_false(injectComic(sidecar(), nil))
 
 -- 新开的 CBZ/CBT、无全局默认：整页宽度缩放、不裁边、连续滚动、页间距 0。
 local cbz = sidecar()
-Assert.is_true(ReaderPrefs.injectComic(cbz, { file = "/cache/kuaikan/4783.CBZ" }))
+Assert.is_true(injectComic(cbz, { file = "/cache/kuaikan/4783.CBZ" }))
 Assert.eq(cbz.data.kopt_trim_page, 3)
 Assert.eq(cbz.data.kopt_zoom_mode_genus, 4)
 Assert.eq(cbz.data.kopt_zoom_mode_type, 1)
@@ -88,7 +88,7 @@ Assert.is_true(cbz.data.book_comic_cbz_fit)
 Assert.is_true(cbz.data.book_comic_cbz_nogap)
 
 local cbt = sidecar()
-Assert.is_true(ReaderPrefs.injectComic(cbt, { file = "/x/vol.cbt" }))
+Assert.is_true(injectComic(cbt, { file = "/x/vol.cbt" }))
 Assert.eq(cbt.data.kopt_trim_page, 3)
 Assert.eq(cbt.data.kopt_page_gap_height, 0)
 
@@ -96,7 +96,7 @@ Assert.eq(cbt.data.kopt_page_gap_height, 0)
 cbz.data.kopt_trim_page = 1
 cbz.data.zoom_mode = "contentwidth"
 cbz.data.kopt_page_gap_height = 16
-Assert.is_false(ReaderPrefs.injectComic(cbz, { file = "/cache/kuaikan/4783.CBZ" }))
+Assert.is_false(injectComic(cbz, { file = "/cache/kuaikan/4783.CBZ" }))
 Assert.eq(cbz.data.kopt_trim_page, 1)
 Assert.eq(cbz.data.zoom_mode, "contentwidth")
 Assert.eq(cbz.data.kopt_page_gap_height, 16)
@@ -108,7 +108,7 @@ local legacy = sidecar({
     kopt_zoom_mode_type = 1,
     zoom_mode = "contentwidth",
 })
-Assert.is_true(ReaderPrefs.injectComic(legacy, { file = "/cache/kuaikan/4783.cbz" }))
+Assert.is_true(injectComic(legacy, { file = "/cache/kuaikan/4783.cbz" }))
 Assert.eq(legacy.data.kopt_trim_page, 3)
 Assert.eq(legacy.data.kopt_zoom_mode_genus, 4)
 Assert.eq(legacy.data.zoom_mode, "pagewidth")
@@ -125,19 +125,19 @@ local fitted = sidecar({
     kopt_page_scroll = 0,
     kopt_page_gap_height = 8,
 })
-Assert.is_true(ReaderPrefs.injectComic(fitted, { file = "/cache/kuaikan/4783.cbz" }))
+Assert.is_true(injectComic(fitted, { file = "/cache/kuaikan/4783.cbz" }))
 Assert.eq(fitted.data.kopt_page_gap_height, 0)
 Assert.is_true(fitted.data.book_comic_cbz_nogap)
 Assert.eq(fitted.data.kopt_trim_page, 1)
 Assert.eq(fitted.data.kopt_zoom_mode_genus, 3)
 Assert.eq(fitted.data.zoom_mode, "contentwidth")
 Assert.eq(fitted.data.kopt_page_scroll, 0)
-Assert.is_false(ReaderPrefs.injectComic(fitted, { file = "/cache/kuaikan/4783.cbz" }))
+Assert.is_false(injectComic(fitted, { file = "/cache/kuaikan/4783.cbz" }))
 Assert.eq(fitted.data.kopt_page_gap_height, 0)
 
 -- 没有月读标记的旧章也不能把明确选择的分页覆盖成连续。
 local paged = sidecar({ kopt_page_scroll = 0 })
-ReaderPrefs.injectComic(paged, { file = "/books/paged.cbz" })
+injectComic(paged, { file = "/books/paged.cbz" })
 Assert.eq(paged.data.kopt_page_scroll, 0)
 
 -- 「设为默认」的手动缩放 / 连续视图：新章必须吃全局，不能再强制 pagewidth。
@@ -146,7 +146,7 @@ global_data.kopt_zoom_mode_type = 2
 global_data.kopt_zoom_factor = 0.7
 global_data.kopt_page_scroll = 1
 local user_default = sidecar()
-Assert.is_true(ReaderPrefs.injectComic(user_default, { file = "/books/user-default.cbz" }))
+Assert.is_true(injectComic(user_default, { file = "/books/user-default.cbz" }))
 Assert.eq(user_default.data.kopt_zoom_mode_genus, 0)
 Assert.eq(user_default.data.kopt_zoom_factor, 0.7)
 Assert.eq(user_default.data.kopt_page_scroll, 1)
@@ -191,7 +191,7 @@ Assert.eq(ReaderPrefs.load(identity).kopt.page_scroll, 0)
 Assert.eq(ReaderPrefs.load(identity).kopt.zoom_factor, 0.7)
 Assert.eq(ReaderPrefs.load(identity).zoom_mode, "manual")
 local next_chapter = sidecar()
-ReaderPrefs.injectComic(next_chapter, { file = "/cache/comic/2.cbz" })
+injectComic(next_chapter, { file = "/cache/comic/2.cbz" })
 Assert.eq(next_chapter.data.kopt_page_scroll, 0, "新章节必须继承当前书的分页选择")
 Assert.eq(next_chapter.data.kopt_zoom_factor, 0.7, "新章节必须继承缩放比例")
 Assert.eq(next_chapter.data.kopt_zoom_mode_genus, 0)
@@ -201,12 +201,12 @@ local old_chapter = sidecar({
     book_comic_cbz_fit = true, book_comic_cbz_nogap = true,
     kopt_page_scroll = 1, kopt_zoom_mode_genus = 4, zoom_mode = "pagewidth",
 })
-ReaderPrefs.injectComic(old_chapter, { file = "/cache/comic/old.cbz" })
+injectComic(old_chapter, { file = "/cache/comic/old.cbz" })
 Assert.eq(old_chapter.data.kopt_page_scroll, 0, "已缓存章节的旧模式也不能压过全书偏好")
 Assert.eq(old_chapter.data.kopt_zoom_factor, 0.7)
 Assert.eq(old_chapter.data.zoom_mode, "manual")
 local other = sidecar()
-ReaderPrefs.injectComic(other, { file = "/cache/other/1.cbz" })
+injectComic(other, { file = "/cache/other/1.cbz" })
 Assert.eq(other.data.kopt_page_scroll, 1, "不能把某一本的选择变成全局默认")
 Assert.eq(other.data.zoom_mode, "pagewidth")
 
@@ -223,12 +223,12 @@ Assert.eq(JSON.decode(saved["moon\0novel"]).copt.font_size, 22)
 Assert.eq(JSON.decode(saved["moon\0novel"]).font_face, "Novel Font")
 global_data.kopt_page_scroll = 0
 local default_paged = sidecar()
-ReaderPrefs.injectComic(default_paged, { file = "/books/default.cbz" })
+injectComic(default_paged, { file = "/books/default.cbz" })
 Assert.eq(default_paged.data.kopt_page_scroll, 0, "明确设置的全局分页优先于漫画默认")
 Assert.eq(default_paged.data.kopt_zoom_factor, 0.7, "全局缩放比例仍要带上")
 Assert.is_true(ReaderPrefs.captureAndSave(ui, identity))
 local continued = sidecar()
-ReaderPrefs.injectComic(continued, { file = "/cache/comic/3.CBT" })
+injectComic(continued, { file = "/cache/comic/3.CBT" })
 Assert.eq(continued.data.kopt_page_scroll, 1, "手动切回连续同样跨章保留")
 Assert.eq(continued.data.kopt_zoom_factor, 0.7)
 Assert.eq(global_data.kopt_page_scroll, 0, "普通切章不能修改全局分页默认")

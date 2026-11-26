@@ -18,6 +18,7 @@ package.preload["desktop"] = function()
             return { book = {} }
         end,
         open = function() opened = opened + 1 end,
+        hostPlugin = function(ui) return ui and ui.book end,
     }
 end
 local ReaderExit = require("desktop.reader_exit")

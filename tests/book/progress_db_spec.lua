@@ -494,6 +494,25 @@ do
     clearMods()
 end
 
+-- ── hasUnsynced：只查存在性 ───────────────────────────
+do
+    local dirty = true
+    local connection, calls = makeConn({
+        step = function(sql)
+            if sql:find("LIMIT 1", 1, true) and dirty then return { 1 }, { "1" } end
+        end,
+    })
+    local DbBase, ProgressDB = loadProgress(connection)
+    Assert.is_true(ProgressDB.hasUnsynced("moon"))
+    local q = calls[#calls]
+    Assert.is_true(q.sql:find("sync_status=0", 1, true) ~= nil)
+    Assert.eq(q.args[1], "moon")
+    dirty = false
+    Assert.is_false(ProgressDB.hasUnsynced("moon"))
+    DbBase.close()
+    clearMods()
+end
+
 -- ── markFinished：手动已读补一条 100% 的待上传进度 ──
 do
     local connection, calls = makeConn()

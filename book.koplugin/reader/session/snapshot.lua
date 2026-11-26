@@ -115,7 +115,8 @@ function Snapshot.refresh(session, page)
     local Toc = require("reader.session.toc")
     local current = Toc.current(session)
     session.reading_chapter_idx = current and current.idx or nil
-    local position = require("reader.session.progress").position(session)
+    -- 每翻一页都走这里：把算好的当前章交过去，别让 CRE 再算一遍。
+    local position = require("reader.session.progress").position(session, current or false)
     session.position = position
     session.fraction = position.fraction
     session.chapter_fraction = position.chapter_fraction

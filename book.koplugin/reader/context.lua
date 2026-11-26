@@ -32,7 +32,8 @@ local function currentPage()
     return session and session.page or 0
 end
 
---- 取某页正文：getTextBoxes 优先，退回 getPageText；结果可能是字符串或嵌套词框表。
+--- 取某页正文：CRE 取本页与下一页起点之间的文本；固定版式 getTextBoxes 优先，退回 getPageText，
+--- 结果可能是字符串或嵌套词框表。
 ---@param ui table|nil ReaderUI
 ---@param page integer|nil
 ---@return string 取不到时空串
@@ -40,7 +41,12 @@ local function pageText(ui, page)
     local document = ui and ui.document
     if not document or not page or page < 1 then return "" end
     local boxes
-    if document.getTextBoxes then
+    if ui.rolling and document.getPageXPointer then
+        local ok, result = pcall(function()
+            return document:getTextFromXPointers(document:getPageXPointer(page), document:getPageXPointer(page + 1))
+        end)
+        if ok then boxes = result end
+    elseif document.getTextBoxes then
         local ok, result = pcall(document.getTextBoxes, document, page)
         if ok then boxes = result end
     end
@@ -72,22 +78,18 @@ local function pageText(ui, page)
     return Text.trim(Text.normalizeNewlines(table.concat(parts, " ")))
 end
 
+--- 末尾不超过 max_bytes 字节，起点跳过 UTF-8 续字节（0x80-0xBF），不切半个字。
 ---@param s string
 ---@param max_bytes integer
 ---@return string
 local function tailUtf8(s, max_bytes)
-    if #s <= max_bytes then
-        return s
-    end
-    local start = math.max(1, #s - max_bytes)
+    local start = math.max(1, #s - max_bytes + 1)
     while start <= #s do
-        local piece = s:sub(start)
-        if #piece <= max_bytes and Text.isValidUtf8(piece) then
-            return piece
-        end
+        local byte = s:byte(start)
+        if byte < 0x80 or byte >= 0xC0 then break end
         start = start + 1
     end
-    return Text.truncateUtf8(s, max_bytes)
+    return s:sub(start)
 end
 
 --- 当前可见页正文与页码；滚动文档按屏幕坐标取字。
@@ -132,7 +134,8 @@ local function chapterStart(ui, page)
 end
 
 --- [start_page, end_page) 区间的正文；区间为空返回空串。
---- 固定版式逐页取字很慢：给了 head 时只从头取够 head 字节、从尾取够 tail 字节，中间跳过的页以「……」相隔。
+--- 逐页取字：给了 head 时只从头取够 head 字节、从尾取够 tail 字节，中间跳过的页以「……」相隔
+--- （固定版式逐页取字慢，CRE 整章一次取出会在小内存设备上撑爆）。
 ---@param ui table
 ---@param start_page integer
 ---@param end_page integer
@@ -142,15 +145,6 @@ end
 function Context.pagesText(ui, start_page, end_page, head, tail)
     if end_page <= start_page then
         return ""
-    end
-    local document = ui.document
-    -- CRE 没有逐页取字接口，只能按两页起点的 xpointer 取区间文本。
-    if ui.rolling and document.getPageXPointer then
-        local ok, text = pcall(function()
-            return document:getTextFromXPointers(
-                document:getPageXPointer(start_page), document:getPageXPointer(end_page))
-        end)
-        return ok and Text.trim(Text.normalizeNewlines(text)) or ""
     end
     local first, last = {}, {}
     local lo, hi, used = start_page, end_page - 1, 0
@@ -189,7 +183,7 @@ function Context.chapterText(ui, page, offset)
     elseif offset ~= 0 then
         return nil
     end
-    -- CRE 取到区间末页起点，固定版式逐页取字要把末页算进去。
+    -- CRE 每页取到下一页起点，文档末页没有下一页起点；固定版式要把末页算进去。
     local last = (stop == count and not ui.rolling) and count + 1 or stop
     local text = Context.pagesText(ui, start, last, 24000, 12000)
     if text == "" then return nil end
@@ -206,9 +200,6 @@ function Context.priorText(ui, end_page, limit)
     local start_page = chapterStart(ui, end_page)
     if end_page <= start_page then
         return ""
-    end
-    if ui.rolling and ui.document.getPageXPointer then
-        return tailUtf8(Context.pagesText(ui, start_page, end_page), limit)
     end
     local parts = {}
     local total = 0

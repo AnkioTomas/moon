@@ -98,6 +98,41 @@ do
     db.get, json.decode, derived.collect = previous_get, previous_decode, previous_collect
 end
 
+-- 拉注解回包时阅读器已换了文档：不把这本书的快照写进新文档
+do
+    local db = require("book.note_db")
+    local previous_get = db.get
+    local writes_before = #writes
+    local revision = 1
+    db.get = function() revision = revision + 1; return { payload = "[x]", updated_at = revision } end
+    local other = { source_id = "moon", stable_id = "other" }
+    require("book.store").identityFor = function() return other end
+    local touched = false
+    local pulled = {
+        document = { file = "/books/other.epub" },
+        doc_settings = {
+            readSetting = function() return {} end,
+            saveSetting = function() touched = true end,
+            flush = function() end,
+        },
+    }
+    local source = { syncNotesAsync = function(_self, _opts, cb) cb({}) end }
+    local applied = 0
+    local real_apply = SessionNote.applyLocal
+    SessionNote.applyLocal = function() applied = applied + 1; return 0 end
+    SessionNote.pull(pulled, { source_id = "moon", stable_id = "copy", chapter_idx = 2, source = source })
+    require("support.stubs").flush()
+    Assert.eq(applied, 0, "文档已换不应用")
+    Assert.is_false(touched)
+    other.stable_id, other.chapter_idx = "copy", 2
+    SessionNote.pull(pulled, { source_id = "moon", stable_id = "copy", chapter_idx = 2, source = source })
+    require("support.stubs").flush()
+    Assert.eq(applied, 1, "还是这一章照常应用")
+    SessionNote.applyLocal = real_apply
+    db.get = previous_get
+    for i = #writes, writes_before + 1, -1 do writes[i] = nil end
+end
+
 -- 衍生版（同目录 meta.json 指向自己）的坐标原书不认，不进 notes 表
 local dir = os.tmpname()
 os.remove(dir)

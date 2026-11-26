@@ -306,7 +306,7 @@ function ProgressDB.list(source_id, series_id)
     local result, nrows = DB.query(
         "SELECT " .. COLUMNS .. " FROM pending_progress WHERE source_id=? AND stable_id LIKE ?;",
         source_id, tostring(series_id) .. ":%")
-    for _, row in ipairs(rows(result, nrows)) do
+    for _idx, row in ipairs(rows(result, nrows)) do
         out[row.stable_id] = row
     end
     return out
@@ -319,6 +319,13 @@ function ProgressDB.unsynced(source_id)
         "SELECT " .. COLUMNS .. " FROM pending_progress WHERE sync_status=0 AND source_id=? ORDER BY updated_at ASC;",
         source_id
     ))
+end
+
+--- 是否有待上传进度：只查存在性，不把行读出来。
+---@param source_id string
+---@return boolean
+function ProgressDB.hasUnsynced(source_id)
+    return DB.rowexec("SELECT 1 FROM pending_progress WHERE sync_status=0 AND source_id=? LIMIT 1;", source_id) ~= nil
 end
 
 --- 有阅读进度的书，按进度更新时间倒序。
@@ -376,17 +383,6 @@ function ProgressDB.fixRemoteTime(source_id, stable_id, updated_at)
     return DB.exec([[UPDATE pending_progress SET updated_at=?
         WHERE source_id=? AND stable_id=? AND sync_status=1 AND updated_at>?;]],
         updated_at, source_id, stable_id, updated_at) ~= nil
-end
-
---- 丢掉源的远端占位进度：源发现这条进度不该存在时用（例如多卷 series 的容器行占位，
---- 真实进度在各自的卷行上）。只删干净且无精确定位的行——脏行是本地真实阅读，留给正常推送。
----@param source_id string
----@param stable_id string
----@return boolean
-function ProgressDB.dropRemote(source_id, stable_id)
-    return DB.exec([[DELETE FROM pending_progress
-        WHERE source_id=? AND stable_id=? AND sync_status=1 AND locator IS NULL;]],
-        source_id, stable_id) ~= nil
 end
 
 --- 手动标已读（BookDB.setRead）：补一条 100% 的待上传进度。

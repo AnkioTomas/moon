@@ -61,7 +61,7 @@ prior = Context.priorText(paging, 3)
 Assert.eq(prior, "page2")
 Assert.eq(Context.priorText(paging, 2), "", "章首页没有本章前文")
 
--- 滚动文档：按章首页与当前页的 xpointer 取区间文本，过长保留末尾
+-- 滚动文档：从当前页往前逐页取，取够上限就停，过长保留末尾
 local ranges = {}
 local cre = {
     rolling = {},
@@ -75,11 +75,15 @@ local cre = {
     },
 }
 prior = Context.priorText(cre, 5)
-Assert.eq(ranges[1], "xp2-xp5")
+Assert.eq(table.concat(ranges, ","), "xp4-xp5", "一页就够上限，不碰章首")
 Assert.is_true(#prior <= 24000)
 Assert.matches(prior, "末尾$")
 Assert.is_nil(prior:find("本章", 1, true))
-Assert.is_true(#Context.priorText(cre, 5, 2000) <= 2000)
+-- 截断点落在多字节字中间：跳过续字节，不切半个字
+local cut = Context.priorText(cre, 5, 2001)
+Assert.is_true(#cut <= 2001)
+Assert.is_true(require("utils.text").isValidUtf8(cut))
+Assert.matches(cut, "^字")
 cre.document.getTextFromXPointers = function() error("bad xpointer") end
 Assert.eq(Context.priorText(cre, 5), "")
 

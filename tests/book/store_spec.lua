@@ -405,7 +405,7 @@ do
     warnings = {}
 end
 
--- ── markDeleted：工作目录改名移进 .trash 后交给后台分 tick 删，不同步 purge ──
+-- ── markDeleted：工作目录改名移进 .trash 后后台分 tick 清整个 .trash（顺带清掉中途关机的残留） ──
 do
     local purged = {}
     package.loaded["book.cache"] = { purgeAsync = function(dir) purged[#purged + 1] = dir end }
@@ -420,7 +420,7 @@ do
     Assert.is_true(ok)
     Assert.is_nil(leftover, "改名成功即算删掉")
     Assert.matches(renamed[2], "/%.trash/%d+%-%d+$")
-    Assert.eq(purged[1], renamed[2])
+    Assert.eq(purged[1], renamed[2]:match("^(.*/%.trash)/"))
     warnings = {}
 end
 

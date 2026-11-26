@@ -236,7 +236,7 @@ end
 ---@param identity BookIdentity|nil 缺省按当前文档路径解析
 ---@return boolean 是否成功写入数据库
 function M.captureAndSave(ui, identity)
-    identity = identity or Store.ensureIdentity(ui.document.file)
+    identity = identity or Store.identityFor(ui.document.file)
     if not (identity and identity.chapter_idx) then
         return false
     end
@@ -268,8 +268,9 @@ end
 --- 未列举的键（字重、字间距等）已经按该章 sidecar 的默认值渲染完毕。
 ---@param doc_settings table
 ---@param document table|nil
+---@param identity BookIdentity|nil Store.identityFor(document.file)，DocSettingsLoad 解析一次传进来
 ---@return boolean
-function M.inject(doc_settings, document)
+function M.inject(doc_settings, document, identity)
     if type(document) ~= "table" or type(document.setFontFace) ~= "function" then
         return false
     end
@@ -294,7 +295,6 @@ function M.inject(doc_settings, document)
     if big and doc_settings:readSetting("copt_embedded_css") == nil then
         doc_settings:saveSetting("copt_embedded_css", 0)
     end
-    local identity = Store.identityFor(document.file)
     if not (identity and identity.chapter_idx) then
         return false
     end
@@ -303,7 +303,9 @@ function M.inject(doc_settings, document)
     if not prefs then
         return false
     end
-    if identity.ephemeral then
+    -- identityFor 不带 ephemeral（只有 ensureIdentity 补），按属主源判断。
+    local source = require("source.registry").resolve(identity.source_id)
+    if source and source.ephemeral then
         -- 没存过渲染模式时，全局平面不能写进来：缺键会落到刚补上的全局平面。
         local saved_mode = saved and saved.copt and saved.copt.block_rendering_mode
         if type(saved_mode) ~= "number" then
@@ -408,7 +410,7 @@ function M.saveDefaults(ui)
             logger.warn("book.reader_prefs merge failed")
         end
         -- merge 只扫库里已有行；当前书若还没 reader_prefs，这里补上，否则下一章 inject 仍吃旧默认。
-        local identity = Store.ensureIdentity(ui.document.file)
+        local identity = Store.identityFor(ui.document.file)
         if identity and identity.chapter_idx and prefs.kopt then
             local existing = M.load(identity) or {}
             existing.kopt = copyValue(prefs.kopt)
@@ -453,13 +455,13 @@ end
 --- DocSettingsLoad：在原生 ReadSettings 之前写入 kopt 默认。
 ---@param doc_settings table
 ---@param document table|nil
+---@param identity BookIdentity|nil 同 inject
 ---@return boolean
-function M.injectComic(doc_settings, document)
+function M.injectComic(doc_settings, document, identity)
     if type(doc_settings) ~= "table" or type(document) ~= "table" or not isComicArchive(document.file) then
         return false
     end
     local changed = false
-    local identity = Store.identityFor(document.file)
     local prefs = identity and identity.chapter_idx and M.load(identity)
     local kopt = prefs and prefs.kopt
     if kopt then

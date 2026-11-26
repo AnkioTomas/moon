@@ -830,17 +830,6 @@ function BookDB.clearPathsUnder(dir)
     ) ~= nil
 end
 
---- 按 (source_id, md5) 列出在架行的 stable_id（不含墓碑：删掉的书不能被同内容的新文件收编复活）。
---- 同内容副本可以并存，由调用方挑真正被移走的那一行。
----@param source_id string
----@param md5 string
----@return string[]
-function BookDB.stableIdsByMd5(source_id, md5)
-    return stringColumn([[SELECT stable_id FROM books
-          WHERE source_id=? AND md5=? AND deleted=0
-          ORDER BY inserted_at ASC, stable_id ASC;]], source_id, md5)
-end
-
 --- 扫盘改名/搬家候选：在架行，以及换书库目录后留下 path 的待重匹配行。
 --- 用户删除或盘上消失后的墓碑（path 已清空）不收编。
 ---@param source_id string
@@ -943,6 +932,13 @@ function BookDB.unsynced(source_id)
         out[i] = bookAt(result, i)
     end
     return out
+end
+
+--- 是否有待上传的书架行（含墓碑）：只查存在性，不把行读出来。
+---@param source_id string
+---@return boolean
+function BookDB.hasUnsynced(source_id)
+    return DB.rowexec("SELECT 1 FROM books WHERE source_id=? AND sync_status=0 LIMIT 1;", source_id) ~= nil
 end
 
 --- push 成功后清脏。
@@ -1195,28 +1191,6 @@ local function forgetOne(source_id, stable_id)
         if not require(name).removeIdentity(source_id, stable_id) then return false end
     end
     return Event.emit("book_removed", source_id, stable_id)
-end
-
---- 撕掉本源里 stable_id 带指定前缀的书（及依附表），不留墓碑。
---- 给 local 换 WebDAV 用：前缀 `webdav://`，纯本地绝对路径书不动。
----@param source_id string
----@param prefix string
----@return boolean
----@return string[] forgotten 被撕掉的 stable_id（调用方清缓存用）
-function BookDB.forgetPrefix(source_id, prefix)
-    local forgotten = {}
-    local ok = DB.transaction(function()
-        local ids = stringColumn(
-            [[SELECT stable_id FROM books WHERE source_id=? AND stable_id LIKE ? ESCAPE '\' ORDER BY stable_id;]],
-            source_id, prefix:gsub("([%%_\\])", "\\%1") .. "%"
-        )
-        for _idx, stable_id in ipairs(ids) do
-            if not forgetOne(source_id, stable_id) then return false end
-            forgotten[#forgotten + 1] = stable_id
-        end
-        return true
-    end) == true
-    return ok, forgotten
 end
 
 ---@param path string

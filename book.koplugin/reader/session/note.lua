@@ -110,14 +110,13 @@ function SessionNote.save(ui, identity, changed, done)
         if done then done(false) end
         return
     end
+    local file = ui.document.file
     -- 衍生版的坐标原书不认：划线留在它自己的 sidecar，回原书时由 derived_note 收进来。
-    if DerivedNote.originOf(ui.document.file) then
+    if DerivedNote.originOf(file) then
         if done then done(true) end
         return
     end
-    local file = ui.document and ui.document.file
-    local bilingual = identity.chapter_idx ~= nil and file
-        and require("utils.paths").chapterOrigin(file) ~= file
+    local bilingual = identity.chapter_idx ~= nil and require("utils.paths").chapterOrigin(file) ~= file
     if bilingual and ui.annotation then
         SessionNote._untranslate(ui.document, ui.annotation.annotations)
         ui.doc_settings:saveSetting("annotations", ui.annotation.annotations)
@@ -273,17 +272,6 @@ function SessionNote.applyLocal(ui, identity, span)
         lap("notes")
         return 0
     end
-    -- 异步回调回来时阅读器可能已换了文档（或同书换了章）
-    local current_id = ui.document and ui.document.file
-        and require("book.store").identityFor(ui.document.file)
-    if not current_id
-            or current_id.source_id ~= identity.source_id
-            or current_id.stable_id ~= identity.stable_id
-            or current_id.chapter_idx ~= identity.chapter_idx then
-        logger.dbg("book.note apply skip: document changed")
-        lap("notes")
-        return 0
-    end
     local Perf = require("utils.perf")
     local started_at = Perf.now()
     local applied
@@ -314,6 +302,16 @@ function SessionNote.pull(ui, identity)
     local UIManager = require("ui/uimanager")
     --- 用库里最新快照重写阅读器注解；条数变了才请求局部重画。
     local function applyFromDb()
+        -- 回调回来时阅读器可能已换了文档（或同书换了章）；开书同步路径的身份就按这份文件解析，不用再查。
+        local current_id = ui.document and ui.document.file
+            and require("book.store").identityFor(ui.document.file)
+        if not current_id
+                or current_id.source_id ~= identity.source_id
+                or current_id.stable_id ~= identity.stable_id
+                or current_id.chapter_idx ~= identity.chapter_idx then
+            logger.dbg("book.note apply skip: document changed")
+            return
+        end
         local before = ui.doc_settings and #(ui.doc_settings:readSetting("annotations") or {}) or 0
         if SessionNote.applyLocal(ui, identity) ~= before and ui.view then
             UIManager:setDirty(ui.view.dialog or "all", "partial")

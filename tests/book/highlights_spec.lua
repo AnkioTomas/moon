@@ -6,6 +6,7 @@ book.highlights 离线用例。
 ---@diagnostic disable: undefined-field, missing-fields, redundant-parameter, missing-parameter, inject-field, assign-type-mismatch, param-type-mismatch, cast-type-mismatch, return-type-mismatch, cast-local-type
 
 local Assert = require("support.assert")
+local notes_stamp, full_reads = "2:100", 0
 
 package.preload["reader.session"] = function()
     return { current = function() return nil end }
@@ -23,7 +24,9 @@ package.preload["book.note_db"] = function()
             end
             return nil
         end,
+        stamp = function() return notes_stamp end,
         allWithBook = function()
+            full_reads = full_reads + 1
             return {
                 {
                     source_id = "moon",
@@ -84,9 +87,14 @@ Assert.len(all, 2)
 Assert.eq(all[1].author, "余华")
 Assert.eq(all[1].title, "活着")
 
+full_reads = 0
 local first = Highlights.random("不存在")
 Assert.is_true(first.text == "划线句子" or first.text == "另一句")
 local other = Highlights.random(first.text)
 Assert.is_true(other.text ~= first.text)
+Assert.eq(full_reads, 1, "notes 表没变不重读全表")
+notes_stamp = "3:101"
+Highlights.random()
+Assert.eq(full_reads, 2, "notes 表变了重读")
 
 return true

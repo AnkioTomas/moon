@@ -28,12 +28,15 @@ package.preload["ui/event"] = function()
     return { new = function(_, name, ...) return { name = name, args = { ... } } end }
 end
 package.preload["reader.session.toc"] = function()
-    return { list = function() return {} end, chapterFraction = function() return 0 end }
+    return {
+        list = function() return {} end,
+        current = function() return { title = "" } end,
+        chapterFraction = function() return 0 end,
+    }
 end
 package.preload["reader.session"] = function()
     return {
         current = function() return nil end,
-        chapterTitle = function() return "" end,
         gotoChapter = function() return false end,
     }
 end

@@ -42,6 +42,7 @@ end
 package.preload["reader.session.toc"] = function()
     return {
         list = function() return { {}, {}, {}, {}, {} } end,
+        current = function() return { title = "" } end,
         chapterFraction = function() return 0 end,
     }
 end
@@ -63,7 +64,7 @@ package.preload["reader.session"] = function()
             live_snapshot.doc_fraction = 0
             return live_snapshot
         end,
-        chapterTitle = function() return "" end,
+        resolvePosition = function(_id, pos) return pos end,
         gotoChapter = function(idx, opts)
             goto_calls[#goto_calls + 1] = { idx = idx, opts = opts }
             return not goto_calls.fail

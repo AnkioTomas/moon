@@ -535,61 +535,39 @@ end
 ---@param note string|nil
 ---@param remove boolean
 local function patchOpenDocument(source_id, stable_id, chapter_idx, item_id, note, remove)
-    local ok_ui, ReaderUI = pcall(require, "apps/reader/readerui")
-    if not ok_ui or not ReaderUI or not ReaderUI.instance then
+    local ui = require("apps/reader/readerui").instance
+    if not (ui and ui.annotation) then return end
+    local session = require("reader.session").current()
+    local identity = session and session.identity
+    if not identity or identity.source_id ~= source_id or identity.stable_id ~= stable_id
+        or (tonumber(identity.chapter_idx) or 0) ~= chapter_idx then
         return
     end
-    local ui = ReaderUI.instance
-    local ok_sess, Session = pcall(require, "reader.session")
-    local identity = ok_sess and Session and Session._snapshot and Session._snapshot.identity
-    if not identity then
-        return
-    end
-    if identity.source_id ~= source_id or identity.stable_id ~= stable_id then
-        return
-    end
-    if (tonumber(identity.chapter_idx) or 0) ~= chapter_idx then
-        return
-    end
-    local live = ui.annotation and ui.annotation.annotations
-    if type(live) ~= "table" then
-        return
-    end
+    local live = ui.annotation.annotations
     if remove then
         for i = #live, 1, -1 do
-            if type(live[i]) == "table" and itemId(live[i]) == item_id then
+            if itemId(live[i]) == item_id then
                 table.remove(live, i)
             end
         end
     else
         for _idx, item in ipairs(live) do
-            if type(item) == "table" and itemId(item) == item_id then
+            if itemId(item) == item_id then
                 item.note = note
             end
         end
     end
-    if ui.doc_settings then
-        ui.doc_settings:saveSetting("annotations", live)
-        if ui.doc_settings.flush then
-            ui.doc_settings:flush()
-        end
-    end
-    if ui.annotation and type(ui.annotation.updateAnnotations) == "function" then
-        ui.annotation:updateAnnotations(true)
-    end
+    ui.doc_settings:saveSetting("annotations", live)
+    ui.doc_settings:flush()
+    ui.annotation:updateAnnotations(true)
 end
 
 local function maybePushDirty(source_id)
-    local ok_net, NetworkMgr = pcall(require, "ui/network/manager")
-    if not ok_net or not NetworkMgr or not NetworkMgr:isConnected() then
+    if not require("ui/network/manager"):isConnected() then
         return
     end
-    local ok_reg, Registry = pcall(require, "source.registry")
-    if not ok_reg or not Registry then
-        return
-    end
-    local source = Registry.resolve(source_id)
-    if source and type(source.pushNotesAsync) == "function" and type(source.pushDirty) == "function" then
+    local source = require("source.registry").resolve(source_id)
+    if source and type(source.pushNotesAsync) == "function" then
         source:pushDirty()
     end
 end
@@ -644,7 +622,7 @@ function Note.mutate(opts)
     end
     local total_pages = found.total_pages
     local clean = Note.clean(source, current, total_pages)
-    if source and type(source.prepareLocalAnnotations) == "function" then
+    if type(source.prepareLocalAnnotations) == "function" then
         source:prepareLocalAnnotations(previous, clean, deleted)
     end
     local ok, payload = pcall(JSON.encode, Normalize.pack(clean, authoritative))

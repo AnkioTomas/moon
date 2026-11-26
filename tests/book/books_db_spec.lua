@@ -554,27 +554,22 @@ do
     clearMods()
 end
 
--- ── stableIdsByMd5：同内容副本全部列出（不 LIMIT 1），墓碑不算，顺序稳定 ──
+-- ── hasUnsynced：只查存在性（墓碑也算待上传） ──
 do
+    local dirty = true
     local connection, calls = makeConn({
-        resultset = function(sql)
-            if sql:find("md5=?", 1, true) then
-                return { { "/books/a.epub", "/books/b.epub" } }, 2
-            end
-            return nil, 0
+        step = function(sql)
+            if sql:find("LIMIT 1", 1, true) and dirty then return { 1 }, { "1" } end
         end,
     })
     local DbBase, BookDB = loadBook(connection)
-    local ids = BookDB.stableIdsByMd5("local", "m")
-    Assert.eq(#ids, 2)
-    Assert.eq(ids[1], "/books/a.epub")
-    Assert.eq(ids[2], "/books/b.epub")
+    Assert.is_true(BookDB.hasUnsynced("wechat"))
     local q = calls[#calls]
-    Assert.is_true(q.sql:find("deleted=0", 1, true) ~= nil, "墓碑不能被同内容新文件收编")
-    Assert.is_true(q.sql:find("ORDER BY inserted_at ASC, stable_id ASC", 1, true) ~= nil)
-    Assert.is_nil(q.sql:find("LIMIT", 1, true))
-    Assert.eq(q.args[1], "local")
-    Assert.eq(q.args[2], "m")
+    Assert.is_true(q.sql:find("sync_status=0", 1, true) ~= nil)
+    Assert.is_nil(q.sql:find("deleted", 1, true))
+    Assert.eq(q.args[1], "wechat")
+    dirty = false
+    Assert.is_false(BookDB.hasUnsynced("wechat"))
     DbBase.close()
     clearMods()
 end
@@ -1034,6 +1029,17 @@ do
         DbBase.transaction(function() error("boom") end)
     end)
     Assert.eq(last(), "ROLLBACK;", "抛错也要回滚，否则连接停在事务里")
+
+    -- 嵌套：内层走保存点，失败只撤回自己，外层照常提交
+    local from = #calls
+    Assert.eq(DbBase.transaction(function()
+        Assert.is_nil(DbBase.transaction(function() return false end))
+        return DbBase.transaction(function() return 3 end)
+    end), 3)
+    local seq = {}
+    for i = from + 1, #calls do seq[#seq + 1] = calls[i].sql end
+    Assert.eq(table.concat(seq, " "),
+        "BEGIN IMMEDIATE; SAVEPOINT tx1; ROLLBACK TO tx1; RELEASE tx1; SAVEPOINT tx1; RELEASE tx1; COMMIT;")
 
     DbBase.close()
     clearMods()

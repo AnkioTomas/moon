@@ -62,12 +62,9 @@ end
 
 package.preload["book.store"] = function()
     return {
-        ensureIdentity = function()
-            return { source_id = "moon", stable_id = "book-1", chapter_idx = 1 }
-        end,
         identityFor = function(path)
             if path == "/rss.html" then
-                return { source_id = "subscribe", stable_id = "feed-1", chapter_idx = 1, ephemeral = true }
+                return { source_id = "subscribe", stable_id = "feed-1", chapter_idx = 1 }
             end
             if path == "/chapter.html" then
                 return { source_id = "moon", stable_id = "book-1", chapter_idx = 1 }
@@ -76,6 +73,15 @@ package.preload["book.store"] = function()
                 return { source_id = "moon", stable_id = "book-1", chapter_idx = 2 }
             end
             return { source_id = "moon", stable_id = "book-1" }
+        end,
+    }
+end
+
+-- 同 Store.identityFor：身份不带 ephemeral，只读不记看属主源。
+package.preload["source.registry"] = function()
+    return {
+        resolve = function(id)
+            return { ephemeral = id == "subscribe" or nil }
         end,
     }
 end
@@ -158,6 +164,11 @@ package.loaded["ui.fonts.reader"] = nil
 package.loaded["book.books_db"] = nil
 package.loaded["book.store"] = nil
 local ReaderPrefs = require("reader.prefs")
+--- 同 Session.onDocSettingsLoad：身份按文件解析一次传进去。
+local function inject(doc_settings, document)
+    local identity = document and document.file and require("book.store").identityFor(document.file)
+    return ReaderPrefs.inject(doc_settings, document, identity)
+end
 
 local save_settings_events = 0
 local ui = {
@@ -238,7 +249,7 @@ Assert.is_true(type(saved_payload) == "string" and #saved_payload > 0)
 -- 未落库时不得往 sidecar 写任何东西
 saved_payload = nil
 local blank = { data = {}, saveSetting = ui.doc_settings.saveSetting, readSetting = ui.doc_settings.readSetting }
-Assert.is_false(ReaderPrefs.inject(blank, { file = "/x.epub", setFontFace = function() end }))
+Assert.is_false(inject(blank, { file = "/x.epub", setFontFace = function() end }))
 Assert.eq(blank.data.copt_embedded_fonts, 0)
 blank.data.copt_embedded_fonts = nil
 Assert.is_nil(next(blank.data))
@@ -259,7 +270,7 @@ local fresh = {
     readSetting = ui.doc_settings.readSetting,
     delSetting = ui.doc_settings.delSetting,
 }
-Assert.is_true(ReaderPrefs.inject(fresh, { file = "/chapter.html", setFontFace = function() end }))
+Assert.is_true(inject(fresh, { file = "/chapter.html", setFontFace = function() end }))
 -- 样式微调（行距 / 段距）与自定义 CSS 跟着全书走；全书没设的键要清掉这章自己的旧值
 Assert.eq(fresh.data.style_tweaks.lines_line_height_large, 1)
 Assert.eq(fresh.data.book_style_tweak, "p { line-height: 2; }")
@@ -305,7 +316,7 @@ local next_chapter = {
     readSetting = ui.doc_settings.readSetting,
     delSetting = ui.doc_settings.delSetting,
 }
-Assert.is_true(ReaderPrefs.inject(next_chapter, { file = "/chapter2.html", setFontFace = function() end }))
+Assert.is_true(inject(next_chapter, { file = "/chapter2.html", setFontFace = function() end }))
 Assert.is_true(next_chapter.data.inverse_reading_order)
 Assert.is_true(next_chapter.data.invert_ui_layout)
 Assert.eq(next_chapter.data.style_tweaks.lines_line_height_large, 2)
@@ -332,18 +343,18 @@ Assert.is_true(ReaderPrefs.load(identity).doc.inverse_reading_order, "SaveSettin
 local whole_book = { source_id = "moon", stable_id = "book-1" }
 Assert.is_false(ReaderPrefs.captureAndSave(ui, whole_book))
 local whole_book_settings = { data = {}, saveSetting = ui.doc_settings.saveSetting, readSetting = ui.doc_settings.readSetting }
-Assert.is_false(ReaderPrefs.inject(whole_book_settings, { file = "/x.epub", setFontFace = function() end }))
+Assert.is_false(inject(whole_book_settings, { file = "/x.epub", setFontFace = function() end }))
 -- 内嵌字体默认关（防大 EPUB OOM）；本书已显式开启或全局「设为默认」过则保留
 Assert.eq(whole_book_settings.data.copt_embedded_fonts, 0)
 whole_book_settings.data.copt_embedded_fonts = nil
 Assert.is_nil(next(whole_book_settings.data))
 local on_book = { data = { copt_embedded_fonts = 1 }, saveSetting = ui.doc_settings.saveSetting, readSetting = ui.doc_settings.readSetting }
-ReaderPrefs.inject(on_book, { file = "/x.epub", setFontFace = function() end })
+inject(on_book, { file = "/x.epub", setFontFace = function() end })
 Assert.eq(on_book.data.copt_embedded_fonts, 1)
 local saved_g = _G.G_reader_settings
 _G.G_reader_settings = { has = function(_, k) return k == "copt_embedded_fonts" end, readSetting = function() end, saveSetting = function() end }
 local g_default = { data = {}, saveSetting = ui.doc_settings.saveSetting, readSetting = ui.doc_settings.readSetting }
-ReaderPrefs.inject(g_default, { file = "/x.epub", setFontFace = function() end })
+inject(g_default, { file = "/x.epub", setFontFace = function() end })
 Assert.is_nil(g_default.data.copt_embedded_fonts)
 -- 大文件：全局默认开着也强制关内嵌字体 / 样式；本书自己设过的不动
 local lfs = require("libs/libkoreader-lfs")
@@ -353,15 +364,15 @@ lfs.attributes = function(path, what)
     return real_attributes(path, what)
 end
 local big_book = { data = {}, saveSetting = ui.doc_settings.saveSetting, readSetting = ui.doc_settings.readSetting }
-ReaderPrefs.inject(big_book, { file = "/big.epub", setFontFace = function() end })
+inject(big_book, { file = "/big.epub", setFontFace = function() end })
 Assert.eq(big_book.data.copt_embedded_fonts, 0)
 Assert.eq(big_book.data.copt_embedded_css, 0)
 local big_on = { data = { copt_embedded_fonts = 1, copt_embedded_css = 1 }, saveSetting = ui.doc_settings.saveSetting, readSetting = ui.doc_settings.readSetting }
-ReaderPrefs.inject(big_on, { file = "/big.epub", setFontFace = function() end })
+inject(big_on, { file = "/big.epub", setFontFace = function() end })
 Assert.eq(big_on.data.copt_embedded_fonts, 1)
 Assert.eq(big_on.data.copt_embedded_css, 1)
 local small = { data = {}, saveSetting = ui.doc_settings.saveSetting, readSetting = ui.doc_settings.readSetting }
-ReaderPrefs.inject(small, { file = "/x.epub", setFontFace = function() end })
+inject(small, { file = "/x.epub", setFontFace = function() end })
 Assert.is_nil(small.data.copt_embedded_css)
 lfs.attributes = real_attributes
 _G.G_reader_settings = saved_g
@@ -372,12 +383,12 @@ local cold_book_settings = {
     saveSetting = ui.doc_settings.saveSetting,
     readSetting = ui.doc_settings.readSetting,
 }
-Assert.is_false(ReaderPrefs.inject(cold_book_settings, { file = "/x.epub", setFontFace = function() end }))
+Assert.is_false(inject(cold_book_settings, { file = "/x.epub", setFontFace = function() end }))
 Assert.eq(resolved_font_ids[#resolved_font_ids], "demo.ttf")
 
 -- 非 CRE 文档不落 copt_
 local kopt = { data = {}, saveSetting = ui.doc_settings.saveSetting, readSetting = ui.doc_settings.readSetting }
-Assert.is_false(ReaderPrefs.inject(kopt, { file = "/x.pdf" }))
+Assert.is_false(inject(kopt, { file = "/x.pdf" }))
 Assert.is_nil(next(kopt.data))
 
 ui.doc_settings.data.book_reader_font_id = nil
@@ -394,7 +405,7 @@ loaded = ReaderPrefs.load(identity)
 Assert.is_nil(loaded.font_id)
 Assert.eq(loaded.font_face, "Native Face")
 local reopened = { data = {}, saveSetting = ui.doc_settings.saveSetting, readSetting = ui.doc_settings.readSetting, delSetting = ui.doc_settings.delSetting }
-Assert.is_true(ReaderPrefs.inject(reopened, { file = "/chapter.html", setFontFace = function() end }))
+Assert.is_true(inject(reopened, { file = "/chapter.html", setFontFace = function() end }))
 Assert.eq(reopened.data.font_face, "Native Face")
 Assert.eq(reopened.data.book_reader_font_id, "")
 
@@ -447,7 +458,7 @@ Assert.eq(legacy.copt.font_size, ui.document.configurable.font_size)
 Assert.is_nil(legacy.doc)
 -- 新书 sidecar 没有字体 id 时，按默认插件字体注册。
 resolved_font_ids = {}
-ReaderPrefs.inject({ data = {}, readSetting = function() end, saveSetting = function() end }, { file = "/x.epub", setFontFace = function() end })
+inject({ data = {}, readSetting = function() end, saveSetting = function() end }, { file = "/x.epub", setFontFace = function() end })
 Assert.eq(resolved_font_ids[1], "demo.ttf")
 Assert.is_false(ReaderPrefs.saveDefaults({ document = {} }))
 
@@ -464,7 +475,7 @@ local from_global = {
     readSetting = ui.doc_settings.readSetting,
     delSetting = ui.doc_settings.delSetting,
 }
-Assert.is_true(ReaderPrefs.inject(from_global, { file = "/chapter.html", setFontFace = function() end }))
+Assert.is_true(inject(from_global, { file = "/chapter.html", setFontFace = function() end }))
 Assert.eq(from_global.data.copt_font_size, 33)
 Assert.eq(from_global.data.copt_line_spacing, 120)
 Assert.eq(from_global.data.font_face, "Demo Face")
@@ -481,7 +492,7 @@ local prefer_book = {
     readSetting = ui.doc_settings.readSetting,
     delSetting = ui.doc_settings.delSetting,
 }
-Assert.is_true(ReaderPrefs.inject(prefer_book, { file = "/chapter.html", setFontFace = function() end }))
+Assert.is_true(inject(prefer_book, { file = "/chapter.html", setFontFace = function() end }))
 Assert.eq(prefer_book.data.copt_font_size, 18)
 Assert.eq(prefer_book.data.font_face, "Book Face")
 
@@ -516,7 +527,7 @@ ui.font.font_face = "Demo Face"
 ui.doc_settings.data.book_reader_font_id = "demo.ttf"
 Assert.is_true(ReaderPrefs.captureAndSave(ui, identity))
 local next_chapter = emptySidecar()
-Assert.is_true(ReaderPrefs.inject(next_chapter, { file = "/chapter2.html", setFontFace = function() end }))
+Assert.is_true(inject(next_chapter, { file = "/chapter2.html", setFontFace = function() end }))
 Assert.eq(next_chapter.data.copt_font_size, 28)
 Assert.eq(next_chapter.data.copt_h_page_margins[1], 15)
 Assert.eq(next_chapter.data.font_face, "Demo Face")
@@ -530,7 +541,7 @@ ui.document.configurable.line_spacing = 140
 other_payload = "{\"font_face\":\"X\",\"copt\":{\"font_size\":1}}"
 Assert.is_true(ReaderPrefs.saveDefaults(ui))
 local after_default = emptySidecar()
-Assert.is_true(ReaderPrefs.inject(after_default, { file = "/chapter2.html", setFontFace = function() end }))
+Assert.is_true(inject(after_default, { file = "/chapter2.html", setFontFace = function() end }))
 Assert.eq(after_default.data.copt_font_size, 31)
 Assert.eq(after_default.data.copt_line_spacing, 140)
 Assert.eq(require("json").decode(other_payload).copt.font_size, 31)
@@ -543,7 +554,7 @@ local old_file_book = {
     readSetting = ui.doc_settings.readSetting,
     delSetting = ui.doc_settings.delSetting,
 }
-Assert.is_false(ReaderPrefs.inject(old_file_book, { file = "/x.epub", setFontFace = function() end }))
+Assert.is_false(inject(old_file_book, { file = "/x.epub", setFontFace = function() end }))
 Assert.eq(old_file_book.data.copt_font_size, 12)
 Assert.eq(old_file_book.data.font_face, "Old Sidecar")
 
@@ -557,7 +568,7 @@ Assert.eq(global_data.copt_font_size, 36)
 Assert.eq(global_data.copt_t_page_margin, 20)
 Assert.eq(global_data.cre_font, "Demo Face")
 local new_file_book = emptySidecar()
-Assert.is_false(ReaderPrefs.inject(new_file_book, { file = "/brand-new.epub", setFontFace = function() end }))
+Assert.is_false(inject(new_file_book, { file = "/brand-new.epub", setFontFace = function() end }))
 Assert.is_nil(new_file_book.data.copt_font_size)
 -- 仅可能写入大书防护的 embedded 默认
 Assert.eq(new_file_book.data.copt_embedded_fonts, 0)
@@ -567,7 +578,7 @@ Assert.eq(new_file_book.data.copt_embedded_fonts, 0)
 for k in pairs(global_data) do global_data[k] = nil end
 saved_payload = nil
 local seeded = emptySidecar()
-Assert.is_true(ReaderPrefs.inject(seeded, { file = "/chapter.html", setFontFace = function() end }))
+Assert.is_true(inject(seeded, { file = "/chapter.html", setFontFace = function() end }))
 Assert.eq(global_data.copt_block_rendering_mode, 1)
 Assert.eq(seeded.data.copt_block_rendering_mode, 1)
 
@@ -577,14 +588,14 @@ saved_payload = require("json").encode({
 })
 global_data.copt_block_rendering_mode = 1
 local demoted = emptySidecar()
-Assert.is_true(ReaderPrefs.inject(demoted, { file = "/chapter.html", setFontFace = function() end }))
+Assert.is_true(inject(demoted, { file = "/chapter.html", setFontFace = function() end }))
 Assert.eq(demoted.data.copt_block_rendering_mode, 1)
 Assert.eq(demoted.data.copt_word_expansion, 5)
 Assert.eq(demoted.data.copt_font_size, 18)
 
 global_data.copt_block_rendering_mode = 3
 local keep_web = emptySidecar()
-Assert.is_true(ReaderPrefs.inject(keep_web, { file = "/chapter.html", setFontFace = function() end }))
+Assert.is_true(inject(keep_web, { file = "/chapter.html", setFontFace = function() end }))
 Assert.eq(keep_web.data.copt_block_rendering_mode, 3)
 
 global_data.copt_block_rendering_mode = 1
@@ -592,7 +603,7 @@ saved_payload = require("json").encode({
     copt = { block_rendering_mode = 2 },
 })
 local keep_book = emptySidecar()
-Assert.is_true(ReaderPrefs.inject(keep_book, { file = "/chapter.html", setFontFace = function() end }))
+Assert.is_true(inject(keep_book, { file = "/chapter.html", setFontFace = function() end }))
 Assert.eq(keep_book.data.copt_block_rendering_mode, 2)
 
 saved_payload = require("json").encode({ copt = { block_rendering_mode = 3 } })
@@ -602,7 +613,7 @@ local whole_web = {
     readSetting = ui.doc_settings.readSetting,
     delSetting = ui.doc_settings.delSetting,
 }
-Assert.is_false(ReaderPrefs.inject(whole_web, { file = "/x.epub", setFontFace = function() end }))
+Assert.is_false(inject(whole_web, { file = "/x.epub", setFontFace = function() end }))
 Assert.eq(whole_web.data.copt_block_rendering_mode, 3)
 
 -- 订阅文章（ephemeral 源）不降级。快照里的网页模式留下；没存过模式时写成网页，不吃全局平面。
@@ -611,12 +622,12 @@ rss_payload = require("json").encode({
     copt = { font_size = 22, block_rendering_mode = 3, word_expansion = 0 },
 })
 local rss_kept = emptySidecar()
-Assert.is_true(ReaderPrefs.inject(rss_kept, { file = "/rss.html", setFontFace = function() end }))
+Assert.is_true(inject(rss_kept, { file = "/rss.html", setFontFace = function() end }))
 Assert.eq(rss_kept.data.copt_block_rendering_mode, 3)
 Assert.eq(rss_kept.data.copt_font_size, 22)
 rss_payload = nil
 local rss_default = emptySidecar()
-Assert.is_true(ReaderPrefs.inject(rss_default, { file = "/rss.html", setFontFace = function() end }))
+Assert.is_true(inject(rss_default, { file = "/rss.html", setFontFace = function() end }))
 Assert.eq(rss_default.data.copt_block_rendering_mode, 3)
 
 return true

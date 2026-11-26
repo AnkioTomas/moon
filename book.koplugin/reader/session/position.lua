@@ -4,14 +4,9 @@
 @module koplugin.book.reader.session.position
 --]]
 
-local Position = {}
+local clampFraction = require("book.progress").clamp01
 
-local function clampFraction(raw)
-    local n = tonumber(raw) or 0
-    if n < 0 then return 0 end
-    if n > 1 then return 1 end
-    return n
-end
+local Position = {}
 
 --- 只有按章会话才折算：整书文档的 doc_frac 已是全书比例，
 --- 目录章序号只标位置，再按章数折算会把进度算歪。

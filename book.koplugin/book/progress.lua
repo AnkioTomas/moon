@@ -72,23 +72,23 @@ function Progress.closeDecision(identity)
     Progress.decisions[key] = nil
 end
 
---- fraction 钳制到 0..1。
+--- 钳制到 0..1，不做百分数换算（阅读器自己算的比例）。
+---@return number
+function Progress.clamp01(raw)
+    local n = tonumber(raw) or 0
+    if n < 0 then return 0 end
+    if n > 1 then return 1 end
+    return n
+end
+
+--- fraction 钳制到 0..1；源给的 (1, 100] 当百分数。略大于 1 的浮点误差仍是比例，不能当成 1%。
 ---@return number
 function Progress.clampFraction(raw)
-    local n = tonumber(raw)
-    if not n then
-        return 0
-    end
-    if n > 1 and n <= 100 then
+    local n = tonumber(raw) or 0
+    if n > 1 + 1e-6 and n <= 100 then
         n = n / 100
     end
-    if n < 0 then
-        return 0
-    end
-    if n > 1 then
-        return 1
-    end
-    return n
+    return Progress.clamp01(n)
 end
 
 --- 百分比钳制到 0..100 整数。

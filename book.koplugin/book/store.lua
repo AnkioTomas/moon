@@ -170,7 +170,7 @@ local function purgeBookFiles(source_id, stable_id, keep_sidecar, keep_cover)
     if lfs.attributes(dir, "mode") == "directory" then
         local keep = keep_sidecar and sidecarDirs(dir, lfs) or nil
         -- 漫画工作目录动辄上千张图，同步删要卡好几秒：同盘改名移走即刻生效，再分 tick 慢慢删。
-        -- 改名失败才退回同步删；中途关机留下的 .trash 由「清空缓存」一并清掉。
+        -- 改名失败才退回同步删。整个 .trash 一起清：中途休眠 / 关机留下的残留下次删书时带走。
         trash_seq = trash_seq + 1
         local trash = Paths.cacheDir() .. "/.trash"
         local moved = trash .. "/" .. os.time() .. "-" .. trash_seq
@@ -181,7 +181,7 @@ local function purgeBookFiles(source_id, stable_id, keep_sidecar, keep_cover)
                     os.rename(moved .. "/" .. name, dir .. "/" .. name)
                 end
             end
-            require("book.cache").purgeAsync(moved)
+            require("book.cache").purgeAsync(trash)
         elseif not require("ffi/util").purgeDir(dir) then
             logger.warn("book cache purge failed", dir)
             leftover = "partial"
@@ -218,7 +218,7 @@ function Store.forgetSource(source_id)
     local moved = trash .. "/" .. os.time() .. "-" .. trash_seq
     lfs.mkdir(trash)
     if os.rename(dir, moved) then
-        require("book.cache").purgeAsync(moved)
+        require("book.cache").purgeAsync(trash)
         return true
     end
     if not require("ffi/util").purgeDir(dir) then
@@ -237,15 +237,6 @@ local function purgeForgotten(source_id, ids)
             logger.warn("book cache purge failed", source_id, stable_id, leftover)
         end
     end
-end
-
---- 换 WebDAV 根：只撕 local 源里 webdav:// 书的库行与缓存；纯本地书不动。
----@return boolean
-function Store.forgetWebdav()
-    local ok, ids = BookDB.forgetPrefix("local", "webdav://")
-    if not ok then return false end
-    purgeForgotten("local", ids)
-    return true
 end
 
 --- 换本地书库目录：旧根下、新根外的纯本地书先收成待重匹配；无法再匹配的墓碑整本撕掉并清缓存。

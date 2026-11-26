@@ -98,18 +98,6 @@ Assert.len(XrayDB.list("local", "/keep.epub"), 1)
 Assert.is_nil(DB.rowexec(
     [[SELECT payload FROM review_cache WHERE source_id=?;]], SOURCE))
 
--- forgetPrefix：只撕 webdav://，纯本地路径留下
-Assert.is_true(BookDB.upsert({
-    source_id = "local", stable_id = "webdav://cloud.epub", title = "云端",
-}))
-Assert.is_true(ProgressDB.upsert("local", "webdav://cloud.epub", { fraction = 0.5 }))
-local ok_prefix, dropped = BookDB.forgetPrefix("local", "webdav://")
-Assert.is_true(ok_prefix)
-Assert.eq(table.concat(dropped, ","), "webdav://cloud.epub")
-Assert.is_nil(BookDB.get("local", "webdav://cloud.epub"))
-Assert.is_nil(ProgressDB.get("local", "webdav://cloud.epub"))
-Assert.eq(BookDB.get("local", "/keep.epub").title, "别的源", "纯本地书不动")
-
 -- stashOldRoot：旧根在架书收下架但保留进度/统计，等 md5 重匹配；无 path 的墓碑整本撕掉
 Assert.is_true(BookDB.upsert({
     source_id = "local", stable_id = "/mnt/us/documents/a.epub", title = "旧根",

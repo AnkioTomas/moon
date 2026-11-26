@@ -43,14 +43,12 @@ function Session.resolvePosition(identity, pos, ui)
     return source:refinePosition(pos, ui) or pos
 end
 
---- 月读是否认这份文档：Store.identityFor 能解析，且是章节文件或书架成员。
+--- 月读是否认这份文档：会话身份就是 Store.identityFor 按这份文件解析的，再看是章节文件还是书架成员。
 --- deleted=1 是书架已移除的成员，交回原生。
 ---@param snapshot ReaderSessionSnapshot|nil
 ---@return boolean
 local function moonRecognizes(snapshot)
     if not snapshot or not snapshot.identity then return false end
-    local file = snapshot.ui and snapshot.ui.document and snapshot.ui.document.file
-    if not Store.identityFor(file) then return false end
     local id = snapshot.identity
     if id.chapter_idx ~= nil then return true end
     -- deleted=1 是 touch 非成员；缺省 / 0 = 书架上的书
@@ -217,10 +215,8 @@ end
 --- 按章打开时 sidecar / 文档属性用书名，不用章文件 <title>（旧缓存仍是章名）。
 ---@param doc_settings table
 ---@param document table
-local function applyChapterBookTitle(doc_settings, document)
-    local file = document and document.file
-    if type(file) ~= "string" or file == "" then return end
-    local identity = Store.identityFor(file)
+---@param identity BookIdentity|nil
+local function applyChapterBookTitle(doc_settings, document, identity)
     local title = identity and identity.chapter_idx and identity.book and identity.book.title
     if type(title) ~= "string" or title == "" then return end
     local props = doc_settings:readSetting("doc_props") or {}
@@ -239,11 +235,14 @@ end
 ---@param doc_settings table
 ---@param document table
 function Session.onDocSettingsLoad(_plugin, doc_settings, document)
+    -- 三处都要身份：只查一次库（库外书每次查不到还要读设置、翻 meta.json）。
+    local file = document and document.file
+    local identity = type(file) == "string" and file ~= "" and Store.identityFor(file) or nil
     local prefs = require("reader.prefs")
-    prefs.inject(doc_settings, document)
-    prefs.injectComic(doc_settings, document)
+    prefs.inject(doc_settings, document, identity)
+    prefs.injectComic(doc_settings, document, identity)
     require("utils.extension").emit("reader.doc_settings", doc_settings, document)
-    applyChapterBookTitle(doc_settings, document)
+    applyChapterBookTitle(doc_settings, document, identity)
 end
 
 --- KOReader 2026.07 书籍元数据归档的坏状态：选归档目录的回调 path 为 nil 时 saveSetting 把
@@ -320,7 +319,6 @@ function Session.onReaderReady(plugin)
         })
     end
     span:finish(Session.SLOW_READY_MS, identity.source_id, chapter_mode and "chapter" or "book")
-    require("reader.page_diag").install()
 end
 
 --- 推送当前进度和注解。span 可选：关书 / 休眠把同步段拆进同一条 warn。
@@ -379,7 +377,6 @@ end
 --- CloseDocument：结清阅读状态；切章保留目录，真正关书清除全部章节状态。
 ---@param plugin table Book 插件实例
 function Session.onCloseDocument(plugin)
-    require("reader.page_diag").uninstall()
     local span = require("utils.perf").begin("reader.close")
     if Session._snapshot and plugin.ui then
         require("reader.prefs").captureAndSave(plugin.ui, Session._snapshot.identity)
@@ -423,7 +420,6 @@ function Session.onPageUpdate(plugin, page)
     end
     ChapterMode.refreshTocIfNeeded(session)
     Perf.slow("page.update", started_at)
-    require("reader.page_diag").notePageUpdate(started_at, session.page)
 end
 
 --- PosUpdate（滚动视图）：同 PageUpdate。

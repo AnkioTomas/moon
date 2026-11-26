@@ -123,11 +123,18 @@ function Highlights.collectAll()
     return items
 end
 
+local all_stamp, all_items
+
 --- 全库随机一条书摘。有多条时躲开上一句。
+--- 首页每次回前台都要一条：notes 表没变（NoteDB.stamp）就复用上次解码的结果，不再整表读 payload。
 ---@param avoid string|nil
 ---@return BookExcerptQuote|nil
 function Highlights.random(avoid)
-    local items = Highlights.collectAll()
+    local stamp = NoteDB.stamp()
+    if stamp ~= all_stamp then
+        all_stamp, all_items = stamp, Highlights.collectAll()
+    end
+    local items = all_items
     if #items == 0 then return nil end
     local i = math.random(#items)
     if #items > 1 and avoid and items[i].text == avoid then

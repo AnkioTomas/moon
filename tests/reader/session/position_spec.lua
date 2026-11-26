@@ -42,6 +42,16 @@ end
 Assert.eq(Position.fraction({ doc_fraction = -1 }, nil), 0)
 Assert.eq(Position.fraction({ doc_fraction = 2 }, nil), 1)
 
+-- 源进度：(1, 100] 当百分数；浮点误差略大于 1 仍是读完，不能变成 1%。
+local Progress = require("book.progress")
+Assert.eq(Progress.clampFraction(1.0000001), 1)
+Assert.eq(Progress.clampFraction(1), 1)
+Assert.eq(Progress.clampFraction(42), 0.42)
+Assert.eq(Progress.clampFraction(1.5), 0.015)
+Assert.eq(Progress.clampFraction(101), 1)
+Assert.eq(Progress.clampFraction(-0.1), 0)
+Assert.eq(Progress.clampFraction("x"), 0)
+
 -- 冷恢复期间仍保存当前章 / 精确位置，但章末不能把全书误标为已读。
 do
     local snapshot = {

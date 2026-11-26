@@ -17,11 +17,12 @@ local ReaderProgress = {}
 
 --- 当前 ProgressPosition；位置完全来自 ReaderSession 快照。
 ---@param snapshot ReaderSessionSnapshot
+---@param current BookChapter|false|nil 调用方已算出的 Toc.current（false = 不在任何章）；nil 现算
 ---@return ProgressPosition
-function ReaderProgress.position(snapshot)
-    local Session = require("reader.session")
+function ReaderProgress.position(snapshot, current)
     local Toc = require("reader.session.toc")
-    local position = Position.position(snapshot, Toc.list(snapshot), Session.chapterTitle(snapshot))
+    if current == nil then current = Toc.current(snapshot) end
+    local position = Position.position(snapshot, Toc.list(snapshot), current and current.title or nil)
     if position.chapter_idx then
         position.chapter_fraction = Toc.chapterFraction(snapshot) or position.chapter_fraction
     end
@@ -262,12 +263,11 @@ end
 
 --- 开书对比用的本地进度。库存行是上次落盘的位置；屏幕上的章已经走到它前面时，
 --- 以打开的章为准，否则弹窗会拿旧章（版权页）去跟云端比，选「本地」还会跳回去。
----@param id BookIdentity
 ---@param snapshot ReaderSessionSnapshot
+---@param row PendingProgress|nil 本地库存行
 ---@return ProgressPosition
-local function localProgressForPull(id, snapshot)
+local function localProgressForPull(snapshot, row)
     local live = ReaderProgress.position(snapshot)
-    local row = ProgressDB.get(id.source_id, id.stable_id)
     if not row then
         return live
     end
@@ -735,28 +735,23 @@ function ReaderProgress.pull(snapshot, opts)
             logger.warn("book.progress reader pull failed", id.source_id, id.stable_id, err)
             return tell(T(_("拉取进度失败：%1"), tostring(err or "")))
         end
-        local Session = require("reader.session")
-        if type(Session.resolvePosition) == "function" then
-            remote_pos = Session.resolvePosition(id, remote_pos, snapshot.ui) or remote_pos
-        end
-        local stored = ProgressDB.get(id.source_id, id.stable_id)
-        local stored_precise = stored and (
-            (type(stored.locator) == "string" and stored.locator ~= "")
-            or (tonumber(stored.page) and tonumber(stored.total_pages))
+        remote_pos = require("reader.session").resolvePosition(id, remote_pos, snapshot.ui) or remote_pos
+        local row = ProgressDB.get(id.source_id, id.stable_id)
+        local stored_precise = row and (
+            (type(row.locator) == "string" and row.locator ~= "")
+            or (tonumber(row.page) and tonumber(row.total_pages))
         )
         local now_idx = tonumber(id.chapter_idx)
         if not manual and started_idx and now_idx and started_idx ~= now_idx then
             -- 回包时人已经翻到别的章：这一次对比作废，别拿发起时的位置弹窗或把人拽走。
             logger.dbg("book.progress reader pull skip: chapter changed",
                 id.stable_id, started_idx, now_idx)
-            local row = ProgressDB.get(id.source_id, id.stable_id)
             if row and row.sync_status == 0 and source.syncProgressAsync then
                 source:syncProgressAsync({ identity = id, dirty_only = true }, function() end)
             end
             return
         end
-        local local_position = localProgressForPull(id, snapshot)
-        local row = ProgressDB.get(id.source_id, id.stable_id)
+        local local_position = localProgressForPull(snapshot, row)
         local page_level = type(meta) == "table" and meta.page_level == true
         if progressDiffers(local_position, remote_pos, id, snapshot, page_level) then
             -- 只有两边自上次同步后都动过才问；手动拉取是用户要看对比，照常问。
