@@ -60,33 +60,70 @@ function Setting.entries(desktop)
                             })
                         end
                     end
-                    local style = {}
-                    local function choice(key, title, icon, options, label)
-                        return function(iw)
+                    local colors = { [""] = _("跟随原文"), ["#333333"] = _("深灰"), ["#555555"] = _("灰"), ["#777777"] = _("浅灰") }
+                    local function colorText(v) return colors[v or ""] or colors[""] end
+                    local function scaleText(v)
+                        v = v or 0
+                        return v == 0 and _("跟随原文") or v .. "%"
+                    end
+                    local bilingual = {
+                        function(iw)
                             return Row.widget({
                                 width = iw, chevron = true,
-                                kind = "nav", icon = icon, title = title,
-                                status = label(translate[key]),
+                                kind = "nav", icon = "palette", title = _("双语对照"),
+                                status = colorText(translate.bilingual_color) .. " · " .. scaleText(translate.bilingual_scale),
                                 callback = function()
-                                    local items = {}
-                                    for _idx, option in ipairs(options) do
-                                        items[#items + 1] = { text = label(option), checked = option == translate[key], callback = function()
-                                            translate[key] = option
-                                            MoonSettings.save("features.translate", translate)
-                                            desktop:updateView()
-                                        end }
-                                    end
-                                    require("ui.themes.widgets.list"):new{ title = title, centered = true, items = items }:show()
+                                    local draft = {
+                                        color = translate.bilingual_color or "",
+                                        scale = translate.bilingual_scale or 0,
+                                    }
+                                    require("ui.themes.widgets.settings"):new{
+                                        title = _("双语对照"),
+                                        items = function()
+                                            return {
+                                                {
+                                                    title = _("双语译文颜色"),
+                                                    items = {
+                                                        { value = "", text = colors[""] },
+                                                        { value = "#333333", text = colors["#333333"] },
+                                                        { value = "#555555", text = colors["#555555"] },
+                                                        { value = "#777777", text = colors["#777777"] },
+                                                    },
+                                                    current = draft.color,
+                                                    on_select = function(value) draft.color = value end,
+                                                },
+                                                {
+                                                    title = _("双语译文字号"),
+                                                    items = {
+                                                        { value = 0, text = scaleText(0) },
+                                                        { value = 80, text = "80%" },
+                                                        { value = 90, text = "90%" },
+                                                        { value = 100, text = "100%" },
+                                                        { value = 110, text = "110%" },
+                                                    },
+                                                    current = draft.scale,
+                                                    on_select = function(value) draft.scale = value end,
+                                                },
+                                            }
+                                        end,
+                                        buttons = function(page)
+                                            return {
+                                                { text = _("取消"), callback = function() page:close() end },
+                                                { text = _("确定"), variant = "primary", callback = function()
+                                                    translate.bilingual_color = draft.color
+                                                    translate.bilingual_scale = draft.scale
+                                                    MoonSettings.save("features.translate", translate)
+                                                    page:close()
+                                                    desktop:updateView()
+                                                end },
+                                            }
+                                        end,
+                                    }:show()
                                 end,
                             })
-                        end
-                    end
-                    local colors = { [""] = _("跟随原文"), ["#333333"] = _("深灰"), ["#555555"] = _("灰"), ["#777777"] = _("浅灰") }
-                    style[#style + 1] = choice("bilingual_color", _("双语译文颜色"), "palette",
-                        { "", "#333333", "#555555", "#777777" }, function(v) return colors[v] end)
-                    style[#style + 1] = choice("bilingual_scale", _("双语译文字号"), "format_size",
-                        { 0, 80, 90, 100, 110 }, function(v) return v == 0 and _("跟随原文") or v .. "%" end)
-                    return { { title = _("翻译"), rows = rows }, { title = _("双语对照"), rows = style } }
+                        end,
+                    }
+                    return { { title = _("翻译"), rows = rows }, { title = _("双语对照"), rows = bilingual } }
                 end,
             },
         },

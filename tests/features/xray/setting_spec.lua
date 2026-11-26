@@ -106,3 +106,45 @@ section.rows[1](600).callback()
 Assert.is_true(conf.translate.edge_translation_enabled)
 Assert.eq(saved[#saved], "features.translate")
 Assert.len(translate[1].page.sections()[1].rows, 2)
+
+-- 双语样式是一张表单：只有颜色和字号。对照方式在翻译时选，不写进设置。
+local forms = {}
+package.preload["ui.themes.widgets.settings"] = function()
+    return {
+        new = function(_self, opts)
+            forms[#forms + 1] = opts
+            return { show = function() end }
+        end,
+    }
+end
+local bilingual = translate[1].page.sections()[2]
+Assert.eq(bilingual.title, "双语对照")
+Assert.len(bilingual.rows, 1)
+Assert.eq(bilingual.rows[1](600).status, "跟随原文 · 跟随原文")
+bilingual.rows[1](600).callback()
+Assert.len(forms, 1)
+local items = forms[1].items()
+Assert.eq(items[1].title, "双语译文颜色")
+Assert.eq(items[2].title, "双语译文字号")
+Assert.eq(items[1].current, "")
+Assert.eq(items[2].current, 0)
+local saved_before = #saved
+local updates_before = updates
+local page = { closed = false, close = function(self) self.closed = true end }
+items[1].on_select("#555555")
+forms[1].buttons(page)[1].callback()
+Assert.is_true(page.closed)
+Assert.eq(#saved, saved_before, "取消不落盘")
+Assert.is_nil(conf.translate.bilingual_color)
+bilingual.rows[1](600).callback()
+items = forms[2].items()
+items[1].on_select("#555555")
+items[2].on_select(90)
+page = { closed = false, close = function(self) self.closed = true end }
+forms[2].buttons(page)[2].callback()
+Assert.is_true(page.closed)
+Assert.eq(conf.translate.bilingual_color, "#555555")
+Assert.eq(conf.translate.bilingual_scale, 90)
+Assert.is_nil(conf.translate.bilingual_unit, "对照方式不进设置")
+Assert.eq(saved[#saved], "features.translate")
+Assert.eq(updates, updates_before + 1)
