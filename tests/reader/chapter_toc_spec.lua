@@ -53,6 +53,12 @@ Assert.eq(shown:getTitle(), "目录")
 Assert.eq(selected, 1)
 Assert.eq(selected_anchor.title, "第一章")
 
+-- KOReader #16393：副标题 self.ui.bookinfo:expandString("%c")；章节适配器必须提供。
+Assert.eq(shown.ui.bookinfo:expandString("%c"), "3")
+Assert.eq(shown.ui.bookinfo:expandString("Current page: %c"), "Current page: 3")
+Assert.is_false(shown.ui.handmade:isHandmadeTocEnabled())
+Assert.is_false(shown.ui.handmade:isHandmadeHiddenFlowsEnabled())
+
 -- pageno 永远是数字：nil / 不在目录 / 空标题章都不能把 nil 传给 ReaderToc。
 local toc = {
     { idx = 1, title = "一" },

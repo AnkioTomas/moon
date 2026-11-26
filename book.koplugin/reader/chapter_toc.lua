@@ -2,7 +2,8 @@
 连续章节目录：把源目录适配成 KOReader 原生 ReaderToc。
 
 仅替换“页码跳转”为“章节跳转”；缩进、折叠、搜索、当前项定位和菜单样式
-全部复用 KOReader 原生实现。
+全部复用 KOReader 原生实现。适配器只挂目录需要的 ui 子集（含 bookinfo /
+handmade stub，对齐 KOReader #16393 起的副标题与菜单）。
 
 @module koplugin.book.reader.chapter_toc
 --]]
@@ -86,12 +87,25 @@ function ChapterToc.show(toc, current_idx, on_select)
         },
     }, { __index = ReaderToc })
 
+    -- ReaderToc（KOReader #16393 起）副标题走 ui.bookinfo:expandString("%c")；
+    -- 章节模式没有完整 ReaderUI，缺 stub 会 bookinfo nil。handmade 一并挡掉，避免点菜单再炸。
     adapter.ui = {
         document = {
             hasHiddenFlows = function() return false end,
         },
         link = {
             addCurrentLocationToStack = function() end,
+        },
+        bookinfo = {
+            expandString = function(_self, str)
+                if type(str) ~= "string" then return str end
+                return (str:gsub("%%c", tostring(adapter.pageno or 1)))
+            end,
+        },
+        handmade = {
+            isHandmadeTocEnabled = function() return false end,
+            isHandmadeHiddenFlowsEnabled = function() return false end,
+            isHandmadeHiddenFlowsEditEnabled = function() return false end,
         },
         handleEvent = function(_self, event)
             if event.handler == "onGotoPage" then
