@@ -206,16 +206,10 @@ end
 ---@param res table
 ---@return boolean
 local function hasDiamWallCookie(res)
-    if type(Request.headerAll) == "function" then
-        for _idx, line in ipairs(Request.headerAll(res, "Set-Cookie")) do
-            if type(line) == "string" and line:lower():find("__diamwall", 1, true) then
-                return true
-            end
-        end
-        return false
+    for _idx, line in ipairs(Request.headerAll(res, "Set-Cookie")) do
+        if line:lower():find("__diamwall", 1, true) then return true end
     end
-    local single = Request.header(res, "Set-Cookie")
-    return type(single) == "string" and single:lower():find("__diamwall", 1, true) ~= nil
+    return false
 end
 
 --- 判断是否为 DiamWall 反机器人拦截：

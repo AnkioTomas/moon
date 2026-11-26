@@ -236,7 +236,13 @@ function Online:ensureImage(cb)
         end
     end
     self:watch(on)
-    self:ensure()
+    -- 冷却中 / 队列拒绝：不会有任务来通知，当场用旧图（没有就报错）回掉，不留悬挂的等待。
+    if not self:ensure() then
+        self:unwatch(on)
+        local path = self:imagePath()
+        if path then cb(path) else cb(nil, "image") end
+        return
+    end
     return { cancel = function() self:unwatch(on) end }
 end
 
@@ -306,20 +312,21 @@ local function notify(self, data, err)
 end
 
 --- JSON 或图过期才入队。未过期是空操作。url 变了（换地点）才取消在跑的同名任务。
+---@return boolean pending 有本 url 的任务在队列里（新入队或已在跑），之后会通知观察者
 function Online:ensure()
-    if self:fresh() and self:imageReady() then return end
-    if self._retry_at and os.time() < self._retry_at then return end
+    if self:fresh() and self:imageReady() then return false end
+    if self._retry_at and os.time() < self._retry_at then return false end
     local Tasks = require("workers.tasks")
     local key = "online\0" .. self.name
     local url = self:url()
     local existing = Tasks.get(key)
     if existing then
-        if existing._online_url == url then return end
+        if existing._online_url == url then return true end
         existing.cancel()
     end
     require("l10n").apply()
     local title = require("gettext")(self.title or self.name)
-    Tasks.enqueue{
+    return Tasks.enqueue{
         key = key,
         kind = "online",
         title = title,
@@ -382,7 +389,7 @@ function Online:ensure()
             end
             return { cancel = stop }
         end,
-    }
+    } ~= nil
 end
 
 return Online

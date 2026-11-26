@@ -33,6 +33,7 @@ package.loaded["util"] = util_copy
 local captured = {}
 local canned_res
 local canned_err
+local held -- 非 nil 时请求不回包，回调存这里，用来看车道里同时在飞几路
 package.preload["http.request"] = function()
     return {
         ok = function(code)
@@ -41,6 +42,10 @@ package.preload["http.request"] = function()
         end,
         request = function(opts, cb)
             captured[#captured + 1] = opts
+            if held then
+                held[#held + 1] = cb
+                return { cancel = function() end }
+            end
             local res, err = canned_res, canned_err
             if type(canned_res) == "function" then res, err = canned_res(opts) end
             cb(res, err)
@@ -472,6 +477,25 @@ do
     local req = captured[#captured]
     Assert.eq(req.headers["Depth"], "infinity")
     Assert.eq(req.timeout, 120)
+end
+
+-- 车道：列目录同一台最多 4 路并发；读写串行，且不被列目录挤占。
+do
+    local dav = Webdav.new({ url = "http://lanes.example/dav" })
+    held, captured = {}, {}
+    local listed = 0
+    for _i = 1, 6 do dav:listAsync("d", function() listed = listed + 1 end) end
+    Assert.len(held, 4, "列目录最多 4 路同时在飞")
+    dav:deleteAsync("a", function() end)
+    dav:deleteAsync("b", function() end)
+    Assert.len(held, 5, "读写另一条车道，第二个排队")
+    local list_cb = held[1]
+    list_cb({ code = 207, body = "<d:multistatus xmlns:d=\"DAV:\"></d:multistatus>" })
+    Assert.eq(listed, 1)
+    Assert.len(held, 6, "列目录完成一路就放下一路")
+    held[5]({ code = 201 })
+    Assert.len(held, 7, "读写完成后放行下一个")
+    held = nil
 end
 
 -- ── 还原现场（不影响后续 spec 文件）────────────────────────

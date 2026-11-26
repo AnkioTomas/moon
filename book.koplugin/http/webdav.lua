@@ -35,8 +35,11 @@ local Webdav = {}
 Webdav.__index = Webdav
 
 --- 同一台 WebDAV 同时只飞一个请求。笔记、统计、书架、上传并行时，PW3 的 Wi-Fi 会把每一路都拖到超时。
----@type table<string, { running: boolean, queue: function[] }>
+---@type table<string, { active: integer, queue: function[] }>
 local lanes = {}
+
+--- 列目录允许的同时在飞请求数。完整读写仍串行，避免和笔记 / 上传互相拖垮弱网设备。
+local LIST_CONCURRENCY = 4
 
 --- 本进程已经确认存在的目录（完整 URL）。建过或探测过就不再 MKCOL。
 ---@type table<string, boolean>
@@ -96,28 +99,33 @@ function Webdav:join(path, as_dir)
     return url
 end
 
---- 同一 url 上的请求串行（上传、下载、MKCOL 等）。start(release) 开始一次请求，结束时必须 release（含失败）。
+--- 同一 url 一条车道：读写（上传、下载、MKCOL 等）limit=1 串行；列目录另一条，最多 LIST_CONCURRENCY 路并发
+--- （硬刷新要对大量书文件夹并发 PROPFIND，不能跟读写挤一条串行车道）。
+--- start(release) 开始一次请求，结束时必须 release（含失败）。
 --- 回调先于 release：回调里再发的请求排在后面，不会和当前这次重叠，也不会死锁。
---- 列目录另走 _list：硬刷新要对大量书文件夹并发 PROPFIND，不能再跟读写挤一条串行车道。
 ---@param start fun(release: fun()): { cancel: fun() }|nil
+---@param limit integer|nil 缺省 1
 ---@return { cancel: fun() }
-function Webdav:_one(start)
-    local key = self.url
+function Webdav:_one(start, limit)
+    limit = limit or 1
+    local key = limit .. "\0" .. self.url
     local lane = lanes[key]
     if not lane then
-        lane = { running = false, queue = {} }
+        lane = { active = 0, queue = {} }
         lanes[key] = lane
     end
     local handle = {}
     local function go()
+        lane.active = lane.active + 1
         local released = false
         local function release()
             if released then return end
             released = true
+            lane.active = lane.active - 1
             local nxt = table.remove(lane.queue, 1)
             if nxt then
                 nxt()
-            elseif lanes[key] == lane then
+            elseif lane.active == 0 and lanes[key] == lane then
                 lanes[key] = nil
             end
         end
@@ -127,7 +135,7 @@ function Webdav:_one(start)
             release()
         end
     end
-    if lane.running then
+    if lane.active >= limit then
         local entry = go
         lane.queue[#lane.queue + 1] = entry
         handle.cancel = function()
@@ -136,7 +144,6 @@ function Webdav:_one(start)
             end
         end
     else
-        lane.running = true
         go()
     end
     return handle
@@ -145,8 +152,9 @@ end
 --- 带 Basic 凭据发请求：成功 cb(res)；非 2xx cb(nil, 文案, code)；网络错误 cb(nil, err)。
 ---@param opts HttpRequest
 ---@param cb fun(res: table|nil, err: string|nil, code: number|nil)
+---@param limit integer|nil 车道并发数，见 _one
 ---@return HttpJob
-function Webdav:_request(opts, cb)
+function Webdav:_request(opts, cb, limit)
     opts.auth_username = self.username
     opts.auth_password = self.password
     return self:_one(function(release)
@@ -172,23 +180,7 @@ function Webdav:_request(opts, cb)
             if job and job.cancel then job:cancel() end
             if not fired then fired = true; release() end
         end }
-    end)
-end
-
-local MONTHS = { Jan = 1, Feb = 2, Mar = 3, Apr = 4, May = 5, Jun = 6,
-    Jul = 7, Aug = 8, Sep = 9, Oct = 10, Nov = 11, Dec = 12 }
-
---- RFC 1123 日期（`Tue, 02 Jan 2024 03:04:05 GMT`）→ UTC 秒。
----@param value string|nil
----@return number|nil
-local function httpDate(value)
-    local d, mon, y, h, mi, s = tostring(value or ""):match("(%d+) (%a+) (%d+) (%d+):(%d+):(%d+)")
-    if not MONTHS[mon or ""] then return nil end
-    local t = os.time({ year = tonumber(y), month = MONTHS[mon], day = tonumber(d),
-        hour = tonumber(h), min = tonumber(mi), sec = tonumber(s), isdst = false })
-    -- os.time 按本地时区解释表，补回本地与 UTC 的差。
-    local now = os.time()
-    return t + os.difftime(now, os.time(os.date("!*t", now)))
+    end, limit)
 end
 
 --- href 归一成不含 scheme/host、去尾斜杠的路径，供和被列目录比较、拼相对路径。
@@ -221,6 +213,7 @@ local function parseList(xml, folder_url, folder_path)
             local is_collection = item:find("<[%w_]*:?collection[^<]*/>")
                 or item:find("<[%w_]*:?collection>%s*</[%w_]*:?collection>")
             local is_dir = not is_empty_type and is_collection ~= nil
+            local modified = item:match("<[%w_]*:?getlastmodified[^>]*>(.-)</[%w_]*:?getlastmodified>")
 
             -- 回包里第一条通常是被列目录自身，跳过。
             if not is_dir or full_path ~= folder_href then
@@ -239,7 +232,7 @@ local function parseList(xml, folder_url, folder_path)
                     is_dir = is_dir,
                     size = is_dir and 0
                         or tonumber(item:match("<[%w_]*:?getcontentlength[^>]*>(%d+)</[%w_]*:?getcontentlength>")) or 0,
-                    mtime = httpDate(item:match("<[%w_]*:?getlastmodified[^>]*>(.-)</[%w_]*:?getlastmodified>")),
+                    mtime = modified and Text.parseHttpDate(modified),
                 }
             end
         end
@@ -251,89 +244,6 @@ local function parseList(xml, folder_url, folder_path)
         return a.name < b.name
     end)
     return entries
-end
-
---- 列目录允许的同时在飞请求数。完整读写仍走 _one 串行，避免和笔记 / 上传互相拖垮弱网设备。
-local LIST_CONCURRENCY = 4
-
----@type table<string, { active: integer, queue: function[] }>
-local list_lanes = {}
-
---- 同一 url 上的列目录请求：最多 LIST_CONCURRENCY 路同时在飞，其余排队。
----@param start fun(release: fun()): { cancel: fun() }|nil
----@return { cancel: fun() }
-function Webdav:_list(start)
-    local key = self.url
-    local lane = list_lanes[key]
-    if not lane then
-        lane = { active = 0, queue = {} }
-        list_lanes[key] = lane
-    end
-    local handle = {}
-    local function go()
-        lane.active = lane.active + 1
-        local released = false
-        local function release()
-            if released then return end
-            released = true
-            lane.active = lane.active - 1
-            local nxt = table.remove(lane.queue, 1)
-            if nxt then
-                nxt()
-            elseif lane.active == 0 and list_lanes[key] == lane then
-                list_lanes[key] = nil
-            end
-        end
-        local job = start(release)
-        handle.cancel = function()
-            if job and job.cancel then job:cancel() end
-            release()
-        end
-    end
-    if lane.active >= LIST_CONCURRENCY then
-        local entry = go
-        lane.queue[#lane.queue + 1] = entry
-        handle.cancel = function()
-            for i = #lane.queue, 1, -1 do
-                if lane.queue[i] == entry then table.remove(lane.queue, i) end
-            end
-        end
-    else
-        go()
-    end
-    return handle
-end
-
---- 列目录专用请求：并发走 _list，成功 / 失败回调与 _request 相同。
----@param opts HttpRequest
----@param cb fun(res: table|nil, err: string|nil, code: number|nil)
----@return HttpJob
-function Webdav:_listRequest(opts, cb)
-    opts.auth_username = self.username
-    opts.auth_password = self.password
-    return self:_list(function(release)
-        local fired = false
-        local function finish(res, err)
-            if fired then return end
-            fired = true
-            local pok, err_obj = xpcall(function()
-                if err then
-                    cb(nil, networkErr(err))
-                elseif not res or not Request.ok(res.code) then
-                    cb(nil, statusErr(res and res.code), res and tonumber(res.code))
-                else
-                    cb(res)
-                end
-            end, debug.traceback)
-            release()
-            if not pok then error(err_obj, 0) end
-        end
-        local job = Request.request(opts, finish)
-        return { cancel = function()
-            if job and job.cancel then job:cancel() end
-            if not fired then fired = true; release() end
-        end }
-    end)
 end
 
 --- Nonblocking directory listing。opts.depth 缺省 "1"；也支持 "infinity"。
@@ -357,7 +267,7 @@ function Webdav:listAsync(path, cb, opts)
     }
     if opts.timeout then req.timeout = opts.timeout end
     if opts.connect_timeout then req.connect_timeout = opts.connect_timeout end
-    return self:_listRequest(req, function(res, err, code)
+    return self:_request(req, function(res, err, code)
         if not res then
             cb(nil, err, code)
             return
@@ -372,7 +282,7 @@ function Webdav:listAsync(path, cb, opts)
             return
         end
         cb(parseList(xml, url, path))
-    end)
+    end, LIST_CONCURRENCY)
 end
 
 --- Nonblocking download to dest.

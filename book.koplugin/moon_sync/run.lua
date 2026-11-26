@@ -48,10 +48,25 @@ local function localPath(rel)
     return nil
 end
 
----@param data string
----@return string
-local function hashOf(data)
-    return require("ffi/sha2").md5(data)
+--- 本进程按路径记 size + mtime → hash：没改过的文件不再整读重算（字体动辄几 MB，ffi/sha2 是纯 Lua）。
+--- 一轮里两次扫描（规划前、上传后）也只算一遍。mtime 只到秒：一秒内刚改过的不记，免得同秒同长度的
+--- 第二次修改被当成没变。
+---@type table<string, { size: number, mtime: number, hash: string }>
+local hashes = {}
+
+---@param path string
+---@param attr table lfs.attributes
+---@return string|nil
+local function hashFile(path, attr)
+    local hit = hashes[path]
+    if hit and hit.size == attr.size and hit.mtime == attr.modification then return hit.hash end
+    local data = Fs.read(path)
+    if not data then return nil end
+    local hash = require("ffi/sha2").md5(data) --[[@as string]]
+    if attr.modification < os.time() - 1 then
+        hashes[path] = { size = attr.size, mtime = attr.modification, hash = hash }
+    end
+    return hash
 end
 
 ---@param dir string
@@ -62,17 +77,14 @@ local function walk(dir, prefix, out)
         if not name:find("\0", 1, true) and name ~= "." and name ~= ".." then
             local path = dir .. "/" .. name
             local rel = prefix .. name
-            local mode = require("libs/libkoreader-lfs").attributes(path, "mode")
+            local attr = require("libs/libkoreader-lfs").attributes(path)
+            local mode = attr and attr.mode
             if mode == "directory" then
                 walk(path, rel .. "/", out)
             elseif mode == "file" and Plan.safeRel(rel) then
-                local data = Fs.read(path)
-                if data then
-                    out[rel] = {
-                        path = path,
-                        hash = hashOf(data),
-                        mtime = require("libs/libkoreader-lfs").attributes(path, "modification") or 0,
-                    }
+                local hash = hashFile(path, attr)
+                if hash then
+                    out[rel] = { path = path, hash = hash, mtime = attr.modification }
                 end
             end
         end

@@ -17,15 +17,18 @@ local Paper = setmetatable({
 }, Online)
 Paper.__index = Paper
 
+--- fetch 的 args.city 临时写在 self.city（base 约定），没有才读首页天气设置。
+--- 不能叫 Paper:city()：方法会被 self.city 字符串遮住。
+---@param self BookOnlinePaper
 ---@return string
-function Paper:city()
-    local home = require("utils.settings").get("desktop.pages.home")
-    return Text.urlEncode(Text.trim(home.home_weather_city or ""))
+local function city(self)
+    local name = self.city or require("utils.settings").get("desktop.pages.home").home_weather_city
+    return Text.urlEncode(Text.trim(name or ""))
 end
 
 ---@return string
 function Paper:url()
-    return self.host .. "/paper?type=json&city=" .. self:city()
+    return self.host .. "/paper?type=json&city=" .. city(self)
 end
 
 --- 竖屏尺寸；接口只接受 240-2560 的整数。彩屏不带 ink，水墨屏 ink=1。
@@ -38,7 +41,7 @@ function Paper:imageUrl()
     end
     w = math.max(240, math.min(2560, math.floor(w)))
     h = math.max(240, math.min(2560, math.floor(h)))
-    local q = string.format("width=%d&height=%d&city=%s", w, h, self:city())
+    local q = string.format("width=%d&height=%d&city=%s", w, h, city(self))
     if not Device.screen:isColorEnabled() then
         q = q .. "&ink=1"
     end

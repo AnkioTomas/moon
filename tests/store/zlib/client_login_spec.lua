@@ -17,6 +17,7 @@ package.preload["http.request"] = function()
     return {
         ok = function(code) return code >= 200 and code < 300 end,
         header = function() end,
+        headerAll = function() return {} end,
         request = function(opts, cb)
             urls[#urls + 1] = opts.url
             sent[#urls] = opts.headers

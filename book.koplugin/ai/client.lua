@@ -286,15 +286,18 @@ local function sseAccumulator()
         if choice and choice.finish_reason then acc.finish = choice.finish_reason end
     end
 
+    -- 认出 SSE 事件后 raw 就用不上了，丢掉：长回答不再在内存里存两份。
     function acc.feed(chunk)
-        acc.raw[#acc.raw + 1] = chunk
-        acc.buf = acc.buf .. chunk
+        if acc.raw then acc.raw[#acc.raw + 1] = chunk end
+        local buf, pos = acc.buf .. chunk, 1
         while true do
-            local nl = acc.buf:find("\n", 1, true)
+            local nl = buf:find("\n", pos, true)
             if not nl then break end
-            line((acc.buf:sub(1, nl - 1):gsub("\r$", "")))
-            acc.buf = acc.buf:sub(nl + 1)
+            line((buf:sub(pos, nl - 1):gsub("\r$", "")))
+            pos = nl + 1
         end
+        acc.buf = buf:sub(pos)
+        if acc.events > 0 then acc.raw = nil end
     end
 
     function acc.done()

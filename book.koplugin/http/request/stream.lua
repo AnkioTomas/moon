@@ -101,14 +101,15 @@ function Stream.open(opts, handlers)
             end
             self.response_headers = headers
             local code = headers:get_status_code()
+            -- 跟随的中间跳不交给 on_headers：下载会按它开 / 截断 .part，探测会按 302 判坏。
+            if opts.allow_redirects and (code == 301 or code == 302) then
+                return self:_finalize_request()
+            end
             if not state.cancelled and handlers.on_headers and not Fetch.call("http stream headers", function()
                 handlers.on_headers(code, headers)
                 return true
             end) then
                 state.data_err = "stream callback failed"
-            end
-            if opts.allow_redirects and (code == 301 or code == 302) then
-                return self:_finalize_request()
             end
             local transfer = headers:get("Transfer-Encoding", true)
             if transfer and tostring(transfer):lower() == "chunked" then

@@ -92,12 +92,6 @@ local function chapterTitle(line)
     return nil
 end
 
----@param line string
----@return boolean
-local function isChapterTitle(line)
-    return chapterTitle(line) ~= nil
-end
-
 --- 判断一行是否应当保留为独立段落（列表或对话）。
 ---@param line string
 ---@return boolean
@@ -619,6 +613,5 @@ function Text2Epub.build(opts, cb, on_progress)
 end
 
 Text2Epub.chapterTitle = chapterTitle
-Text2Epub._isChapterTitle = isChapterTitle
 
 return Text2Epub

@@ -236,7 +236,7 @@ local function ipv6(raw)
     if inner then s = inner end
     local zone = s:match("%%([%w%._:-]+)$")
     if zone then s = s:sub(1, -(#zone + 2)) end
-    local _, doubles = s:gsub("::", "::")
+    local _s, doubles = s:gsub("::", "::")
     if doubles > 1 or not s:find(":", 1, true) then return nil end
     local function groups(part)
         if part == "" then return 0 end

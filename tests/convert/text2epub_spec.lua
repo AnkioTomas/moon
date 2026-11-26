@@ -158,16 +158,16 @@ end
 
 -- 常见独立章节名
 do
-    Assert.is_true(Text2Epub._isChapterTitle("第十二卷 风起"))
-    Assert.is_true(Text2Epub._isChapterTitle("序章"))
-    Assert.is_true(Text2Epub._isChapterTitle("最终章 归途"))
-    Assert.is_true(Text2Epub._isChapterTitle("Chapter IV - Return"))
-    Assert.is_true(Text2Epub._isChapterTitle("Section 12: Return"))
-    Assert.is_true(Text2Epub._isChapterTitle("===第001章 养母婉娘==="))
-    Assert.is_true(Text2Epub._isChapterTitle("第一部 风起"))
-    Assert.is_false(Text2Epub._isChapterTitle("第一部门负责审批"))
-    Assert.is_false(Text2Epub._isChapterTitle("第二天傍晚，我来到夜总会"))
-    Assert.is_false(Text2Epub._isChapterTitle("这只是普通正文"))
+    Assert.not_nil(Text2Epub.chapterTitle("第十二卷 风起"))
+    Assert.not_nil(Text2Epub.chapterTitle("序章"))
+    Assert.not_nil(Text2Epub.chapterTitle("最终章 归途"))
+    Assert.not_nil(Text2Epub.chapterTitle("Chapter IV - Return"))
+    Assert.not_nil(Text2Epub.chapterTitle("Section 12: Return"))
+    Assert.not_nil(Text2Epub.chapterTitle("===第001章 养母婉娘==="))
+    Assert.not_nil(Text2Epub.chapterTitle("第一部 风起"))
+    Assert.is_nil(Text2Epub.chapterTitle("第一部门负责审批"))
+    Assert.is_nil(Text2Epub.chapterTitle("第二天傍晚，我来到夜总会"))
+    Assert.is_nil(Text2Epub.chapterTitle("这只是普通正文"))
 end
 
 -- 带装饰符的章节标题应去掉装饰后写入目录。

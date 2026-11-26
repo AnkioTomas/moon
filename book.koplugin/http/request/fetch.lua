@@ -149,6 +149,7 @@ function Fetch.options(opts, timeout_ratio)
     local user_agent = Fetch.getHeader(opts.headers, "User-Agent")
     -- 超时 = 「网络超时」× 倍率（调用方已换算的原样用），规则见 http/timeout.lua。
     local request_timeout, connect_timeout = require("http.timeout").resolve(opts, timeout_ratio)
+    local origin_host = (opts.url:match("^%a[%w+.-]*://([^/?#]*)") or ""):gsub("^.*@", ""):gsub(":%d+$", ""):lower()
     return {
         method = opts.method or "GET",
         body = opts.body,
@@ -156,10 +157,13 @@ function Fetch.options(opts, timeout_ratio)
         connect_timeout = connect_timeout,
         allow_redirects = opts.allow_redirects,
         user_agent = user_agent and tostring(user_agent),
+        -- 跟随跳转时 turbo 每一跳都会再调这里；跳到别的主机（CDN / S3）不能把账号密码带过去。
         on_headers = function(headers)
             if opts.body_size then headers:add("Content-Length", opts.body_size) end
             addHeaders(headers, opts.headers)
-            addHeaders(headers, auth)
+            if auth and tostring(headers:get("Host", true) or ""):lower() == origin_host then
+                addHeaders(headers, auth)
+            end
         end,
     }
 end

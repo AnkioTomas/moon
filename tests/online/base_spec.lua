@@ -250,5 +250,30 @@ do -- 离线不拉网，联网再入队
     Assert.eq(got.ok, "late")
 end
 
+do -- ensureImage：失败冷却中不会入队，当场回调而不是一直挂着等通知
+    local Pic = setmetatable({ name = "pic", title = "图", ttl = 60, image_ext = "jpg" }, Online)
+    Pic.__index = Pic
+    function Pic:url() return self.host .. "/pic" end
+    function Pic:parse(body) return Online.decode(body) end
+    requests, by_key = {}, {}
+    Pic._retry_at = os.time() + 60
+    Assert.is_false(Pic:ensure())
+    local got_path, got_err = "unset", nil
+    Assert.is_nil(Pic:ensureImage(function(path, err) got_path, got_err = path, err end))
+    Assert.is_nil(got_path)
+    Assert.eq(got_err, "image")
+    Assert.eq(#requests, 0)
+    Assert.is_nil(Pic._watchers[1], "不留观察者")
+
+    Pic._retry_at = nil
+    got_path = "unset"
+    local handle = Pic:ensureImage(function(path) got_path = path end)
+    Assert.not_nil(handle, "入队了就等任务通知")
+    Assert.eq(got_path, "unset")
+    Assert.is_true(Pic:ensure(), "同一 url 的任务已在跑")
+    Assert.eq(#requests, 1)
+    handle.cancel()
+end
+
 os.execute("rm -rf '" .. cache_dir .. "'")
 return true

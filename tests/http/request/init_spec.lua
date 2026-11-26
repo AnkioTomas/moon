@@ -601,7 +601,7 @@ do
     turbo.async.HTTPClient = function()
         return {
             fetch = function(_, _url, opts)
-                sent = {}
+                sent = { Host = "127.0.0.1" }
                 opts.on_headers({
                     get = function(_, name) return sent[name] end,
                     set = function(_, name, value) sent[name] = value end,
@@ -672,4 +672,21 @@ do
     Assert.matches(select(2, Fetch.begin({ url = "http://127.0.0.1:8321/status" }, "spec")), "pump stub")
     Assert.matches(select(2, Fetch.begin({ url = "http://127.0.0.10/x" }, "spec")), "网络不可用")
     Turbo.acquire = acquire
+end
+
+-- Basic 认证只发给原主机：跟随跳转到别的主机（CDN）时不带账号密码。
+do
+    local Fetch = require("http.request.fetch")
+    local opts = Fetch.options({ url = "https://User:pw@NAS.example:8443/dav/a.epub", auth_username = "u", auth_password = "p" }, 1)
+    local function sent(host)
+        local fields = { Host = host }
+        opts.on_headers({
+            get = function(_self, key) return fields[key] end,
+            add = function(_self, key, value) fields[key] = value end,
+        })
+        return fields.Authorization
+    end
+    Assert.eq(sent("nas.example"), "Basic dTpw")
+    Assert.is_nil(sent("cdn.example"))
+    Assert.is_nil(Fetch.options({ url = "nas.example/a" }, 1).on_headers({ get = function() end, add = function() end }))
 end

@@ -21,6 +21,7 @@ package.preload["http.request"] = function()
     return {
         ok = function(code) return code >= 200 and code < 300 end,
         header = function(res, name) return res.headers and res.headers[name:lower()] end,
+        headerAll = function() return {} end,
         request = function(opts, cb)
             local entry = { url = opts.url, cb = cb }
             pending[#pending + 1] = entry

@@ -54,7 +54,7 @@ end
 ---   author: string|nil,
 ---   language: string|nil,
 ---   identifier: string|nil,
----   chapters: { title: string, href: string, xhtml: string, toc?: boolean, depth?: integer }[],
+---   chapters: { title: string, href: string, html: string, toc?: boolean, depth?: integer }[],
 --- }
 ---@param dest string
 ---@param progress fun(done: integer, total: integer)|nil 每写完一章
@@ -172,7 +172,8 @@ local function writeEpubPackage(opts, dest, progress)
     end
 
     for i, ch in ipairs(chapters) do
-        if not epub:addFileFromMemory("OEBPS/" .. ch.href, ch.xhtml, mtime) then
+        -- 逐章现包：整本书的 XHTML 不和原 HTML 一起常驻内存。
+        if not epub:addFileFromMemory("OEBPS/" .. ch.href, wrapXhtml(ch.title, ch.html), mtime) then
             return abort(_("写入章节失败"))
         end
         if progress then progress(i, #chapters) end
@@ -206,7 +207,7 @@ function Html2Epub.write(opts, progress)
             toc = chapter.toc,
             depth = chapter.depth,
             href = string.format("chapter_%03d.xhtml", index),
-            xhtml = wrapXhtml(chapter.title, chapter.html),
+            html = chapter.html,
         }
     end
     return writeEpubPackage({

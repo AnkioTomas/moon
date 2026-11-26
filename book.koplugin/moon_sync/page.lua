@@ -142,7 +142,7 @@ function Page.sections(desktop)
                     return Row.widget({
                         width = iw, chevron = false, kind = "action", icon = "cloud_sync",
                         title = _("立即同步"),
-                        subtitle = _(require("source.local.layout").get(
+                        subtitle = require("l10n").get("source.local")(require("source.local.layout").get(
                             require("utils.settings").getSource("local").webdav_sync_style).blurb),
                         callback = function() MoonSync.start() end,
                     })

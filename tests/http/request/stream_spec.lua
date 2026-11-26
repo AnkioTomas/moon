@@ -69,7 +69,9 @@ do
         empty = { code = 302, length = "0" },
         missing = { code = 404, length = "3" },
         unsatisfiable = { code = 416, length = "3" },
+        resumed = { code = 206, length = "2", range = "bytes 5-6/7" },
     }
+    local redirect_to = "second"
     local invalid_header = "HTTP/1.1 200 OK\r\nContent-Length: invalid\r\nSet-Cookie: token=private\r\n\r\n"
     local parse_reason = "libturbo_parser could not parse HTTP header. HPE_INVALID_CONTENT_LENGTH invalid character in content-length header"
     local first_hop = "first"
@@ -85,6 +87,7 @@ do
                         if name == "Content-Length" and response.length then
                             return response.length, 99
                         end
+                        if name == "Content-Range" then return response.range end
                     end,
                 }
             end,
@@ -108,7 +111,7 @@ do
             local code = self.response_headers:get_status_code()
             if code == 302 and self.kwargs.allow_redirects then
                 self.redirect = self.redirect + 1
-                return self:_handle_headers("second")
+                return self:_handle_headers(redirect_to)
             end
             assert(coroutine.resume(self.future.co, { code = code }))
         end
@@ -169,8 +172,8 @@ do
         on_data = function(chunk) chunks[#chunks + 1] = chunk end,
         on_done = function(err) done_err = err end,
     })
-    Assert.eq(codes[1], 302)
-    Assert.eq(codes[2], 200)
+    Assert.eq(#codes, 1, "跟随的 302 中间跳不交给 on_headers")
+    Assert.eq(codes[1], 200)
     Assert.eq(table.concat(chunks), "xx")
     Assert.is_nil(done_err)
 
@@ -251,6 +254,20 @@ do
     Assert.eq(got:read("*a"), "xx")
     got:close()
     os.remove(resume_dest)
+
+    -- 续传 + 302 + 206：中间跳不能把 .part 截空，否则只剩尾部却通过长度校验。
+    local part = assert(io.open(resume_dest .. ".part", "wb"))
+    part:write("abcde")
+    part:close()
+    first_hop, redirect_to = "first", "resumed"
+    Request.download({ url = "https://example.test/big.bin", resume = true, allow_redirects = true }, resume_dest,
+        function(ok, err) r_ok, r_err = ok, err end)
+    Assert.is_true(r_ok, r_err)
+    got = assert(io.open(resume_dest, "rb"))
+    Assert.eq(got:read("*a"), "abcdexx", "续上原有 5 字节")
+    got:close()
+    os.remove(resume_dest)
+    redirect_to = "second"
 
     -- on_headers 抛错同 on_data：经 guard 报告，丢弃 body，on_done 报错收口（否则跳过 release，泵不拆）。
     local guard = package.loaded["ui.guard"]

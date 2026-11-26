@@ -27,27 +27,7 @@
 local Jar = {}
 Jar.__index = Jar
 
-local MONTHS = { jan = 1, feb = 2, mar = 3, apr = 4, may = 5, jun = 6,
-    jul = 7, aug = 8, sep = 9, oct = 10, nov = 11, dec = 12 }
-
---- "Wed, 21 Oct 2015 07:28:00 GMT" → epoch（不碰本地时区）。认不出返回 nil。
----@param text string
----@return number|nil
-local function parseDate(text)
-    local day, mon, year, h, m, s = text:match("(%d+)[%s%-]+(%a+)[%s%-]+(%d+)%s+(%d+):(%d+):(%d+)")
-    mon = mon and MONTHS[mon:sub(1, 3):lower()]
-    if not mon then return nil end
-    year = tonumber(year)
-    if year < 70 then year = year + 2000 elseif year < 100 then year = year + 1900 end
-    -- days-from-civil
-    local y = mon <= 2 and year - 1 or year
-    local era = math.floor(y / 400)
-    local yoe = y - era * 400
-    local doy = math.floor((153 * (mon + (mon > 2 and -3 or 9)) + 2) / 5) + tonumber(day) - 1
-    local doe = yoe * 365 + math.floor(yoe / 4) - math.floor(yoe / 100) + doy
-    local days = era * 146097 + doe - 719468
-    return days * 86400 + tonumber(h) * 3600 + tonumber(m) * 60 + tonumber(s)
-end
+local Text = require("utils.text")
 
 ---@param url string
 ---@return string scheme, string host, string path
@@ -123,7 +103,7 @@ function Jar:absorb(url, lines, since)
                 elseif key == "max-age" then
                     max_age = tonumber(val)
                 elseif key == "expires" then
-                    entry.expires = parseDate(val)
+                    entry.expires = Text.parseHttpDate(val)
                 elseif key == "secure" then
                     entry.secure = true
                 end
