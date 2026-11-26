@@ -136,7 +136,7 @@ function Source:onEvent(event, payload)
     end
 end
 
---- 书架只来自本机 cc.db，没有远端可推。
+--- 书架只来自本机 cc.db，没有远端可推。阅读数据没有自己的接口，走月读同步。
 function Source:pushDirty() end
 
 --- 书架 = cc.db 快照（KFX + 带 DRM 的 mobi 族；无 DRM 的归本地源）。查询失败报错，不当成空书架。

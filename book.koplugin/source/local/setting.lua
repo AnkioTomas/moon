@@ -1,6 +1,7 @@
 --[[--
 本地源设置 UI（书库目录由本模块自绘）。
-读写：utils.settings.getSource / saveSource("local")
+读写：utils.settings.getSource / saveSource("local")。
+WebDAV 连接在月读同步设置页。这一页分两节：书库、同步（上传书籍）。
 
 @module koplugin.book.source.local.setting
 --]]
@@ -15,9 +16,6 @@ local Setting = {}
 ---@return string status, boolean status_on
 function Setting.rowStatus()
     local cfg = require("utils.settings").getSource(SOURCE_ID)
-    if type(cfg.webdav_url) == "string" and cfg.webdav_url ~= "" then
-        return "WebDAV · " .. cfg.webdav_url, true
-    end
     local path = cfg.path or ""
     if path ~= "" then
         return path, true
@@ -26,9 +24,9 @@ function Setting.rowStatus()
 end
 
 ---@param plugin table|nil
-function Setting.rows(plugin)
+---@return table[]
+function Setting.sections(plugin)
     local Row = require("ui.themes.widgets.row")
-    local Text = require("utils.text")
     local function repaint()
         local desktop = plugin and plugin.desktop
         if desktop and desktop.settings_overlay then desktop.settings_overlay:updateView() end
@@ -40,63 +38,6 @@ function Setting.rows(plugin)
             -- 跟「按文件夹分类」一样：有桌面就强制重扫，不要 Registry.reload（会关设置叠层）。
             callback = function()
                 Setting.open(function() repaint() end, plugin and plugin.desktop)
-            end })
-    end
-    --- 连接变化先停旧同步，再准备保留记录向新库收敛。
-    local function webdavFingerprint(cfg)
-        return table.concat({
-            Text.trim(cfg.webdav_url or ""),
-            Text.trim(cfg.webdav_path or ""),
-            Text.trim(cfg.webdav_username or ""),
-        }, "\0")
-    end
-    local function edit(key, title, password)
-        local cfg = require("utils.settings").getSource(SOURCE_ID)
-        require("ui.themes.widgets.input"):new{
-            title = title,
-            fields = { { text = tostring(cfg[key] or ""), text_type = password and "password" or nil } },
-            ok_text = _("保存"),
-            callback = function(text)
-                local before = webdavFingerprint(cfg)
-                local next_cfg = require("util").tableDeepCopy(cfg)
-                next_cfg[key] = Text.trim(text)
-                local function save()
-                    cfg[key] = next_cfg[key]
-                    require("utils.settings").saveSource(SOURCE_ID, cfg)
-                end
-                if before ~= webdavFingerprint(next_cfg) then
-                    if not require("source.logout").replaceWebdav(save) then
-                        require("ui.themes.widgets.toast"):new{ text = _("准备本地同步失败"), timeout = 3 }:show()
-                        return
-                    end
-                else
-                    save()
-                    require("source.registry").invalidate()
-                end
-                repaint()
-            end,
-        }:show()
-    end
-    local function row(key, title, password, icon)
-        return function(iw)
-            local value = require("utils.settings").getSource(SOURCE_ID)[key] or ""
-            return Row.widget({ width = iw, chevron = true, kind = "nav", icon = icon, title = title,
-                status = value ~= "" and (password and "******" or value) or _("未设置"),
-                status_on = value ~= "", callback = function() edit(key, title, password) end })
-        end
-    end
-    local function testRow(iw)
-        return Row.widget({ width = iw, chevron = false, kind = "action", icon = "network_check", title = _("测试 WebDAV 连接"),
-            subtitle = _("写入、读回并删除一个测试文件"), callback = function()
-                local waiting = require("ui.themes.widgets.progress_dialog"):new{
-                    title = _("测试 WebDAV 连接"), text = _("正在测试 WebDAV 连接…"), dismissable = false,
-                }
-                waiting:show()
-                local client = require("source.local.client").new(require("utils.settings").getSource(SOURCE_ID))
-                client:testWebdavAsync(function(ok, err)
-                    waiting:close()
-                    require("ui.themes.widgets.toast"):new{ text = ok and _("WebDAV 连接正常，可读写") or err, timeout = ok and 2 or nil }:show()
-                end)
             end })
     end
     --- 按文件夹分类（默认开）：切换后重扫一次，分类 / 系列随之刷新。
@@ -119,7 +60,6 @@ function Setting.rows(plugin)
                 repaint()
             end })
     end
-    --- 上传本地书到 WebDAV（默认开）；关了只同步进度、笔记和统计，本地书留在本地。
     local function uploadRow(iw)
         local Settings = require("utils.settings")
         local cfg = Settings.getSource(SOURCE_ID)
@@ -134,46 +74,21 @@ function Setting.rows(plugin)
                 repaint()
             end })
     end
-    local function progressGuardRow(iw)
-        local Settings = require("utils.settings")
-        local cfg = Settings.getSource(SOURCE_ID)
-        local on = cfg.webdav_check_progress_before_upload == true
-        return Row.widget({ width = iw, chevron = false, kind = "toggle", icon = "cloud_upload",
-            title = _("上传前检查云端进度"),
-            subtitle = _("开书时询问是否采用领先的云端进度，上传前再次检查"),
-            status = on and _("开") or _("关"), status_on = on,
-            callback = function()
-                cfg.webdav_check_progress_before_upload = not on
-                Settings.saveSource(SOURCE_ID, cfg)
-                repaint()
-            end })
-    end
-    local function progressToleranceRow(iw)
-        local Settings = require("utils.settings")
-        local cfg = Settings.getSource(SOURCE_ID)
-        local on = cfg.webdav_ignore_small_progress_diff ~= false
-        return Row.widget({ width = iw, chevron = false, kind = "toggle", icon = "cloud_upload",
-            title = _("忽略小于 1% 的进度差"),
-            subtitle = _("关闭后，整本书进度只要有差异就参与同步比较"),
-            status = on and _("开") or _("关"), status_on = on,
-            callback = function()
-                cfg.webdav_ignore_small_progress_diff = not on
-                Settings.saveSource(SOURCE_ID, cfg)
-                repaint()
-            end })
-    end
     return {
-        localPathRow,
-        folderCategoryRow,
-        uploadRow,
-        progressGuardRow,
-        progressToleranceRow,
-        row("webdav_url", _("WebDAV 地址"), false, "dns"),
-        row("webdav_username", _("WebDAV 用户名"), false, "person"),
-        row("webdav_password", _("WebDAV 密码"), true, "key"),
-        row("webdav_path", _("WebDAV 目录"), false, "folder"),
-        testRow,
+        { title = _("书库"), rows = { localPathRow, folderCategoryRow } },
+        { title = _("同步"), rows = { uploadRow } },
     }
+end
+
+---@param plugin table|nil
+function Setting.rows(plugin)
+    local rows = {}
+    for _idx, section in ipairs(Setting.sections(plugin)) do
+        for _row_idx, row in ipairs(section.rows) do
+            rows[#rows + 1] = row
+        end
+    end
+    return rows
 end
 
 --- 是否 Kindle 默认的 documents 目录（忽略结尾斜杠）。

@@ -421,6 +421,24 @@ function SourceBase:syncStatsAsync(opts, cb)
     return require("book.stats").syncAsync(self, opts, cb)
 end
 
+--- 没有自己的进度接口时，关书记下静读天下那一行用的章内字符数。有接口的源不改 extra。
+---@param pos ProgressPosition
+---@param ui table|nil
+---@return ProgressPosition
+function SourceBase:captureProgress(pos, ui)
+    if type(self.putProgressAsync) == "function" then return pos end
+    return require("source.local.common").captureProgress(pos, ui)
+end
+
+--- 没有自己的进度接口时，开书按 .po 里的字符偏移或页码落地。
+---@param pos ProgressPosition
+---@param ui table|nil
+---@return ProgressPosition
+function SourceBase:refinePosition(pos, ui)
+    if type(self.putProgressAsync) == "function" then return pos end
+    return require("source.local.common").refinePosition(pos, ui)
+end
+
 --- 默认封面：书库 `books.cover` 里的公开 URL。图书馆列表行不带 cover，只能按身份查库。
 --- 需要鉴权头或本地提取的源自己覆盖。
 ---@param identity BookIdentity

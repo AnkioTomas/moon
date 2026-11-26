@@ -413,12 +413,15 @@ function Webdav:getAsync(path, dest, opts, cb)
 end
 
 --- 上传本地文件到 WebDAV。timeout 缺省是下载档（整本 epub）；笔记 / 统计 / 进度传普通请求超时。
+--- opts.allow_empty：允许 0 字节（设置文件可以是空的）。opts.headers 追加到请求头。
 ---@param path string
 ---@param local_path string
 ---@param cb fun(ok: boolean|nil, err: string|nil, code: number|nil) code 非 nil 表示服务器回了状态码，nil 是传输层失败
 ---@param timeout number|nil
+---@param opts { allow_empty?: boolean, headers?: table<string, string> }|nil
 ---@return HttpJob|nil
-function Webdav:putFileAsync(path, local_path, cb, timeout)
+function Webdav:putFileAsync(path, local_path, cb, timeout, opts)
+    opts = type(opts) == "table" and opts or {}
     local file, open_err = io.open(local_path, "rb")
     if not file then
         cb(nil, open_err or _("无法读取待上传文件"))
@@ -426,14 +429,29 @@ function Webdav:putFileAsync(path, local_path, cb, timeout)
     end
     local size = file:seek("end")
     file:close()
+    local headers = { ["Content-Type"] = "application/octet-stream" }
+    for key, value in pairs(opts.headers or {}) do headers[key] = value end
     if not size or size == 0 then
-        cb(nil, _("待上传文件为空"))
-        return nil
+        if not opts.allow_empty then
+            cb(nil, _("待上传文件为空"))
+            return nil
+        end
+        -- Content-Length: 0 写进头。body_size = 0 在请求层是假值，不会被写出去。
+        headers["Content-Length"] = "0"
+        return self:_request({
+            url = self:join(path, false),
+            method = "PUT",
+            headers = Header.forRequest(headers),
+            body = "",
+            timeout = timeout or require("http.timeout").net(10),
+        }, function(res, err, code)
+            cb(res and true, err, code)
+        end)
     end
     return self:_request({
         url = self:join(path, false),
         method = "PUT",
-        headers = Header.forRequest({ ["Content-Type"] = "application/octet-stream" }),
+        headers = Header.forRequest(headers),
         body_file = local_path,
         body_size = size,
         timeout = timeout or require("http.timeout").net(10),
