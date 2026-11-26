@@ -26,7 +26,8 @@ package.preload["liblipclua"] = function()
                 end,
                 set_int_property = function(_self, _svc, prop, value)
                     btfd.sets[#btfd.sets + 1] = prop .. "=" .. value
-                    if prop == "BTflightMode" and value == 1 then btfd.state = 0 end
+                    -- hold：飞行模式写成功但 BTstate 不动（框架把原生「蓝牙开」盖回去）
+                    if prop == "BTflightMode" and value == 1 and not btfd.hold then btfd.state = 0 end
                 end,
                 close = function() end,
             }
@@ -85,6 +86,22 @@ do
     Stubs.flush()
     Assert.eq(btfd.sets[1], "BTflightMode=0")
     Assert.eq(btfd.sets[2], "BTenable=1:2")
+end
+
+-- 飞行模式盖不掉 BTstate：再写 BTenable 0:1；两条都没把状态拉下来就报没有变化。
+do
+    btfd.state = 1
+    btfd.hold = true
+    btfd.sets = {}
+    local ok, err
+    Bluetooth.setEnabled(false, function(done, e) ok, err = done, e end)
+    Stubs.flush()
+    Assert.is_false(ok)
+    Assert.eq(err, "蓝牙状态没有变化")
+    Assert.eq(btfd.sets[1], "BTflightMode=1")
+    Assert.eq(btfd.sets[2], "BTenable=0:1")
+    Assert.eq(Bluetooth.current().state, "on")
+    btfd.hold = nil
 end
 
 -- 断开：写 Disconnect，连接表还在时超时失败不挂起。

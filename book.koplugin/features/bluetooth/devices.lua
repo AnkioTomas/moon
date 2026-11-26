@@ -30,6 +30,23 @@ local function toast(text)
     Toast:new{ text = text, timeout = 3 }:show()
 end
 
+--- 关掉失败且 Kindle 框架仍在跑：原生设置会把蓝牙维持在开，提示改用 no-framework 再关一次。
+---@param on boolean 这次要开还是要关
+---@param err any
+local function fail(on, err)
+    if not on and err == _("蓝牙状态没有变化") and require("utils.mem").canOfferNoFramework() then
+        require("utils.log").warn("book.bluetooth off blocked", "startup_mode=framework")
+        require("ui.themes.widgets.confirm"):new{
+            text = _("Kindle 系统界面仍在运行，原生设置里打开的蓝牙会保持开启。以 no-framework 模式重启（关闭系统界面）后可以再关一次。退出阅读器后系统界面会恢复，蓝牙回到原来的设置。"),
+            ok_text = _("以 no-framework 重启"),
+            cancel_text = _("取消"),
+            ok_callback = function() require("utils.restart").noFramework() end,
+        }:show()
+        return
+    end
+    toast(tostring(err))
+end
+
 --- 开 / 关蓝牙，结果用提示告知。
 ---@param on boolean
 function Devices.setEnabled(on)
@@ -39,7 +56,7 @@ function Devices.setEnabled(on)
     waiting:show()
     Bluetooth.setEnabled(on, function(ok, err)
         waiting:close()
-        toast(ok and (on and _("蓝牙已打开") or _("蓝牙已关闭")) or tostring(err))
+        if ok then toast(on and _("蓝牙已打开") or _("蓝牙已关闭")) else fail(on, err) end
     end)
 end
 
@@ -112,15 +129,18 @@ function Devices.show()
     end
 
     --- 同一时间只跑一个操作；完成后出错才提示，状态由 watch 刷新。
+    --- 开关把目标状态放在 done 的第三参，关不掉时才能对上「这次是要关」。
     ---@param key string
-    ---@param fn fun(done: fun(ok: boolean, err: any))
+    ---@param fn fun(done: fun(ok: boolean, err: any, target: boolean|nil))
     local function run(key, fn)
         if busy then return end
         busy = key
         render()
-        fn(function(ok, err)
+        fn(function(ok, err, target)
             busy = nil
-            if not ok then toast(tostring(err)) end
+            if not ok then
+                if key == "power" then fail(target, err) else toast(tostring(err)) end
+            end
             render()
         end)
     end
@@ -134,7 +154,12 @@ function Devices.show()
             icon = on and "bluetooth" or "bluetooth_disabled",
             mandatory = state("power", not st and _("读取中…") or (on and _("已开启") or _("已关闭"))),
             keep_open = true,
-            callback = function() run("power", function(done) Bluetooth.setEnabled(not on, done) end) end,
+            callback = function()
+                local target = not on
+                run("power", function(done)
+                    Bluetooth.setEnabled(target, function(ok, err) done(ok, err, target) end)
+                end)
+            end,
         } }
         if not on then return out end
         ---@cast st BookBluetoothStatus

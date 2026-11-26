@@ -47,6 +47,11 @@ function Sync.wrap(raw)
             if (raw.status().state == "on") == on then return cb(true) end
             if not raw.setEnabled(on) then return cb(false, _("无法控制系统蓝牙")) end
             waitFor(function(s) return (s.state == "on") == on end, WAIT_SECONDS, function(done)
+                if not done then
+                    local st = raw.status()
+                    require("utils.log").warn("book.bluetooth unchanged",
+                        "target=" .. (on and "on" or "off"), "state=" .. tostring(st and st.state))
+                end
                 cb(done, not done and _("蓝牙状态没有变化") or nil)
             end)
         end)

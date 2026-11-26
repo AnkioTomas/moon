@@ -2078,6 +2078,7 @@ return {
     ["各页显示的数据"] = "Data shown per page",
     ["无法控制系统蓝牙"] = "Cannot control system Bluetooth",
     ["蓝牙状态没有变化"] = "Bluetooth state did not change",
+    ["Kindle 系统界面仍在运行，原生设置里打开的蓝牙会保持开启。以 no-framework 模式重启（关闭系统界面）后可以再关一次。退出阅读器后系统界面会恢复，蓝牙回到原来的设置。"] = "The Kindle system UI is still running and keeps Bluetooth on after it was enabled in system settings. Restart in no-framework mode (this stops the system UI), then turn it off again. Leaving KOReader brings the system UI back, and Bluetooth returns to that setting.",
     ["更新"] = "Update",
     ["更新失败：%1"] = "Update failed: %1",
     ["更新词库"] = "Update lexicons",

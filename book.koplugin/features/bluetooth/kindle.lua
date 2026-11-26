@@ -112,24 +112,33 @@ function Native.status()
     }
 end
 
+---@param ok boolean
+---@param prop string
+---@param value string|integer
+---@return boolean
+local function logged(ok, prop, value)
+    require("utils.log").info("book.bluetooth set", prop, value, ok, "BTstate", btState())
+    return ok
+end
+
 ---@param prop string
 ---@param value string
 ---@return boolean
 local function setString(prop, value)
-    local ok = withLipc(function(h) h:set_string_property(SERVICE, prop, value) return true end) == true
-    require("utils.log").info("book.bluetooth set", prop, value, ok, "BTstate", btState())
-    return ok
+    return logged(withLipc(function(h) h:set_string_property(SERVICE, prop, value) return true end) == true, prop, value)
 end
 
 ---@param prop string
 ---@param value integer
 ---@return boolean
 local function setInt(prop, value)
-    return withLipc(function(h) h:set_int_property(SERVICE, prop, value) return true end) == true
+    return logged(withLipc(function(h) h:set_int_property(SERVICE, prop, value) return true end) == true, prop, value)
 end
 
 --- ACE 蓝牙栈（新款 Kindle）上 BTenable 的第二段是功耗模式不是客户端：1:2 开（满功耗），
---- 0:x 只是降功耗不关，关闭要写 BTflightMode=1（真机验证）；老 btfd 没有该属性，退回 0:1。
+--- 0:x 只是降功耗不关，关闭先写 BTflightMode=1（真机验证）。写成功不等于射频已关：
+--- 原生设置把蓝牙打开、框架仍在跑时，飞行模式会被盖回去，BTstate 仍非 0，这时再写 0:1。
+--- 老 btfd 没有飞行模式，直接走 0:1。
 ---@param on boolean
 ---@return boolean
 function Native.setEnabled(on)
@@ -137,7 +146,9 @@ function Native.setEnabled(on)
         setInt("BTflightMode", 0)
         return setString("BTenable", "1:2")
     end
-    return setInt("BTflightMode", 1) or setString("BTenable", "0:1")
+    local flight = setInt("BTflightMode", 1)
+    if flight and (btState() or 0) == 0 then return true end
+    return setString("BTenable", "0:1") or flight
 end
 
 ---@param address string
