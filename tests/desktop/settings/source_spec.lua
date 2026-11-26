@@ -47,7 +47,11 @@ package.preload["source.registry"] = function()
             set_enabled_calls[#set_enabled_calls + 1] = { id, on }
             return true
         end,
-        setActive = function(id) set_active = id; active = id end,
+        setActive = function(id)
+            if id == "copymanga" then return nil, "数据源初始化失败: copymanga" end
+            set_active = id; active = id
+            return {}
+        end,
         meta = function(id)
             for _idx, meta in ipairs(enabled) do
                 if meta.id == id then return meta end
@@ -117,6 +121,13 @@ Assert.eq(notified, 1, "切混合模式广播 SourceChanged")
 src:pickActive()
 sheet = Themed.last("list")
 Assert.eq(sheet.current, "__mixed__", "混合开启时只勾混合")
+
+-- 源建不出来（第三方 new() 抛错）：不关混合、不广播，提示失败原因而不是「已切换」。
+local before_notified = notified
+sheet.on_select("copymanga")
+Assert.is_true(source_cfg.library_mixed, "切换失败不动混合模式")
+Assert.eq(notified, before_notified, "切换失败不广播 SourceChanged")
+Assert.eq(Themed.last("toast").text, "切换数据源失败：数据源初始化失败: copymanga")
 
 set_active = nil
 sheet.on_select("moon")

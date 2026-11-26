@@ -64,3 +64,22 @@ Assert.eq(package.loaded["desktop"].who, "mine", "权威缓存写回 package.loa
 package.loaded["desktop"] = { who = "foe2" }
 Assert.eq(dofile(mine .. "/use.lua").who, "mine", "权威缓存不受二次污染")
 os.execute("rm -rf " .. mine .. " " .. foe)
+
+-- xpcall(require, ...)（feature 加载器经 Guard.call）越过 C 帧认出本插件：进权威缓存，之后普通 require 不再执行第二遍。
+local own = os.tmpname()
+os.remove(own)
+local stranger = os.tmpname()
+os.remove(stranger)
+os.execute("mkdir -p " .. own .. "/feat " .. stranger)
+writeFile(own .. "/feat/init.lua", "MODULES_SPEC_RUNS = (MODULES_SPEC_RUNS or 0) + 1 return { runs = MODULES_SPEC_RUNS }")
+writeFile(own .. "/boot.lua", "local ok, m = xpcall(require, debug.traceback, 'feat') assert(ok, m) return m")
+writeFile(own .. "/use.lua", "local m = require('feat') return m")
+writeFile(stranger .. "/boot.lua", "local ok, m = pcall(require, 'feat') return ok and m or nil")
+Modules.install(own)
+Assert.is_nil(dofile(stranger .. "/boot.lua"), "别的插件 pcall(require) 仍不劫持")
+local booted = dofile(own .. "/boot.lua")
+Assert.eq(dofile(own .. "/use.lua"), booted, "同一个模块实例")
+Assert.eq(MODULES_SPEC_RUNS, 1, "模块只执行一次")
+MODULES_SPEC_RUNS = nil
+package.loaded["feat"] = nil
+os.execute("rm -rf " .. own .. " " .. stranger)
