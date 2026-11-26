@@ -48,7 +48,7 @@ for _idx, section in ipairs(sections) do
 end
 Assert.eq(table.concat(titles, ","), table.concat({
     "WebDAV 地址", "WebDAV 用户名", "WebDAV 密码", "WebDAV 目录", "测试 WebDAV 连接",
-    "同步字体", "立即同步",
+    "同步字体", "同步书籍附属数据", "立即同步",
 }, ","))
 
 local path_row = sections[1].rows[4](100)
@@ -62,3 +62,9 @@ local fonts = sections[2].rows[1](100)
 Assert.eq(fonts.status, "关")
 fonts.callback()
 Assert.eq(moon.sync_fonts, true)
+
+moon.sync_extra = true
+local extra = sections[2].rows[2](100)
+Assert.eq(extra.status, "开")
+extra.callback()
+Assert.eq(moon.sync_extra, false)

@@ -152,7 +152,8 @@ Assert.eq(#found, 0, "下层依赖了 feature（改成下层声明通用扩展�
 package.path = ROOT .. "/?.lua;" .. package.path
 local Ext = require("utils.extension")
 local NAMESPACES = { desktop = true, topbar = true, setting = true, reader = true, highlight = true, note = true, quickpanel = true, modal = true,
-    web = true } -- web.*：远程管理网页的接口挂点（提供者登记 /api/<name>/*，不含 feature 名）
+    web = true, -- web.*：远程管理网页的接口挂点（提供者登记 /api/<name>/*，不含 feature 名）
+    sync = true } -- sync.*：月读同步（moon_sync）收功能的书籍附属数据
 local bad = {}
 for point in pairs(Ext.POINTS) do
     local ns = point:match("^([%w_]+)%.")

@@ -10,6 +10,7 @@ WebDAV 连接是这里的键。首次打开从旧分区，以及原来的本地�
 return {
     defaults = {
         sync_fonts = false,
+        sync_extra = true,
     },
     keys = { "webdav_url", "webdav_username", "webdav_password", "webdav_path" },
     adopt_sources = { "local" },

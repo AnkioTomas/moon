@@ -1,5 +1,5 @@
 --[[--
-月读同步设置页。WebDAV 连接和字体开关都写 moon_sync。
+月读同步设置页。WebDAV 连接、字体和书籍附属数据开关都写 moon_sync。
 上传书籍在本地书源账号里。阅读数据没有开关。
 
 @module koplugin.book.moon_sync.page
@@ -136,6 +136,13 @@ function Page.sections(desktop)
                 end, function(on)
                     local sync = MoonSync.config()
                     sync.sync_fonts = on
+                    Settings.save("moon_sync")
+                end),
+                toggleRow("auto_awesome", _("同步书籍附属数据"), _("AI 生成的人物、情节与章节摘要，换设备不用重新生成"), function()
+                    return MoonSync.syncExtra()
+                end, function(on)
+                    local sync = MoonSync.config()
+                    sync.sync_extra = on
                     Settings.save("moon_sync")
                 end),
                 function(iw)

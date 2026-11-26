@@ -832,6 +832,144 @@ local function syncSdr(handle, dav, root, cb)
     return job
 end
 
+--- 一个提供者在一个源下的书。推完再列一次目录，记下远端修改时间，下一轮才不会把自己刚推的又拉回来。
+---@param handle table
+---@param dav WebdavClient
+---@param dir string
+---@param provider BookSyncDataProvider
+---@param source_id string
+---@param ids table<string, true> 本机有数据的书
+---@param seen table
+---@param cb fun(err: string|nil)
+local function syncExtraSource(handle, dav, dir, provider, source_id, ids, seen, cb)
+    local Extra = require("moon_sync.extra")
+    local Reading = require("moon_sync.reading")
+    local BookDB = require("book.books_db")
+    local json = require("json")
+    local job = listDir(dav, dir, function(entries, err)
+        if handle.cancelled then return end
+        if not entries then return cb(err) end
+        local index = Reading.digestIndex(source_id)
+        local remote = {}
+        for _i, entry in ipairs(entries) do
+            local name = not entry.is_dir and type(entry.name) == "string" and entry.name:match("^([%w%%%-]+)%.json$")
+            local id = name and Reading.idOf(name, index)
+            if id then
+                remote[id] = tonumber(entry.mtime) or 0
+                ids[id] = true
+            end
+        end
+        local list = {}
+        for id in pairs(ids) do
+            if Reading.fileName(id) and BookDB.get(source_id, id) then list[#list + 1] = id end
+        end
+        table.sort(list)
+        local pushed = {}
+        local function push(key, name, data, updated_at, next_item)
+            local body = json.encode({ updated_at = updated_at, data = data })
+            return putText(dav, dir .. "/" .. name .. ".json", body, function(ok, put_err)
+                if handle.cancelled then return end
+                if not ok then return next_item(put_err) end
+                seen[key] = { hash = Extra.hash(data) }
+                pushed[name .. ".json"] = key
+                next_item()
+            end)
+        end
+        handle.job = series(list, function(id, next_item)
+            local name = Reading.fileName(id) --[[@as string]]
+            local key = provider.id .. "/" .. source_id .. "/" .. name
+            local data, updated_at = provider.export(source_id, id)
+            local act = Extra.action({
+                seen = seen[key], hash = Extra.hash(data), remote_mtime = remote[id],
+                merge = provider.merge, trusted = handle.trusted ~= false,
+            })
+            if act == "skip" then return next_item() end
+            if act == "push" then return push(key, name, data, updated_at, next_item) end
+            return getText(dav, dir .. "/" .. name .. ".json", function(body, get_err, code)
+                if handle.cancelled then return end
+                if body == nil and code == 404 then return next_item() end
+                if type(body) ~= "string" or body == "" then return next_item(get_err or _("书籍附属数据损坏")) end
+                local decoded_ok, doc = pcall(json.decode, body)
+                if not decoded_ok or type(doc) ~= "table" then return next_item(_("书籍附属数据损坏")) end
+                local incoming = type(doc.data) == "table" and next(doc.data) ~= nil and doc.data or nil
+                if act == "both" and not provider.merge and (tonumber(doc.updated_at) or 0) <= updated_at then
+                    push(key, name, data, updated_at, next_item)
+                    return
+                end
+                if not provider.import(source_id, id, incoming or {}) then
+                    return next_item(_("书籍附属数据损坏"))
+                end
+                local merged, merged_at = provider.export(source_id, id)
+                if provider.merge and Extra.hash(merged) ~= Extra.hash(incoming) then
+                    push(key, name, merged, merged_at, next_item)
+                    return
+                end
+                seen[key] = { hash = Extra.hash(merged), mtime = remote[id] }
+                next_item()
+            end)
+        end, function(ok, step_err)
+            if handle.cancelled then return end
+            if not ok then return cb(step_err) end
+            if next(pushed) == nil then return cb() end
+            handle.job = listDir(dav, dir, function(after)
+                if handle.cancelled then return end
+                for _i, entry in ipairs(after or {}) do
+                    local key = pushed[entry.name]
+                    if key then seen[key].mtime = tonumber(entry.mtime) or 0 end
+                end
+                cb()
+            end)
+        end)
+    end)
+    handle.job = job
+    return job
+end
+
+--- 书籍附属数据（AI 摘要、X-Ray 等）：每个提供者列一次目录，再逐源处理本机有数据或远端有文件的书。
+---@param handle table
+---@param dav WebdavClient
+---@param root string
+---@param cb fun(err: string|nil)
+function Run.extra(handle, dav, root, cb)
+    local Extra = require("moon_sync.extra")
+    local seen = Extra.loadSeen()
+    local base = root .. "/" .. ROOT_NAME .. "/extra"
+    local job = series(Extra.providers(), function(provider, next_provider)
+        local dir = base .. "/" .. provider.id
+        return listDir(dav, dir, function(entries, err)
+            if handle.cancelled then return end
+            if not entries then return next_provider(err) end
+            local groups = {}
+            local function group(source_id)
+                if type(source_id) ~= "string" or not source_id:match("^[%w_%-]+$") then return nil end
+                groups[source_id] = groups[source_id] or {}
+                return groups[source_id]
+            end
+            for _i, entry in ipairs(entries) do
+                if entry.is_dir then group(entry.name) end
+            end
+            for _i, book in ipairs(provider.books()) do
+                local set = group(book.source_id)
+                if set then set[book.stable_id] = true end
+            end
+            local ids = {}
+            for id in pairs(groups) do ids[#ids + 1] = id end
+            table.sort(ids)
+            handle.job = series(ids, function(source_id, next_source)
+                return syncExtraSource(handle, dav, dir .. "/" .. source_id, provider, source_id,
+                    groups[source_id], seen, next_source)
+            end, function(ok, source_err)
+                next_provider(ok and nil or source_err)
+            end)
+        end)
+    end, function(ok, err)
+        Extra.saveSeen(seen)
+        cb(ok and nil or err)
+    end)
+    handle.job = job
+    return job
+end
+
 ---@param handle table
 ---@param dav WebdavClient
 ---@param root string
@@ -870,7 +1008,12 @@ function Run.reading(handle, dav, root, report, cb)
         handle.job = syncSdr(handle, dav, root, function(sdr_err)
             if handle.cancelled then return end
             if sdr_err then return cb(nil, sdr_err) end
-            finishSources()
+            if not MoonSync.syncExtra() then return finishSources() end
+            handle.job = Run.extra(handle, dav, root, function(extra_err)
+                if handle.cancelled then return end
+                if extra_err then return cb(nil, extra_err) end
+                finishSources()
+            end)
         end)
     end
     report(_("正在同步阅读数据"), 3, 4)

@@ -46,6 +46,7 @@ Ext.POINTS = {
     ["web.open_page"] = "启动远程管理并弹二维码引导到某个网页 fn(path, title, text, opts?) -> dialog|nil，opts.close_callback 在二维码关闭时调用，dialog:close() 可收起；path 形如 /xxx.html；单一提供者，没人登记时调用方退化为文字提示",
     ["note.item_actions"] = "书摘/笔记列表条目追加动作 { text, icon?, run(entry, ctx) }；entry 含 text / note / chapter，ctx 含 ui / snapshot",
     ["note.markup_classes"] = "页内插入的译文类元素 class（字符串）；划线端点落在其中时回退到原文",
+    ["sync.book_data"] = "月读同步的书籍附属数据 { id, merge?: boolean, books() -> { source_id, stable_id }[], export(source_id, stable_id) -> data|nil, updated_at, import(source_id, stable_id, data) -> boolean }；data 只用数组（编码稳定，按串比对），export 没数据返回 nil；merge 为真时 import 是并集合并（不会丢数据），否则整本替换、两边都改时后写的赢",
     ["note.derived_dirs"] = "衍生版子目录名（相对书的工作目录的一段路径）；收划线时只读这些目录的 meta.json",
     ["note.chapter_variants"] = "fn(identity, origin) -> string[]  同一章的衍生文件路径（如双语章）；调用方自己判断文件在不在，不扫目录",
 }

@@ -378,6 +378,109 @@ function XrayDB.reset(source_id, stable_id)
     end) == true
 end
 
+--- 有 X-Ray 数据的书（续扫游标是本机的，不算）。
+---@return { source_id: string, stable_id: string }[]
+function XrayDB.books()
+    local result, nrows = DB.query([[
+        SELECT source_id, stable_id FROM xray_entities
+        UNION SELECT source_id, stable_id FROM xray_removed
+        UNION SELECT source_id, stable_id FROM xray_plots
+        UNION SELECT source_id, stable_id FROM xray_chapter;]])
+    local out = {}
+    for i = 1, nrows or 0 do out[i] = { source_id = result[1][i], stable_id = result[2][i] } end
+    return out
+end
+
+---@param sql string
+---@param width integer
+---@param source_id string
+---@param stable_id string
+---@return table[]
+local function rowsOf(sql, width, source_id, stable_id)
+    local result, nrows = DB.query(sql, source_id, stable_id)
+    local out = {}
+    for i = 1, nrows or 0 do
+        local row = {}
+        for c = 1, width do row[c] = result[c][i] end
+        out[i] = row
+    end
+    return out
+end
+
+--- 一本书的 X-Ray 快照：{ 实体, 墓碑, 情节节点, 已识别章 }，每行是数组，同样的内容编码出同样的串。
+--- 续扫游标只对本机正文有效，不在里面。没有任何数据返回 nil。
+---@param source_id string
+---@param stable_id string
+---@return table[]|nil data
+---@return integer updated_at 实体最后写入时刻
+function XrayDB.export(source_id, stable_id)
+    local entities = rowsOf([[SELECT kind, name, aliases, role, description, gender, occupation, updated_at
+        FROM xray_entities WHERE source_id=? AND stable_id=? ORDER BY kind, name;]], 8, source_id, stable_id)
+    local removed = rowsOf([[SELECT kind, name FROM xray_removed
+        WHERE source_id=? AND stable_id=? ORDER BY kind, name;]], 2, source_id, stable_id)
+    local plots = rowsOf([[SELECT title, time, description, characters, pos FROM xray_plots
+        WHERE source_id=? AND stable_id=? ORDER BY pos, rowid;]], 5, source_id, stable_id)
+    local chapters = {}
+    for i, row in ipairs(rowsOf([[SELECT chapter_idx FROM xray_chapter
+            WHERE source_id=? AND stable_id=? ORDER BY chapter_idx;]], 1, source_id, stable_id)) do
+        chapters[i] = tonumber(row[1])
+    end
+    if #entities + #removed + #plots + #chapters == 0 then return nil, 0 end
+    local updated_at = 0
+    for _idx, row in ipairs(entities) do
+        row[8] = tonumber(row[8]) or 0
+        updated_at = math.max(updated_at, row[8])
+    end
+    for _idx, row in ipairs(plots) do row[5] = tonumber(row[5]) or 0 end
+    return { entities, removed, plots, chapters }, updated_at
+end
+
+--- 用快照整本替换这本书的 X-Ray（空快照即清空）。续扫游标对不上新数据，一并作废。
+--- 快照来自远端，字段按列类型收拾，缺的填空串 / 0。
+---@param source_id string
+---@param stable_id string
+---@param data table
+---@return boolean
+function XrayDB.import(source_id, stable_id, data)
+    local function str(v) return type(v) == "string" and v or "" end
+    local function rows(i) return type(data[i]) == "table" and data[i] or {} end
+    return DB.transaction(function()
+        for _idx, tbl in ipairs(TABLES) do
+            if not DB.removeIdentity(tbl, source_id, stable_id) then return false end
+        end
+        for _idx, r in ipairs(rows(1)) do
+            if type(r) == "table" and str(r[1]) ~= "" and str(r[2]) ~= "" and not DB.exec([[INSERT OR REPLACE INTO
+                    xray_entities (source_id, stable_id, kind, name, aliases, role, description, gender, occupation,
+                    updated_at) VALUES (?,?,?,?,?,?,?,?,?,?);]], source_id, stable_id, r[1], r[2], str(r[3]),
+                    str(r[4]), str(r[5]), str(r[6]), str(r[7]), tonumber(r[8]) or 0) then
+                return false
+            end
+        end
+        for _idx, r in ipairs(rows(2)) do
+            if type(r) == "table" and str(r[1]) ~= "" and str(r[2]) ~= "" and not DB.exec(
+                    "INSERT OR IGNORE INTO xray_removed (source_id, stable_id, kind, name) VALUES (?,?,?,?);",
+                    source_id, stable_id, r[1], r[2]) then
+                return false
+            end
+        end
+        for _idx, r in ipairs(rows(3)) do
+            if type(r) == "table" and str(r[1]) ~= "" and not DB.exec([[INSERT OR IGNORE INTO xray_plots
+                    (source_id, stable_id, title, time, description, characters, pos) VALUES (?,?,?,?,?,?,?);]],
+                    source_id, stable_id, r[1], str(r[2]), str(r[3]), str(r[4]), tonumber(r[5]) or 0) then
+                return false
+            end
+        end
+        for _idx, idx in ipairs(rows(4)) do
+            if tonumber(idx) and not DB.exec(
+                    "INSERT OR IGNORE INTO xray_chapter (source_id, stable_id, chapter_idx) VALUES (?,?,?);",
+                    source_id, stable_id, math.floor(tonumber(idx))) then
+                return false
+            end
+        end
+        return true
+    end) == true
+end
+
 --- 退出登录：删掉这个源的全部 X-Ray 行。不另起事务。
 ---@param source_id string
 ---@return boolean

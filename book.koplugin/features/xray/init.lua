@@ -48,6 +48,17 @@ local function onPageUpdated(plugin)
 end
 require("utils.extension").add("reader.page_updated", onPageUpdated)
 
+require("utils.extension").add("sync.book_data", {
+    id = "xray",
+    books = function() return require("features.xray.db").books() end,
+    export = function(source_id, stable_id) return require("features.xray.db").export(source_id, stable_id) end,
+    import = function(source_id, stable_id, data)
+        local ok = require("features.xray.db").import(source_id, stable_id, data)
+        if ok then require("features.xray.marks").invalidate() end
+        return ok
+    end,
+})
+
 Xray.events = {
     ---@param plugin BookPlugin
     BookXrayRefresh = function(plugin)

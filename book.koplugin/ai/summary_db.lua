@@ -3,7 +3,7 @@ chapter_summaries 表：AI 生成的章节摘要，供前情提要、X-Ray、划
 
 chapter_idx 是阅读会话的目录章序号（`reader.session` 的 `chapterIndex`，从 1 开始），摘要在 summary 列。
 chapter_idx = 0 是整本书一行，只用 extra 列存读书报告（单文件、按章下载的书都一样）。
-纯本地派生数据，无云同步，丢了可以重新生成。
+派生数据，丢了可以重新生成；配了 WebDAV 时经月读同步在设备间按章并集（books / export / import）。
 chapter_summary_pending 保存已触发的请求快照；error 为空可自动恢复，失败须手动重试。
 完成摘要与删除待办在同一事务内进行；待办跟随书籍身份迁移和清理，不存 AI 凭证。
 
@@ -231,6 +231,57 @@ function SummaryDB.putReport(source_id, stable_id, text)
           ON CONFLICT(source_id, stable_id, chapter_idx) DO UPDATE SET
             extra=excluded.extra, updated_at=excluded.updated_at;]],
         source_id, stable_id, BOOK_ROW, text, os.time()) ~= nil
+end
+
+--- 有摘要或读书报告的书（月读同步用）。
+---@return { source_id: string, stable_id: string }[]
+function SummaryDB.books()
+    local result, nrows = DB.query("SELECT DISTINCT source_id, stable_id FROM chapter_summaries;")
+    local out = {}
+    for i = 1, nrows or 0 do out[i] = { source_id = result[1][i], stable_id = result[2][i] } end
+    return out
+end
+
+--- 一本书的全部摘要行 { 章序号, 标题, 摘要, 报告, 写入时刻 }，按章序；没有返回 nil。
+---@param source_id string
+---@param stable_id string
+---@return table[]|nil data
+---@return integer updated_at
+function SummaryDB.export(source_id, stable_id)
+    local result, nrows = DB.query([[SELECT chapter_idx, title, summary, extra, updated_at FROM chapter_summaries
+        WHERE source_id=? AND stable_id=? ORDER BY chapter_idx;]], source_id, stable_id)
+    if (nrows or 0) == 0 then return nil, 0 end
+    local out, updated_at = {}, 0
+    for i = 1, nrows do
+        local stamp = tonumber(result[5][i]) or 0
+        out[i] = { tonumber(result[1][i]), result[2][i], result[3][i], result[4][i], stamp }
+        updated_at = math.max(updated_at, stamp)
+    end
+    return out, updated_at
+end
+
+--- 并进远端摘要：同一章只收更新的那行，本地独有的不动（摘要没有删除，并集不会复活什么）。
+---@param source_id string
+---@param stable_id string
+---@param data table[]
+---@return boolean
+function SummaryDB.import(source_id, stable_id, data)
+    local function str(v) return type(v) == "string" and v or "" end
+    return DB.transaction(function()
+        for _idx, r in ipairs(data) do
+            if type(r) == "table" and tonumber(r[1]) and not DB.exec([[INSERT INTO chapter_summaries
+                    (source_id, stable_id, chapter_idx, title, summary, extra, updated_at) VALUES (?,?,?,?,?,?,?)
+                    ON CONFLICT(source_id, stable_id, chapter_idx) DO UPDATE SET
+                      title=excluded.title, summary=excluded.summary, extra=excluded.extra,
+                      updated_at=excluded.updated_at
+                    WHERE excluded.updated_at > chapter_summaries.updated_at;]],
+                    source_id, stable_id, math.floor(tonumber(r[1])), str(r[2]), str(r[3]), str(r[4]),
+                    tonumber(r[5]) or 0) then
+                return false
+            end
+        end
+        return true
+    end) == true
 end
 
 --- 读整本书的读书报告；没有返回 nil。
