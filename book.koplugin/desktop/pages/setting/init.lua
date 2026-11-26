@@ -143,19 +143,6 @@ local function coreEntries(desktop)
             },
         },
         {
-            group = "library", order = 25, id = "source_plugins",
-            row = function(iw)
-                return Row.widget({
-                    width = iw, kind = "nav", icon = "qr_code", title = _("第三方书源插件"),
-                    subtitle = _("扫码查看可安装的拓展书源"),
-                    callback = function()
-                        local url = require("utils.docs").url("/manual/library/sources/plugins")
-                        require("ui.themes.widgets.qr"):new{ title = _("第三方书源插件"), text = url, caption = url }:show()
-                    end,
-                })
-            end,
-        },
-        {
             group = "library", order = 30, id = "source_cleanup",
             row = function(iw)
                 return Row.widget({

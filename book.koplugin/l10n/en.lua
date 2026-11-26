@@ -23,8 +23,6 @@ return {
     ["关闭自动旋转"] = "Disable auto rotation",
     ["数据清理"] = "Data cleanup",
     ["选择书源，清理本机书籍或阅读记录"] = "Choose a source and clear local book or reading records",
-    ["第三方书源插件"] = "Third-party source plugins",
-    ["扫码查看可安装的拓展书源"] = "Scan to see installable extension sources",
     ["书籍本地记录"] = "Local book records",
     ["书籍阅读记录"] = "Reading records",
     ["书库索引和目录缓存，不删除书籍文件"] = "Library index and table of contents cache; book files are kept",
