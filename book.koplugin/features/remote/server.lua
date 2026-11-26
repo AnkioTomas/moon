@@ -69,8 +69,6 @@ local STATUS = {
 ---@field get_clipboard fun(): { text: string } 设备共享剪贴板（最后复制的文本）
 ---@field set_clipboard fun(text: string) 写入设备剪贴板并同步进激活输入框
 ---@field get_status fun(): table 首页设备状态快照
----@field send_touch fun(x: number, y: number, kind: "tap"|"hold"|"swipe", dir: string|nil, dist: number|nil): boolean, number|nil, string|nil 注入触摸手势（屏幕像素坐标）；失败返回 false, HTTP 码, 原因
----@field get_screen fun(etag: string|nil): string|nil, string|number, string|nil 当前屏幕：PNG 与 ETag；画面没变返回 nil, 304；不可投屏返回 nil, 403, 原因
 ---@field install_update fun(temp: string, cb: fun(ok: boolean, err: string|nil)) 安装上传的 KOReader 插件包（临时文件所有权移交）
 ---@field backup_zip fun(cb: fun(output: string|nil, err: any))|nil 打包 .moon（不含日志与缓存）
 ---@field reset_config fun(cb: fun(ok: boolean, err: string|nil))|nil 格式化月读数据与 crash.log，成功后设备提示并重启
@@ -92,7 +90,6 @@ local File = require("features.remote.file")
 local Input = require("features.remote.input")
 local Clipboard = require("features.remote.clipboard")
 local Status = require("features.remote.status")
-local Screen = require("features.remote.screen")
 local SettingsRoute = require("features.remote.settings_route")
 local UpdateRoute = require("features.remote.update")
 local BackupRoute = require("features.remote.backup")
@@ -111,7 +108,6 @@ Server._routeZip = File.zip
 Server._routeInput = Input.route
 Server._routeClipboard = Clipboard.route
 Server._routeStatus = Status.route
-Server._routeScreen = Screen.route
 Server._routeSettings = SettingsRoute.settings
 Server._routeUpdate = UpdateRoute.route
 Server._routeBackup = BackupRoute.route
@@ -387,7 +383,6 @@ local ASSETS = {
     ["/file.html"] = { "file.html", "text/html; charset=utf-8" },
     ["/input.html"] = { "input.html", "text/html; charset=utf-8" },
     ["/clipboard.html"] = { "clipboard.html", "text/html; charset=utf-8" },
-    ["/screen.html"] = { "screen.html", "text/html; charset=utf-8" },
     ["/settings.html"] = { "settings.html", "text/html; charset=utf-8" },
     ["/update.html"] = { "update.html", "text/html; charset=utf-8" },
     ["/logo.jpg"] = { "logo.jpg", "image/jpeg" },
@@ -399,7 +394,6 @@ local ASSETS = {
     ["/file.js"] = { "file.js", "application/javascript; charset=utf-8" },
     ["/input.js"] = { "input.js", "application/javascript; charset=utf-8" },
     ["/clipboard.js"] = { "clipboard.js", "application/javascript; charset=utf-8" },
-    ["/screen.js"] = { "screen.js", "application/javascript; charset=utf-8" },
     ["/settings.js"] = { "settings.js", "application/javascript; charset=utf-8" },
     ["/update.js"] = { "update.js", "application/javascript; charset=utf-8" },
 }
@@ -617,8 +611,6 @@ function Server:_route(conn, head)
         return self:_routeClipboard(conn, method, headers, query)
     elseif path == "/api/status" then
         return self:_routeStatus(conn, method)
-    elseif path == "/api/screen" then
-        return self:_routeScreen(conn, method, headers, query)
     elseif path == "/api/rename" then
         return self:_routeRename(conn, method, query)
     elseif path == "/api/extract" then

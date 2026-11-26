@@ -27,7 +27,6 @@ local Remote = {
     _server = nil, ---@type table|nil server 实例（也是 insertZMQ 的句柄）
     _resume = false, ---@type boolean suspend 前在跑，resume 时恢复
     _temp_seq = 0,
-    _screen_at = 0, ---@type number 上次编码投屏 PNG 的时刻
     --- Kindle 实际打孔的端口：stop 必须用它拆规则，不能读当前配置（运行中改端口会泄漏旧规则）
     _punched_port = nil, ---@type number|nil
     _layout = nil,
@@ -860,76 +859,6 @@ local function tempPath()
     )
 end
 
---- 帧哈希：整块 framebuffer 按 32 位字扫一遍；画面没变就不必编码 PNG。
----@param bb table
----@return string
-local function frameTag(bb)
-    local ffi, bit = require("ffi"), require("bit")
-    local words = math.floor(tonumber(bb.stride) * tonumber(bb.h) / 4)
-    local data = ffi.cast("const uint32_t*", bb.data)
-    local h = 0
-    for i = 0, words - 1 do
-        h = bit.tobit((bit.rol(h, 5) + data[i]) * 31)
-    end
-    return string.format('"%d-%d-%08x"', bb:getWidth(), bb:getHeight(), bit.band(h, 0xffffffff))
-end
-
---- 两次 PNG 编码的最小间隔（秒）：编码在主线程，翻页 / 转圈时每次轮询都编码会堵 UI。
-local SCREEN_INTERVAL = 1
-
---- 当前屏幕镜像。passcode 锁着时不投：屏上是解锁键盘。
---- 浏览器已有一帧（带 etag）时按 SCREEN_INTERVAL 节流，间隔内一律 304。
----@param etag string|nil
----@return string|nil png, string|number tag, string|nil msg
-local function getScreen(etag)
-    if require("features.passcode").isLocked() then
-        return nil, 403, "locked"
-    end
-    local now = require("socket").gettime()
-    if etag and now - Remote._screen_at < SCREEN_INTERVAL then
-        return nil, 304
-    end
-    local bb = require("device").screen.bb
-    local tag = frameTag(bb)
-    if etag == tag then
-        return nil, 304
-    end
-    Remote._screen_at = now
-    local path = tempPath() .. ".png"
-    bb:writePNG(path)
-    local f = assert(io.open(path, "rb"))
-    local png = f:read("*a")
-    f:close()
-    os.remove(path)
-    return png, tag
-end
-
---- 把浏览器点击当作手势注入 KOReader；passcode 锁着、坐标越界都拒绝。
----@param x number
----@param y number
----@param kind "tap"|"hold"|"swipe"
----@param dir string|nil swipe 方向
----@param dist number|nil swipe 距离（像素）
----@return boolean ok, number|nil code, string|nil msg
-local function sendTouch(x, y, kind, dir, dist)
-    if require("features.passcode").isLocked() then
-        return false, 403, "locked"
-    end
-    local Screen = require("device").screen
-    if x < 0 or y < 0 or x >= Screen:getWidth() or y >= Screen:getHeight() then
-        return false, 400, "out of screen"
-    end
-    local Event = require("ui/event")
-    local pos = require("ui/geometry"):new { x = x, y = y, w = 0, h = 0 }
-    local seq = { tap = { "tap" }, hold = { "hold", "hold_release" }, swipe = { "swipe" } }
-    for _idx, ges in ipairs(seq[kind]) do
-        require("ui/uimanager"):sendEvent(Event:new("Gesture", {
-            ges = ges, pos = pos, direction = dir, distance = dist, time = require("ui/time").now(),
-        }))
-    end
-    return true
-end
-
 -- ── 复制 / 移动 / 属性 / 文本写入 / 打包（远程文件管理扩展）──────────
 
 local MAX_TREE_ENTRIES = 20000
@@ -1484,8 +1413,6 @@ function Remote.start()
             get_clipboard = getClipboard,
             set_clipboard = setClipboard,
             get_status = getStatus,
-            get_screen = getScreen,
-            send_touch = sendTouch,
             install_update = installUpdate,
             backup_zip = backupZip,
             restore_backup = restoreBackup,
