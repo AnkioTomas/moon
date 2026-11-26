@@ -1,4 +1,6 @@
 return {
+    ["刷新诊断"] = "Refresh diagnostics",
+    ["记录触发位置和波形，重开书生效"] = "Record refresh origins and waveforms; reopen the book to apply",
     ["摘要待办内容损坏，无法恢复"] = "The pending summary request is damaged and cannot be restored",
     ["摘要待办已撤销"] = "The pending summary request was cancelled",
     ["AI 返回了空摘要"] = "AI returned an empty summary",
@@ -2177,6 +2179,10 @@ return {
     ["总占用 (RSS)"] = "Total footprint (RSS)",
     ["文件映射（字体、库）"] = "Mapped files (fonts, libraries)",
     ["月读："] = "Moon: ",
+    ["Lua 堆占用（估算）"] = "Lua heap usage (estimated)",
+    ["分析 Lua 模块占用"] = "Analyze Lua module usage",
+    ["按模块估算 Lua 堆，要几百毫秒；数字是量级参考"] = "Estimates the Lua heap per module and takes a few hundred milliseconds; figures are only indicative",
+    ["未归属（全局表、协程栈等）"] = "Unattributed (globals, coroutine stacks, etc.)",
     ["私有内存"] = "Private memory",
     ["正在退出 KOReader…"] = "Exiting KOReader…",
     ["正在重启 KOReader…"] = "Restarting KOReader…",
