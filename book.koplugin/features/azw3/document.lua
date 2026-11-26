@@ -84,8 +84,11 @@ end
 function Azw3Document:register(registry)
     if registry:getProviderFromKey(self.provider) then return end
     registry:addProvider("azw3", "application/vnd.amazon.mobi8-ebook", self, 100)
-    -- .azw 可能是 KF8 也可能是 MOBI6；权重需高于 CreDocument 的 90，MOBI6 在 prepare 里原样回落
+    -- .azw / .mobi 可能是 KF8 也可能是 MOBI6；权重需高于 CreDocument 的 90。
+    -- 独立 KF8（含不少套 .mobi 后缀的漫画）CRe 会报 Error reading PDB；走重建。
+    -- MOBI6 在 prepare 里没有 html，原样回落 CreDocument。
     registry:addProvider("azw", "application/vnd.amazon.mobi8-ebook", self, 100)
+    registry:addProvider("mobi", "application/x-mobipocket-ebook", self, 100)
 end
 
 function Azw3Document:init()
