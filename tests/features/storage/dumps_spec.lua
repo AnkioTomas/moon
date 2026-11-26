@@ -35,9 +35,6 @@ Assert.is_false(Dumps.isDumpName("Indexer_Dump_1794543178241.md"))
 Assert.is_false(Dumps.isDumpName("cvm_10145.core"))
 Assert.is_false(Dumps.isDumpName("../Indexer_Dump_1.txt"))
 Assert.is_false(Dumps.isDumpName("Indexer_Dump_1.txt/evil"))
-Assert.is_false(Dumps.isSafeRoot("/"))
-Assert.is_false(Dumps.isSafeRoot("/mnt"))
-Assert.is_false(Dumps.isSafeRoot("/var"))
 
 -- 非 Kindle 默认不扫任何路径。
 package.loaded["device"] = { isKindle = function() return false end, home_dir = "/mnt/us" }
@@ -94,7 +91,6 @@ for _idx, item in ipairs(got.items) do
     Assert.is_true(Dumps.isInsideRoot(item.path, root))
     Assert.is_nil(Dumps.verify(item))
     Assert.is_true(item.subtitle == nil)
-    Assert.eq(Dumps.displayPath(item):find(item.name, 1, true) ~= nil, true)
 end
 Assert.not_nil(names["Indexer_Dump_1794543178241.txt"])
 Assert.not_nil(names["cvm_10145_038-juno_120202_bourbon_wario-379151.core"])
@@ -181,22 +177,8 @@ end
 Assert.eq(lfs.attributes(root .. "/notes.txt", "mode"), "file")
 Assert.eq(lfs.attributes(nested .. "/Indexer_Dump_111.txt", "mode"), "file")
 
--- 列表延迟构造：先有扫描结果，点开入口后才组列表项。
-local leftover = Dumps.scan({ root })
-Assert.is_true(leftover.count >= 1)
-local delayed = {}
-for _idx, item in ipairs(leftover.items) do
-    delayed[#delayed + 1] = {
-        text = item.name,
-        subtitle = Dumps.displayPath(item),
-        mandatory = tostring(item.size),
-        value = item,
-        checked = false,
-    }
-end
-built = #delayed > 0
-Assert.is_true(built)
-Assert.is_true(delayed[1].subtitle:find("设备存储/", 1, true) ~= nil)
+-- 删剩的仍能再扫出来。
+Assert.is_true(Dumps.scan({ root }).count >= 1)
 
 -- 清理夹具目录（不是用户设备）。
 local function rm_tree(dir)

@@ -30,7 +30,6 @@ header=true（解锁）时左上角画设备头像 + 设备名称；on_forgot �
 
 local CenterContainer = require("ui/widget/container/centercontainer")
 local Device = require("device")
-local FrameContainer = require("ui/widget/container/framecontainer")
 local Geom = require("ui/geometry")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
@@ -175,7 +174,22 @@ function Pad:clear(message)
     self:refresh()
 end
 
+--- 删除键 / 确认键的可用状态与提示文字：变了才整张卡片重建。
+---@return string
+function Pad:shape()
+    return (#self.pin > 0 and "d" or "") .. (#self.pin >= Pad.MIN_LEN and "o" or "") .. "\0" .. (self.message or "")
+end
+
+--- 多数按键只改圆点：只换圆点行、只刷它那一块；按钮状态或提示变了才整卡重建、整窗刷新。
 function Pad:refresh()
+    local slot = self._dots
+    if slot and slot.dimen.x and self._shape == self:shape() then
+        slot[1]:free()
+        slot[1] = self:dots()
+        local region = slot.dimen:copy()
+        UIManager:setDirty(self, function() return "ui", region end)
+        return
+    end
     self:updateView()
     UIManager:setDirty(self, "ui")
 end
@@ -248,8 +262,8 @@ function Pad:headerWidget()
     for key, value in pairs(t.image) do round[key] = value end
     round.border, round.radius, round.shadow = 0, 999, 0
     local info = require("utils.device")
-    return FrameContainer:new{
-        bordersize = 0,
+    return Box:new{
+        style = {},
         padding = Theme.px(t.space.lg),
         HorizontalGroup:new{
             align = "center",
@@ -349,6 +363,9 @@ function Pad:updateView()
     local area_h = math.max(1, h - self:headerHeight())
     local card_w = math.min(w - margin * 2, math.floor(math.min(w, area_h) * 0.88))
     local inner_w = card_w - Theme.px(t.space.lg) * 2
+    -- 圆点行宽高固定（每格等宽）：外包一层记下绘制位置，按键时只换这一行。
+    self._dots = Box:new{ style = {}, self:dots() }
+    self._shape = self:shape()
 
     local col = VerticalGroup:new{
         align = "center",
@@ -357,7 +374,7 @@ function Pad:updateView()
             Text.line("title", self.title),
         },
         VerticalSpan:new{ width = Theme.px(t.space.lg) },
-        self:dots(),
+        self._dots,
         VerticalSpan:new{ width = Theme.px(t.space.sm) },
         Text.line("caption", self.message or " ", { color = t.color.muted, width = inner_w }),
         VerticalSpan:new{ width = Theme.px(t.space.md) },

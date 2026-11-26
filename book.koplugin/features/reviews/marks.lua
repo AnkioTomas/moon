@@ -80,13 +80,9 @@ end
 ---@param hotspots WechatReviewHotspot[]
 ---@return WechatReviewSpot[]
 function ReviewMarks.locateChapter(source, path, hotspots)
-    local file, open_err = io.open(path, "rb")
-    if not file then error(open_err or ("chapter file missing: " .. tostring(path))) end
-    local ok, html_or_err = pcall(file.read, file, "*a")
-    file:close()
-    if not ok then error(html_or_err) end
-    if html_or_err == nil then error("chapter read failed: " .. tostring(path)) end
-    return source:locateHotspots(hotspots, html_or_err)
+    local html = require("utils.fs").read(path)
+    if not html then error("chapter file unreadable: " .. path) end
+    return source:locateHotspots(hotspots, html)
 end
 
 --- 在子进程里读章文件并定位：纯 Lua 文本匹配，Kindle 上一章要几百毫秒，放主进程会卡住翻页。
@@ -346,8 +342,8 @@ local function currentTarget(self)
     return Linked.target(self.ui, self.cache, function() redraw(self) end)
 end
 
----@param self ReviewMarks
-local function reset(self)
+--- 作废在飞拉取与屏上标记（换目标、关书时）。已拉到的关联书热点留在 cache 里复用。
+function ReviewMarks:reset()
     self.generation = (self.generation or 0) + 1
     if self.job then self.job.cancel() end
     Linked.cancel(self.cache)
@@ -385,11 +381,11 @@ end
 function ReviewMarks:updateView()
     local target = currentTarget(self)
     if not target then
-        reset(self)
+        self:reset()
         return
     end
     if self.key ~= target.key or (self.retry_at and os.time() >= self.retry_at) then
-        reset(self)
+        self:reset()
         fetch(self, target)
     end
     if not self.data then return end

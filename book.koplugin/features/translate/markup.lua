@@ -146,7 +146,10 @@ local function sentenceRanges(text)
         if ch == "." then
             local prev, nxt = text:byte(i - 1), text:byte(i + 1)
             local decimal = prev and prev >= 48 and prev <= 57 and nxt and nxt >= 48 and nxt <= 57
-            local word = text:sub(1, i - 1):match("([%a]+)$")
+            -- 句点前的英文单词：往回数字母，不拷整段前缀（每个句点都拷一次是平方级）。
+            local from = i
+            while from > 1 and text:sub(from - 1, from - 1):match("%a") do from = from - 1 end
+            local word = from < i and text:sub(from, i - 1) or nil
             local abbrev = word and (#word == 1 or ABBR[word:lower()])
             if not decimal and not abbrev and (nxt ~= 46) then
                 local tail = skipTail(text, i)
@@ -354,13 +357,6 @@ function Markup.splitEmbedded(html)
     flush()
     if not absorbed then return html, nil end
     return table.concat(plain), table.concat(rich)
-end
-
---- 去掉源站译文节点和它的样式表引用。原文节点不动。
----@param html string
----@return string
-function Markup.stripEmbedded(html)
-    return (Markup.splitEmbedded(html))
 end
 
 return Markup

@@ -21,6 +21,8 @@ local Markup = require("features.translate.markup")
 local MoonSettings = require("utils.settings")
 local Paths = require("utils.paths")
 local lfs = require("libs/libkoreader-lfs")
+local Fs = require("utils.fs")
+local readFile = Fs.read
 
 local OWNER = "features.translate"
 
@@ -57,17 +59,6 @@ function ChapterBi.legacyPath(path, conf)
     return Paths.legacyBilingualChapterPath(path, conf.engine .. "-" .. conf.lang)
 end
 
---- 读整个文件。没有文件返回 nil。
----@param path string
----@return string|nil
-local function readFile(path)
-    local f = io.open(path, "rb")
-    if not f then return nil end
-    local data = f:read("*a")
-    f:close()
-    return data
-end
-
 --- 原章带源站译文时，把全文抄到 `.embed.html`，原章只留原文。已经拆过就不动。
 --- 先写副本再改原章：中途失败时原文还在。
 ---@param origin string
@@ -78,15 +69,8 @@ function ChapterBi.materialize(origin)
     local stripped, bilingual = Markup.splitEmbedded(html)
     if not bilingual then return nil end
     local keep = Paths.embedChapterPath(origin)
-    local out = io.open(keep, "wb")
-    if not out then return nil end
-    local wrote = out:write(bilingual)
-    out:close()
-    if not wrote then return nil end
-    local file = io.open(origin, "wb")
-    if not file then return keep end
-    file:write(stripped)
-    file:close()
+    if not Fs.write(keep, bilingual) then return nil end
+    Fs.write(origin, stripped)
     return keep
 end
 
@@ -143,7 +127,7 @@ function ChapterBi.input(identity, origin, conf)
     }
 end
 
---- Chapter.variant 实现：本书开着双语且本章双语章就绪时返回它，否则 nil（开原章）。
+--- reader.chapter_variant 挂点实现：本书开着双语且本章双语章就绪时返回它，否则 nil（开原章）。
 ---@param identity BookIdentity
 ---@param _idx integer
 ---@param path string 原章

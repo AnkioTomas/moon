@@ -22,6 +22,7 @@ require("l10n").apply()
 local JSON = require("json")
 local Request = require("http.request")
 local Text = require("utils.text")
+local Guard = require("ui.guard")
 local UIManager = require("ui/uimanager")
 local _ = require("gettext")
 
@@ -88,7 +89,7 @@ local function waitFor(pred, seconds, cb)
     Khp.status(function(st)
         if pred(st) then return cb(true) end
         if seconds <= 0 then return cb(false) end
-        UIManager:scheduleIn(1, function() waitFor(pred, seconds - 1, cb) end)
+        UIManager:scheduleIn(1, Guard.wrap("bluetooth wait", function() waitFor(pred, seconds - 1, cb) end))
     end)
 end
 
@@ -200,16 +201,6 @@ function Khp.setEnabled(on, cb)
     end)
 end
 
----@param st BookBluetoothStatus
----@param address string
----@return boolean
-local function connected(st, address)
-    for _idx, conn in ipairs(st.connections) do
-        if conn.address:upper() == address:upper() then return true end
-    end
-    return false
-end
-
 --- 连接 / 断开已配对设备，等到连接表变化为止。
 ---@param dev BookBluetoothDevice
 ---@param connect boolean
@@ -224,7 +215,7 @@ function Khp.setConnected(dev, connect, cb)
             reopenUhid(released)
             return cb(false, err)
         end
-        waitFor(function(s) return connected(s, dev.address) == connect end, WAIT_SECONDS, function(done)
+        waitFor(function(s) return require("features.bluetooth").isConnected(s, dev.address) == connect end, WAIT_SECONDS, function(done)
             if not done then reopenUhid(released) end
             cb(done, not done and (connect and _("连接超时，请确认设备已开机并在附近") or _("断开超时")) or nil)
         end)
@@ -239,13 +230,13 @@ end
 local function poll(path, steps, step)
     local job, tick
     local left = steps
-    tick = function()
+    tick = Guard.wrap("bluetooth poll", function()
         left = left - 1
         job = get(path, function(data, err)
             job = nil
             if step(data, err, left <= 0) and left > 0 then UIManager:scheduleIn(STEP_SECONDS, tick) end
         end)
-    end
+    end)
     UIManager:scheduleIn(STEP_SECONDS, tick)
     return {
         cancel = function()

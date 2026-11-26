@@ -60,9 +60,6 @@ function Translate.onCreate()
         return
     end
     Translator._book_edge_translation = true
-    require("source.chapter").variant = function(identity, idx, path)
-        return require("ui.guard").call("chapter bilingual", require("features.translate.chapter").resolve, identity, idx, path)
-    end
     local native_show_translation = Translator.showTranslation
     Translator.showTranslation = function(self, text, detailed_view, source_lang, target_lang, from_highlight, index)
         if not Translate.isEnabled() then
@@ -76,6 +73,9 @@ end
 local Ext = require("utils.extension")
 Ext.add("note.markup_classes", require("features.translate.markup").CLASS)
 Ext.add("note.derived_dirs", require("features.translate.bilingual").DIR)
+Ext.add("reader.chapter_variant", function(identity, idx, path)
+    return require("ui.guard").call("chapter bilingual", require("features.translate.chapter").resolve, identity, idx, path)
+end)
 Ext.add("note.chapter_variants", function(identity, origin)
     return require("features.translate.chapter").variants(identity, origin)
 end)

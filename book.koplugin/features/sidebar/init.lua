@@ -506,9 +506,7 @@ Sidebar.events = {
 --- 阅读页创建时登记右滑区。
 ---@param plugin BookPlugin
 function Sidebar.onReaderReady(plugin)
-    local ui = plugin and plugin.ui
-    if not ui then return end
-    Sidebar.install(ui)
+    Sidebar.install(plugin.ui)
 end
 
 return Sidebar

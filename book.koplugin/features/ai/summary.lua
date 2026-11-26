@@ -16,7 +16,10 @@ local Text = require("utils.text")
 local _ = require("gettext")
 local T = require("ffi/util").template
 
-local Summary = {}
+local Summary = {
+    --- 有待办没有对应任务（队列满没入队、身份迁移撤了旧任务）；队列变化时才值得再恢复一次。
+    deferred = false,
+}
 
 --- 交给 AI 的正文上限：超过就保留开头和结尾，章末通常是转折。
 local HEAD_LIMIT = 8000
@@ -155,7 +158,9 @@ local function enqueue(pending)
             end
         end,
     }
-    return Tasks.enqueue(task)
+    local queued, err = Tasks.enqueue(task)
+    if err == "queue_full" then Summary.deferred = true end
+    return queued, err
 end
 
 --- 读完章节自动生成摘要的开关已开且 AI 已配置。
@@ -173,6 +178,7 @@ end
 ---@return string|nil err
 function Summary.resume(source_id, stable_id, manual)
     if not require("ai").isConfigured() or (not manual and not Summary.enabled()) then return 0 end
+    if not source_id then Summary.deferred = false end
     local SummaryDB = require("ai.summary_db")
     local rows = SummaryDB.pending(source_id, stable_id)
     if not rows then return nil, _("无法读取摘要待办") end

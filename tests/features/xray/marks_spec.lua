@@ -248,3 +248,25 @@ Marks.release(ui)
 Assert.eq(Marks.ui, nil)
 Assert.eq(Marks._entity_cache, nil)
 Assert.eq(#Marks._marks, 0)
+
+-- 本书没有实体：翻页不起子进程，同一视口也不反复查库
+do
+    package.loaded["features.xray.db"] = { list = function() list_calls = list_calls + 1; return {} end }
+    Marks.ui = {
+        getCurrentPage = function() return 1 end,
+        dialog = {},
+        view = { dimen = { w = 100, h = 50 } },
+        document = { getCurrentPos = function() return current_pos end },
+    }
+    Marks.invalidate()
+    local runs, lists = job_runs, list_calls
+    Marks:updateView()
+    Stubs.flush()
+    Assert.eq(job_runs, runs, "没有实体不起扫描子进程")
+    Assert.len(Marks:marks(), 0)
+    Assert.eq(list_calls, lists + 1, "同一视口只查一次库")
+    current_pos = current_pos + 1
+    Marks:updateView()
+    Stubs.flush()
+    Assert.eq(job_runs, runs, "翻页后仍不起子进程")
+end

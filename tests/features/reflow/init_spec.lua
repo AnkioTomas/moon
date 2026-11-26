@@ -122,7 +122,7 @@ local switched
 local toc_titles = {}
 local function reader(file, kind)
     local ui = {
-        document = { file = file },
+        document = { file = file, getPageCount = function() return 1 end },
         switchDocument = function(_, target) switched = target end,
         toc = { fillToc = function(self)
             self.toc = {}
@@ -397,6 +397,18 @@ Assert.eq(followed, running)
 Assert.eq(#Themed.made, lists)
 running = nil
 os.remove(fresh_txt)
+
+-- 可重跑任务在关书后续跑：按失败回报，不碰已释放的文档
+do
+    local closed_ui = reader("/books/closed.epub", "rolling")
+    closed_ui.document = nil
+    local got_path, got_err = "unset", nil
+    local handle = Reflow.runAsync(closed_ui, identity, function(path, err) got_path, got_err = path, err end,
+        function() end)
+    Assert.is_nil(got_path)
+    Assert.eq(got_err, "文档已关闭")
+    handle.cancel()
+end
 
 os.remove(txt)
 os.remove(txt .. ".pdf")

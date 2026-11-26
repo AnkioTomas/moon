@@ -202,19 +202,14 @@ local function pagingPage(document, page)
     return table.concat(lines, "\n")
 end
 
---- 整棵 DOM → 纯文本。失败返回 nil（调用方退逐页）。
+--- 整棵 DOM → 纯文本（RootNode 包装也是标签，一并剥掉）。失败返回 nil（调用方退逐页）。
+--- 必须尾调用 stripHtml：本帧不再持有整本 HTML，剥离途中原串即可回收，峰值少一整份。
 ---@param document table
 ---@return string|nil
 local function dumpDomText(document)
     local ok, html = pcall(document.getHTMLFromXPointer, document, ".0", DOM_HTML_FLAGS)
     if not ok or type(html) ~= "string" or html == "" then return nil end
-    -- 双语对照同一套：去掉 CREngine 根包装再剥标签。
-    html = html:gsub("^%s*<RootNode[^>]*>", ""):gsub("</RootNode>%s*$", "")
-    local text = Text.stripHtml(html)
-    html = nil
-    collectgarbage("collect")
-    if text == "" or not text:find("%S") then return nil end
-    return text
+    return Text.stripHtml(html)
 end
 
 --- 取出 ui 当前文档的全部文字到文件；成功 cb(path)，失败 cb(nil, err)。
@@ -453,11 +448,12 @@ function Extract.run(ui, cb, on_progress, opts)
             end
             if ui.document ~= document then return fail(_("文档已关闭")) end
             local text = dumpDomText(document)
+            collectgarbage("collect")
             if cancelled then
                 if not dir then os.remove(part_path) end
                 return
             end
-            if not text then
+            if not text or not text:find("%S") then
                 -- 接口在但倒不出字：退回逐页（仍可能有字）。
                 return runPages()
             end

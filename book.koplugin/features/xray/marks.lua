@@ -305,6 +305,12 @@ function Marks:updateView()
     end
     local entities = loadEntities()
     self._marks = {}
+    -- 本书还没有实体：没有可标的，别每次翻页都起子进程取屏幕文字。
+    if #entities == 0 then
+        cancelScan(self)
+        self._scan_pending, self._render_key = nil, key
+        return
+    end
     self._render_key = nil
     scheduleScan(self, key, entities)
 end
@@ -312,10 +318,8 @@ end
 --- 标记图层：刷新视口后交出屏上实体（点按弹详情）。
 ---@return PageMark[]
 function Marks:marks()
-    if not Marks.enabled() then
-        return {}
-    end
     self:updateView()
+    if #self._marks == 0 then return {} end
     local conf = require("utils.settings").get("features.xray")
     local style, gray, alpha, offset = MarkStyle.resolve(conf, require("features.xray.setting").KEYS)
     local out = {}

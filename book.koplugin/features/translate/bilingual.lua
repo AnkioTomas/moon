@@ -201,17 +201,8 @@ local function workDir(identity)
     return require("utils.paths").bookWorkDir(identity.stable_id, identity.source_id) .. "/" .. Bilingual.DIR
 end
 
-local readFile = require("utils.fs").read
-
---- 写临时文件再改名，读的一方不会看到半截文件。
----@param path string
----@param data string
-local function writeFile(path, data)
-    local f = assert(io.open(path .. ".part", "wb"))
-    assert(f:write(data))
-    assert(f:close())
-    assert(os.rename(path .. ".part", path))
-end
+local Fs = require("utils.fs")
+local readFile = Fs.read
 --- 译文缓存（子进程读）：最后一行可能是被杀时写了一半，解不出来就丢掉这一行。
 ---@param path string
 ---@return table<string, string>
@@ -356,16 +347,14 @@ end
 ---@param input BilingualInput
 local function build(input)
     local map = loadCache(input.cache)
-    local tmp = input.dest .. ".part"
     if input.kind == "dom" then
         local html = Markup.inject(assert(readFile(input.source)), map, input.style, input.unit)
         if input.chapter then html = nestRefs(html) end
-        local f = assert(io.open(tmp, "wb"))
-        assert(f:write(html))
-        assert(f:close())
-    else
-        rewriteEpub(input, map, tmp)
+        assert(Fs.write(input.dest, html))
+        return true
     end
+    local tmp = input.dest .. ".part"
+    rewriteEpub(input, map, tmp)
     os.remove(input.dest)
     assert(os.rename(tmp, input.dest))
     return true
@@ -501,7 +490,7 @@ local function task(input)
                 -- 章节：原章就是 source，不删也不写 meta（按书开关决定开哪份）。
                 if input.chapter then return finish({ ok = true, file = input.dest }) end
                 -- job 回调里抛错会被吞掉、finish 不来，前台进度窗就关不掉：写盘失败按任务失败结束。
-                local ok, err = pcall(writeFile, input.dir .. "/meta.json",
+                local ok, err = Fs.write(input.dir .. "/meta.json",
                     JSON.encode({ origin = input.origin, file = input.dest }))
                 if not ok then return finish({ ok = false, err = err }) end
                 if input.source then os.remove(input.source) end
@@ -632,13 +621,19 @@ local function prepare(ui, identity, engine, lang)
         lang = lang,
     }
     if origin:lower():match("%.epub$") then return input end
+    -- 整本 DOM 在主线程上：只切一次 RootNode 包装、头部分开写，不再多拷整串。
     local html = ui.document:getHTMLFromXPointer(".0", 0x0020)
-        :gsub("^%s*<RootNode[^>]*>", ""):gsub("</RootNode>%s*$", "")
-    local ext = html:find("^%s*<FictionBook") and "fb2" or "html"
+    local first = html:match("^%s*<RootNode[^>]*>()") or 1
+    local last = html:match("()</RootNode>%s*$") or #html + 1
+    local ext = html:find("^%s*<FictionBook", first) and "fb2" or "html"
     input.kind = "dom"
     input.source = dir .. "/source." .. ext
     input.dest = dir .. "/book." .. ext
-    writeFile(input.source, '<?xml version="1.0" encoding="UTF-8"?>\n' .. html)
+    local tmp = input.source .. ".part"
+    local f = assert(io.open(tmp, "wb"))
+    assert(f:write('<?xml version="1.0" encoding="UTF-8"?>\n', html:sub(first, last - 1)))
+    assert(f:close())
+    assert(os.rename(tmp, input.source))
     return input
 end
 

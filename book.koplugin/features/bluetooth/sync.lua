@@ -10,6 +10,7 @@
 require("l10n").apply()
 
 local UIManager = require("ui/uimanager")
+local wrap = require("ui.guard").wrap
 local _ = require("gettext")
 
 local WAIT_SECONDS = 15
@@ -32,18 +33,11 @@ function Sync.wrap(raw)
     local function waitFor(pred, seconds, cb)
         if pred(raw.status()) then return cb(true) end
         if seconds <= 0 then return cb(false) end
-        UIManager:scheduleIn(1, function() waitFor(pred, seconds - 1, cb) end)
-    end
-
-    local function connected(st, address)
-        for _idx, conn in ipairs(st.connections) do
-            if conn.address:upper() == address:upper() then return true end
-        end
-        return false
+        UIManager:scheduleIn(1, wrap("bluetooth wait", function() waitFor(pred, seconds - 1, cb) end))
     end
 
     function Backend.setEnabled(on, cb)
-        UIManager:scheduleIn(0.3, function()
+        UIManager:scheduleIn(0.3, wrap("bluetooth enable", function()
             if (raw.status().state == "on") == on then return cb(true) end
             if not raw.setEnabled(on) then return cb(false, _("无法控制系统蓝牙")) end
             waitFor(function(s) return (s.state == "on") == on end, WAIT_SECONDS, function(done)
@@ -54,17 +48,17 @@ function Sync.wrap(raw)
                 end
                 cb(done, not done and _("蓝牙状态没有变化") or nil)
             end)
-        end)
+        end))
     end
 
     function Backend.setConnected(dev, connect, cb)
-        UIManager:scheduleIn(0.3, function()
+        UIManager:scheduleIn(0.3, wrap("bluetooth connect", function()
             local sent = connect and raw.connect(dev.address) or (not connect and raw.disconnect(dev.address))
             if not sent then return cb(false, _("无法控制系统蓝牙")) end
-            waitFor(function(s) return connected(s, dev.address) == connect end, WAIT_SECONDS, function(done)
+            waitFor(function(s) return require("features.bluetooth").isConnected(s, dev.address) == connect end, WAIT_SECONDS, function(done)
                 cb(done, not done and (connect and _("连接超时，请确认设备已开机并在附近") or _("断开超时")) or nil)
             end)
-        end)
+        end))
     end
 
     function Backend.scan(on_update, on_done)
@@ -74,20 +68,20 @@ function Sync.wrap(raw)
         end
         local left = SCAN_STEPS
         local tick
-        tick = function()
+        tick = wrap("bluetooth scan", function()
             left = left - 1
             local devices = raw.discovered()
             if left <= 0 then return on_done(devices) end
             on_update(devices)
             UIManager:scheduleIn(STEP_SECONDS, tick)
-        end
+        end)
         UIManager:scheduleIn(STEP_SECONDS, tick)
         return { cancel = function() UIManager:unschedule(tick) end }
     end
 
     function Backend.pair(dev, cb)
         local waiting = true
-        UIManager:scheduleIn(0.3, function()
+        UIManager:scheduleIn(0.3, wrap("bluetooth pair", function()
             if not waiting then return end
             local bonded = raw.bond(dev.address)
             waitFor(function(s)
@@ -101,7 +95,7 @@ function Sync.wrap(raw)
                 if done then return cb(true) end
                 cb(false, bonded and _("配对超时") or _("无法控制系统蓝牙"))
             end)
-        end)
+        end))
         return { cancel = function() waiting = false end }
     end
 

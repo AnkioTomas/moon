@@ -137,4 +137,25 @@ do
     Assert.eq(Kit.rotation_mode, 1, "最外层关完才还原")
 end
 
+-- 只改圆点的按键：不重建卡片，只刷圆点那一块；按钮状态变了才整卡重建。
+do
+    local p = Pad:new{ title = "局刷", dismissable = false, on_submit = function() return true end }
+    p:paintTo(Kit.canvas(), 0, 0)
+    press(p, "1")
+    local panel = p[1]
+    press(p, "2")
+    Assert.eq(p[1], panel, "删除 / 确认键状态没变不重建")
+    Assert.eq(dots(p), "●2○○○○")
+    local last = Kit.dirty[#Kit.dirty]
+    Assert.eq(type(last.mode), "function", "只刷圆点区域")
+    local mode, region = last.mode()
+    Assert.eq(mode, "ui")
+    Assert.eq(region.w, p._dots.dimen.w)
+    press(p, "3")
+    press(p, "4")
+    Assert.is_true(p[1] ~= panel, "确认键可用了要重建")
+    Assert.is_true(Kit.buttons(p)[12].enabled)
+    p:close()
+end
+
 return true

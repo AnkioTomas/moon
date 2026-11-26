@@ -18,6 +18,7 @@ Android 的蓝牙在系统里，KOReader 没有接口；都没有时顶栏项与
 
 require("l10n").apply()
 
+local Guard = require("ui.guard")
 local UIManager = require("ui/uimanager")
 local logger = require("utils.log")
 
@@ -137,11 +138,11 @@ function Bluetooth.watch(cb)
     if not Bluetooth.installed() then return { cancel = function() end } end
     watchers[#watchers + 1] = cb
     if not poll_tick then
-        poll_tick = function()
+        poll_tick = Guard.wrap("bluetooth poll", function()
             Bluetooth.refresh()
             local idle = status and status.state == "off" and not wanted
             UIManager:scheduleIn(idle and IDLE_POLL_SECONDS or POLL_SECONDS, poll_tick)
-        end
+        end)
         poll_tick()
     end
     return {
@@ -247,10 +248,10 @@ end
 Bluetooth.events = {
     NetworkDisconnected = function(_plugin)
         if sleeping or not wanted or not Bluetooth.installed() then return end
-        UIManager:scheduleIn(WIFI_RESTORE_DELAY, function()
+        UIManager:scheduleIn(WIFI_RESTORE_DELAY, Guard.wrap("bluetooth wifi restore", function()
             if sleeping or not wanted then return end
             restore("wifi")
-        end)
+        end))
     end,
 }
 

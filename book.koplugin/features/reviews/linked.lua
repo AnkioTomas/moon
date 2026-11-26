@@ -192,6 +192,21 @@ function Linked.titlesAt(toc, page)
     return out
 end
 
+--- 微信章 → 章名与小节名的归一化结果。每次翻页都要拿整本目录比，目录表不换就不重算。
+local names_of = setmetatable({}, { __mode = "k" })
+
+---@param chapter BookChapter
+---@return string[]
+local function names(chapter)
+    local list = names_of[chapter]
+    if not list then
+        list = { norm(chapter.title) }
+        for _anchor_idx, anchor in ipairs(chapter.anchors or {}) do list[#list + 1] = norm(anchor.title) end
+        names_of[chapter] = list
+    end
+    return list
+end
+
 --- 章名或章内小节名归一化后满足 test 的微信章。
 ---@param chapters BookChapter[]
 ---@param test fun(name: string): boolean
@@ -199,11 +214,12 @@ end
 local function find(chapters, test)
     local out = {}
     for _idx, chapter in ipairs(chapters) do
-        local hit = test(norm(chapter.title))
-        for _anchor_idx, anchor in ipairs(chapter.anchors or {}) do
-            hit = hit or test(norm(anchor.title))
+        for _name_idx, name in ipairs(names(chapter)) do
+            if test(name) then
+                out[#out + 1] = chapter
+                break
+            end
         end
-        if hit then out[#out + 1] = chapter end
     end
     return out
 end

@@ -28,6 +28,15 @@ Ext.add("desktop.comments", function(book, page)
     }:show()
 end)
 
+Reviews.events = {
+    --- 关书：取消在飞拉取 / 定位 / 预扫，回调不再落到已关的文档上。
+    ---@param plugin BookPlugin
+    CloseDocument = function(plugin)
+        local marks = plugin.ui._book_reviews_marks
+        if marks then marks:reset() end
+    end,
+}
+
 ---@param plugin BookPlugin
 function Reviews.onReaderReady(plugin)
     require("features.reviews.marks").install(plugin.ui)

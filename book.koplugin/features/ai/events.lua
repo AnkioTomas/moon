@@ -9,6 +9,8 @@ local Tasks = require("workers.tasks")
 return {
     book_identity_changed = function(source_id, old_stable_id)
         Tasks.cancelPrefixed("ai_summary\0" .. source_id .. "\0" .. old_stable_id)
+        -- 快照已迁到新身份、旧任务撤了：等队列变化时按新身份重新入队。
+        require("features.ai.summary").deferred = true
         return true
     end,
     book_removed = function(source_id, stable_id)

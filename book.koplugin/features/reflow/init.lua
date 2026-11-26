@@ -66,8 +66,7 @@ end
 ---@param wipe boolean|nil 真=丢掉断点整本重来
 ---@return number
 function Reflow.estimateSeconds(ui, identity, wipe)
-    local path = ui.document and ui.document.file or ""
-    if type(path) == "string" and path:lower():match("%.txt$") then
+    if ui.document.file:lower():match("%.txt$") then
         return EPUB_SECONDS
     end
     local Extract = require("features.reflow.extract")
@@ -78,8 +77,7 @@ function Reflow.estimateSeconds(ui, identity, wipe)
     if Extract.canDumpDom(ui) then
         return DOM_SECONDS + EPUB_SECONDS
     end
-    local ok, count = pcall(function() return ui.document:getPageCount() end)
-    count = ok and tonumber(count) or 0
+    local count = ui.document:getPageCount()
     if count < 1 then return EPUB_SECONDS end
     local done = wipe and 0 or Extract.donePages(dir, count)
     return math.max(0, count - done) * MS_PER_PAGE / 1000 + EPUB_SECONDS
@@ -153,6 +151,11 @@ end
 ---@param on_progress fun(text: string, done: integer, total: integer) 当前步骤与进度
 ---@return { cancel: fun() }
 function Reflow.runAsync(ui, identity, cb, on_progress)
+    -- 任务可重跑：休眠 / 断网后续跑时书可能已经关了，取不到原书和目录。
+    if not ui.document then
+        cb(nil, _("文档已关闭"))
+        return { cancel = function() end }
+    end
     local Paths = require("utils.paths")
     local Extract = require("features.reflow.extract")
     local origin = ui.document.file
@@ -219,9 +222,7 @@ function Reflow.runAsync(ui, identity, cb, on_progress)
         else
             -- 逐页：先用设备常数，跑过若干页后改用实测速度。
             local t0 = require("utils.perf").now()
-            local ok_count, page_count = pcall(function() return ui.document:getPageCount() end)
-            page_count = ok_count and tonumber(page_count) or 0
-            local start_done = Extract.donePages(dir, page_count)
+            local start_done = Extract.donePages(dir, ui.document:getPageCount())
             reportExtract = function(_text, done, total)
                 local left = math.max(0, (tonumber(total) or 0) - (tonumber(done) or 0))
                 local processed = math.max(0, (tonumber(done) or 0) - start_done)

@@ -41,7 +41,10 @@ function Ai.onCreate(plugin)
         reader = true,
     })
     if plugin._summary_watch then plugin._summary_watch:cancel() end
-    plugin._summary_watch = require("workers.tasks").watch(function() resumeSummaries(plugin) end)
+    -- 任务每次进度变化都会通知；只有存在没入队的待办时才查库补入，其余时候不查。
+    plugin._summary_watch = require("workers.tasks").watch(function()
+        if require("features.ai.summary").deferred then resumeSummaries(plugin) end
+    end)
     resumeSummaries(plugin)
 end
 

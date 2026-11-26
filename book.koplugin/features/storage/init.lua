@@ -16,13 +16,10 @@ local Storage = {
     _warned = false,
 }
 
---- 数据目录所在分区用量，与桌面顶栏同源；取不到返回 nil。
---- 旧版 KOReader 的 df 只返回 total, free，没有第三个 available，util.diskUsage 会给出 nil。
+--- 数据目录所在分区用量；取不到返回 nil。
 ---@return { total: number, used: number, available: number }|nil
 function Storage.disk()
-    local total, free, available = require("ffi/util").df(require("datastorage"):getDataDir())
-    if not total then return nil end
-    return { total = total, used = total - free, available = available or free }
+    return require("utils.fs").disk(require("datastorage"):getDataDir())
 end
 
 --- 可用空间不足时弹窗；取不到空间（df 失败）不提醒。

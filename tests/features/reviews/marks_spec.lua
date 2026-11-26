@@ -1,4 +1,5 @@
 --[[-- features.reviews.marks：章会话按需拉热点、只标屏上句子、点按打开段评。 --]]
+---@diagnostic disable: missing-fields
 
 local Assert = require("support.assert")
 local Stubs = require("support.stubs")
@@ -196,6 +197,16 @@ clock = clock + 60
 marks:updateView()
 Assert.len(source.fetches, 4, "到点重试")
 os.time = real_time
+
+-- 关书：取消在飞拉取，晚到的回包不再写入
+do
+    local before = source.cancelled or 0
+    require("features.reviews").events.CloseDocument({ ui = ui })
+    Assert.eq(source.cancelled, before + 1, "关书取消在飞请求")
+    source.fetches[4].cb({ { range = "1", text = "迟", total = 1, pos0 = "a0", pos1 = "a1" } })
+    Assert.is_nil(marks.data, "过期回包不写入")
+    require("features.reviews").events.CloseDocument({ ui = {} })
+end
 
 -- 关掉开关、非章节会话、不提供段评的源：都不标、点按透传。
 source.enabled = false
