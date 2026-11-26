@@ -304,6 +304,11 @@ local inst_w = Page.sections(inst_desktop)[1].rows[1](100)
 Assert.eq(inst_w.title, "阅读统计")
 Assert.eq(inst_w.status, "更新")
 Assert.eq(scan_calls, 1)
+inst_w.callback()
+local menu = shown[#shown]
+local labels = {}
+for _idx, item in ipairs(menu.items) do labels[#labels + 1] = item.text end
+Assert.eq(table.concat(labels, ","), "查看说明,停用,更新,删除")
 
 Page.setTab("updates", inst_desktop)
 local upd_w = Page.sections(inst_desktop)[1].rows[1](100)

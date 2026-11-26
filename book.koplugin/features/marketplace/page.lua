@@ -77,6 +77,9 @@ local ERRORS = {
     plugin_root = _("无法确定插件安装目录。"),
     write = _("无法写入本地缓存。"),
     record = _("插件已安装，但安装记录未能保存。"),
+    delete = _("无法删除这个插件。"),
+    settings = _("无法修改插件的停用状态。"),
+    missing = _("插件目录已经不在了。"),
     ["not a koplugin archive"] = _("压缩包里没有合法的 .koplugin 目录，不能安装。"),
     ["multiple koplugin directories"] = _("压缩包里包含多个 .koplugin 目录，无法自动安装。"),
 }
@@ -264,18 +267,91 @@ local function warningText(plan)
     ) .. "\n\n" .. _("此安装包没有 SHA-256 校验值，无法校验文件内容或证明包未被篡改。")
 end
 
-local function afterInstalled(desktop)
-    clearScanCache()
+local function askRestart(title, text)
     confirm{
-        title = _("安装完成"),
-        text = _("插件已安装到本地。需要重启 KOReader 后才会加载。现在重启？"),
+        title = title,
+        text = text,
         ok_text = _("重启"),
         cancel_text = _("稍后"),
         ok_callback = function()
             require("ui/uimanager"):nextTick(require("utils.restart").now)
         end,
     }
+end
+
+local function afterInstalled(desktop)
+    clearScanCache()
+    askRestart(_("安装完成"), _("插件已安装到本地。需要重启 KOReader 后才会加载。现在重启？"))
     redraw(desktop)
+end
+
+local function pluginTitle(entry)
+    return entry.local_plugin.title or Catalog.displayTitle(entry.plugin) or entry.local_plugin.name
+end
+
+local function toggleInstalled(desktop, entry, disabled)
+    local ok, err = Installed.setDisabled(entry.local_plugin.name, not disabled)
+    if not ok then
+        toast(Page.errorText(err))
+        return
+    end
+    clearScanCache()
+    redraw(desktop)
+    askRestart(pluginTitle(entry), disabled
+        and _("插件已启用。需要重启 KOReader 后才会加载。现在重启？")
+        or _("插件已停用。需要重启 KOReader 后才会停止加载。现在重启？"))
+end
+
+local function removeInstalled(desktop, entry)
+    local title = pluginTitle(entry)
+    confirm{
+        title = title,
+        text = T(_("确定删除「%1」？插件目录会被移除。"), title),
+        ok_text = _("删除"),
+        ok_callback = function()
+            local removed, err = Installed.remove(pluginRoot(desktop), entry.local_plugin.name)
+            if not removed then
+                toast(Page.errorText(err))
+                return
+            end
+            clearScanCache()
+            redraw(desktop, true)
+            askRestart(title, _("插件已删除。需要重启 KOReader 后才会卸载。现在重启？"))
+        end,
+    }
+end
+
+--- 已安装插件：查看说明、停用 / 启用、删除。有新版本时可以更新。
+---@param desktop table
+---@param entry table
+---@param locals table<string, table>|nil
+function Page.manage(desktop, entry, locals)
+    local name = entry.local_plugin.name
+    local disabled = Installed.isDisabled(name)
+    local items = {
+        { text = _("查看说明"), value = "readme" },
+        { text = disabled and _("启用") or _("停用"), value = "toggle" },
+    }
+    if Catalog.isNewer(Catalog.catalogVersion(entry.plugin), entry.local_plugin.version) then
+        items[#items + 1] = { text = _("更新"), value = "update" }
+    end
+    items[#items + 1] = { text = _("删除"), value = "delete" }
+    require("ui.themes.widgets.list"):new{
+        title = pluginTitle(entry),
+        centered = true,
+        items = items,
+        on_select = function(action)
+            if action == "readme" then
+                Page.openPlugin(desktop, entry.plugin, "installed", locals)
+            elseif action == "toggle" then
+                toggleInstalled(desktop, entry, disabled)
+            elseif action == "update" then
+                Page.installPlugin(desktop, entry.plugin)
+            elseif action == "delete" then
+                removeInstalled(desktop, entry)
+            end
+        end,
+    }:show()
 end
 
 local function startInstall(desktop, plan, plugin)
@@ -621,15 +697,17 @@ local function installedSection(desktop)
     for _idx, entry in ipairs(matched) do
         local current = entry
         local desc = current.local_plugin.description or Catalog.displayDescription(current.plugin)
-        local status = Catalog.isNewer(Catalog.catalogVersion(current.plugin), current.local_plugin.version)
-            and _("更新") or _("已安装")
+        local disabled = Installed.isDisabled(current.local_plugin.name)
+        local status = disabled and _("已停用")
+            or (Catalog.isNewer(Catalog.catalogVersion(current.plugin), current.local_plugin.version)
+                and _("更新") or _("已安装"))
         rows[#rows + 1] = function(iw)
             return Row.widget{
                 width = iw,
                 title = current.local_plugin.title or Catalog.displayTitle(current.plugin),
                 subtitle = desc,
                 status = status,
-                callback = function() Page.openPlugin(desktop, current.plugin, "installed", locals) end,
+                callback = function() Page.manage(desktop, current, locals) end,
             }
         end
     end

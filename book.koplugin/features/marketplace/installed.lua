@@ -375,4 +375,73 @@ function Installed.findLocal(plugin, plugin_root, locals)
     return nil
 end
 
+--- KOReader `plugins_disabled` 的键：目录名去掉 `.koplugin`。
+---@param dir_name string
+---@return string|nil
+function Installed.koName(dir_name)
+    if not Installed.isPluginDir(dir_name) then return nil end
+    return dir_name:sub(1, -10)
+end
+
+---@return table|nil
+local function readerSettings()
+    local settings = rawget(_G, "G_reader_settings")
+    if type(settings) ~= "table" or type(settings.readSetting) ~= "function"
+        or type(settings.saveSetting) ~= "function" then
+        return nil
+    end
+    return settings
+end
+
+--- 插件是否已在 KOReader 里停用。停用后要重启才不再加载。
+---@param dir_name string
+---@return boolean
+function Installed.isDisabled(dir_name)
+    local key = Installed.koName(dir_name)
+    local settings = readerSettings()
+    if not key or not settings then return false end
+    local list = settings:readSetting("plugins_disabled")
+    return type(list) == "table" and list[key] == true
+end
+
+--- 写入 KOReader 的停用表。启用时删键，与插件管理器一致。
+---@param dir_name string
+---@param disabled boolean
+---@return boolean|nil ok
+---@return string|nil err
+function Installed.setDisabled(dir_name, disabled)
+    local key = Installed.koName(dir_name)
+    if not key then return nil, "reserved" end
+    local settings = readerSettings()
+    if not settings then return nil, "settings" end
+    local list = settings:readSetting("plugins_disabled")
+    if type(list) ~= "table" then list = {} end
+    list[key] = disabled and true or nil
+    settings:saveSetting("plugins_disabled", list)
+    if settings.flush then settings:flush() end
+    return true
+end
+
+--- 删掉已安装的市场插件目录，并清安装记录与停用标记。不碰月读核心。
+---@param plugin_root string
+---@param dir_name string
+---@return boolean|nil ok
+---@return string|nil err
+function Installed.remove(plugin_root, dir_name)
+    if not Installed.isPluginDir(dir_name) then return nil, "reserved" end
+    local parent = Installed.parent(plugin_root)
+    if not parent then return nil, "plugin_root" end
+    local path = parent .. "/" .. dir_name
+    local attr = lfs.symlinkattributes(path)
+    if not attr then return nil, "missing" end
+    if attr.mode ~= "directory" then return nil, "reserved" end
+    local ok = require("ffi/util").purgeDir(path)
+    if not ok then return nil, "delete" end
+    DB.exec("DELETE FROM marketplace_installed WHERE name = ?;", dir_name)
+    record_index = nil
+    meta_cache[path .. "/" .. Meta.FILENAME] = nil
+    Installed.setDisabled(dir_name, false)
+    return true
+end
+
 return Installed

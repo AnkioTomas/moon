@@ -155,6 +155,39 @@ local ok_res, err_res = Installed.remember({ uid = "x" }, "book.koplugin")
 Assert.is_nil(ok_res)
 Assert.eq(err_res, "reserved")
 
+-- 停用写入 KOReader 的 plugins_disabled；删除清目录和记录，不碰月读核心。
+local gone = parent .. "/gone.koplugin"
+lfs.mkdir(gone)
+local marker = io.open(gone .. "/main.lua", "w")
+marker:write("return {}\n")
+marker:close()
+Assert.is_true(Installed.remember({
+    uid = "gone", type = "github", host = "github.com", owner = "a", repo = "gone",
+}, "gone.koplugin"))
+local disabled = {}
+local previous_settings = rawget(_G, "G_reader_settings")
+_G.G_reader_settings = {
+    readSetting = function(_, key)
+        if key == "plugins_disabled" then return disabled end
+    end,
+    saveSetting = function(_, key, value)
+        if key == "plugins_disabled" then disabled = value end
+    end,
+    flush = function() end,
+}
+Assert.is_true(Installed.setDisabled("gone.koplugin", true))
+Assert.is_true(Installed.isDisabled("gone.koplugin"))
+Assert.eq(disabled.gone, true)
+Assert.is_true(Installed.setDisabled("gone.koplugin", false))
+Assert.is_true(not Installed.isDisabled("gone.koplugin"))
+Assert.is_nil(disabled.gone)
+Assert.is_nil(Installed.setDisabled("book.koplugin", true))
+Assert.is_true(Installed.remove(plugin, "gone.koplugin"))
+Assert.is_nil(lfs.attributes(gone, "mode"))
+Assert.is_nil(Installed.remove(plugin, "book.koplugin"))
+Assert.is_nil(Installed.remove(plugin, "../gone.koplugin"))
+_G.G_reader_settings = previous_settings
+
 wipe(parent)
 Catalog.clear()
 Installed.clearRecords()
