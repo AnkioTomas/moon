@@ -88,12 +88,13 @@ flush()
 Assert.eq(texts(dialog), "后台任务|缓存：书b| |进行中")
 Assert.eq(Kit.dirty[#Kit.dirty].widget, "all")
 
--- 完成：标已完成，进度条满，不能点。
+-- 完成：标已完成，进度条满，不能点；有已结束记录才出现清理。
 runs.b.done({ ok = true })
 flush()
-Assert.eq(texts(dialog), "后台任务|缓存：书b| |已完成")
+Assert.eq(texts(dialog), "后台任务|缓存：书b| |已完成|清理")
 Assert.eq(bars(dialog)[1].percent, 100)
 Assert.len(Kit.taps(dialog), 0)
+Assert.eq(Kit.buttons(dialog)[1].text, "清理")
 
 -- 关窗注销订阅，之后队列变化不再重建。
 dialog:onCloseWidget()
@@ -128,9 +129,21 @@ paged:goPage(99)
 local pages = math.ceil(22 / per)
 Assert.eq(paged.page, pages, "越界夹到末页")
 local last = Kit.texts(paged)
-Assert.eq(last[#last - 6], "失败", "末页尾部是历史：z 失败在前")
-Assert.eq(last[#last - 3], "已完成", "末尾是翻页条：图标 + 页码 + 图标")
+Assert.eq(last[#last - 7], "失败", "末页尾部是历史：z 失败在前")
+Assert.eq(last[#last - 4], "已完成", "翻页条前面是历史状态")
+Assert.eq(last[#last], "清理")
 Assert.eq(paged[1]:getSize().h, height, "末页补齐，翻页不跳")
+local running_before = #Tasks.tasks()
+local clear
+for _idx, button in ipairs(Kit.buttons(paged)) do
+    if button.text == "清理" then clear = button end
+end
+Assert.not_nil(clear)
+clear:onTapThemeButton()
+flush()
+Assert.len(Tasks.finished(), 0, "清理已完成和失败")
+Assert.eq(#Tasks.tasks(), running_before, "清理不碰未结束任务")
+Assert.is_nil(table.concat(Kit.texts(paged), "|"):find("清理", 1, true), "清完不再显示按钮")
 paged:onCloseWidget()
 for i = 1, 20 do runs["p" .. i].done({ ok = true }) end
 flush()

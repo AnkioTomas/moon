@@ -13,8 +13,8 @@
   | [<]          1 / 2          [>] |
   +--------------------------------+
 
-未结束任务之后列出最近结束的任务（已完成 / 失败）。点按可重跑的未结束任务询问取消；
-点面板外或返回键收起，收起只关窗，不影响任务。
+未结束任务之后列出最近结束的任务（已完成 / 失败），底部「清理」一次清掉这些记录。
+点按可重跑的未结束任务询问取消；点面板外或返回键收起，收起只关窗，不影响任务。
 
 前台：任务入队后默认 `follow` 弹出进度窗，任务结束自动关窗；「后台运行」只关窗，
 之后遇到等网络提示一次，结果仍由任务自己的 on_done 报告。可重跑的任务另有「取消」。
@@ -217,8 +217,7 @@ function TaskDialog:row(task)
         },
     }
     return Tap.wrap(row, task.restartable and task.state ~= "finished"
-        and function() TaskDialog.confirmCancel(task) end or nil,
-        task.state == "finished" and function() Tasks.dismissFinished(task.key) end or nil)
+        and function() TaskDialog.confirmCancel(task) end or nil)
 end
 
 function TaskDialog:init()
@@ -227,7 +226,8 @@ function TaskDialog:init()
     self.inner = self:innerWidth()
     self.page = 1
     local pitch = self:row({ kind = "cache", state = "queued", count = 0, total = 0 }):getSize().h
-    local chrome = Theme.px(t.control.height) + Theme.px(t.space.lg) * 4 + Theme.px(t.font.title * 2)
+    -- 标题、内边距、翻页条，再留一行给底部「清理」。
+    local chrome = Theme.px(t.control.height) * 2 + Theme.px(t.space.lg) * 5 + Theme.px(t.font.title * 2)
     self.per_page = math.max(1, math.floor((self.dimen.h - chrome) / pitch))
     self.pitch = pitch
     self:rebuild()
@@ -265,7 +265,11 @@ function TaskDialog:rebuild()
             on_page = function(page) self:goPage(page) end,
         })
     end
-    self:setDialog{ title = _("后台任务"), body = body }
+    local buttons
+    if #Tasks.finished() > 0 then
+        buttons = { { text = _("清理"), callback = function() Tasks.clearFinished() end } }
+    end
+    self:setDialog{ title = _("后台任务"), body = body, buttons = buttons }
 end
 
 --- 重画；高度不变时只刷面板区域（任务进度每秒数次，默认 "fast" 免得墨水屏一直闪），

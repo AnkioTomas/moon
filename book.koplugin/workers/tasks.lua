@@ -416,16 +416,13 @@ function Tasks.finished()
     return out
 end
 
---- 删除一条已结束记录（只动历史，不碰在飞任务）。
----@param key string
-function Tasks.dismissFinished(key)
-    for i, item in ipairs(finished) do
-        if item.key == key then
-            table.remove(finished, i)
-            changed()
-            return
-        end
-    end
+--- 清掉已结束记录（已完成和失败）。不碰在飞任务。
+---@return boolean 确实清掉了才为真
+function Tasks.clearFinished()
+    if #finished == 0 then return false end
+    finished = {}
+    changed()
+    return true
 end
 
 --- 订阅状态改变。返回的 cancel 只注销观察者，绝不影响任务。
