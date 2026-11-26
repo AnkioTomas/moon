@@ -180,15 +180,16 @@ do
     Assert.eq(log.saved.percent_finished, 0.4)
 end
 
--- ── 整本书：文档已被 sidecar 放到位，且和 pending 是同一比例，不再动它 ─
+-- ── 整本书：给出了精确坐标，百分比接近也要跳过去 ─────────
 do
     local book_identity = { source_id = "moon", stable_id = "b9" }
     local log, ui = rollingUI({ ["xp:saved"] = true })
     pending_row = { fraction = 0.4, locator = "xp:saved" }
     Progress.applyLocalPending({ identity = book_identity, ui = ui, doc_fraction = 0.4 })
 
-    Assert.len(log.goto_xpointer, 0)
-    Assert.eq(log.flushed, 0)
+    Assert.len(log.goto_xpointer, 1)
+    Assert.eq(log.goto_xpointer[1], "xp:saved")
+    Assert.eq(log.from_proportion, 0, "有精确坐标就不按百分比跳")
 end
 
 -- ── 整本书：XPointer 相同就是同一处，比例漂移也不跳 ─────────

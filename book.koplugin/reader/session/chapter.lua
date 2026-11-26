@@ -224,7 +224,9 @@ function Chapter.onReaderReady(plugin, session)
     wrapChapterReaderUi(ui)
     Snapshot.refresh(session)
     if not nav_target then
-        require("reader.session.progress").applyLocalPending(session)
+        local ready = require("book.progress_db").get(identity.source_id, identity.stable_id)
+        if ready then ready = require("reader.session").resolvePosition(identity, ready, ui) end
+        require("reader.session.progress").applyLocalPending(session, ready)
         Snapshot.refresh(session)
     end
     return nav_target

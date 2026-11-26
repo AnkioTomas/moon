@@ -29,6 +29,20 @@ local Session = {
     SLOW_READY_MS = 3000,
 }
 
+--- 属主源把静读天下的章号 / 字符偏移 / 页码换成这份文档上的坐标。
+--- 换不出来的位置保持原样，百分比由源在写入时就算好。
+---@param identity BookIdentity|nil
+---@param pos ProgressPosition|nil
+---@param ui table|nil
+---@return ProgressPosition|nil
+function Session.resolvePosition(identity, pos, ui)
+    if type(pos) ~= "table" then return pos end
+    local source = identity and identity.source
+    if not source or type(source.refinePosition) ~= "function" then return pos end
+    if pos.stable_id == nil then pos.stable_id = identity.stable_id end
+    return source:refinePosition(pos, ui) or pos
+end
+
 --- 月读是否认这份文档：Store.identityFor 能解析，且是章节文件或书架成员。
 --- deleted=1 是书架已移除的成员，交回原生。
 ---@param snapshot ReaderSessionSnapshot|nil
@@ -276,7 +290,11 @@ function Session.onReaderReady(plugin)
         ChapterMode.clearActiveChapter(Session._snapshot)
         Snapshot.refresh(Session._snapshot)
         -- 边车缺失，或仍停在同步前的旧位置：用本地进度回落。
-        require("reader.session.progress").applyLocalPending(Session._snapshot)
+        -- 精确坐标由属主源先算好；算不出的，行里的百分比就是落点。
+        local ready_id = Session._snapshot.identity
+        local ready = require("book.progress_db").get(ready_id.source_id, ready_id.stable_id)
+        if ready then ready = Session.resolvePosition(ready_id, ready, ui) end
+        require("reader.session.progress").applyLocalPending(Session._snapshot, ready)
         Snapshot.refresh(Session._snapshot)
         require("reader.session.auto_toc").start(Session._snapshot)
         ensureCover(ui, identity)

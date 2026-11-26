@@ -754,51 +754,27 @@ do
     local id = { source_id = "local", stable_id = "b1" }
     local whole = { identity = id, ui = ui }
     Session.current = function() return whole end
-    local remote_fraction = 0.0089
     id.source = { getProgressAsync = function(_, _, cb)
-        cb({ fraction = remote_fraction }, nil, { webdav_progress_marker = "seen-marker" })
+        cb({ fraction = 0.0089 })
     end }
     pending_row = { fraction = 0.0046, updated_at = 12, sync_status = 0, locator = "/body/p[1]/text().0" }
-    local RemoteData = require("source.local.remote_data")
-    local enabled = RemoteData.progressUploadGuardEnabled
-    local cfg = require("utils.settings").getSource("local")
-    local prior_tolerance = cfg.webdav_ignore_small_progress_diff
-    RemoteData.progressUploadGuardEnabled = function() return false end
-    cfg.webdav_ignore_small_progress_diff = nil
     shown = {}
     Progress.clearConflicts(id)
     Progress.pull(whole)
-    Assert.len(shown, 0, "默认忽略小于一个百分点的差异")
+    Assert.len(shown, 0, "不足一个百分点的差异不当成冲突")
 
-    cfg.webdav_ignore_small_progress_diff = false
-    Progress.clearConflicts(id)
-    Progress.pull(whole)
-    Assert.len(shown, 1, "关闭阈值后，小差额也按现有冲突流程处理")
-    pending_row.decision_pending = nil
-    remote_fraction = pending_row.fraction
+    id.source = { getProgressAsync = function(_, _, cb)
+        cb({ fraction = pending_row.fraction })
+    end }
     shown = {}
     Progress.clearConflicts(id)
     Progress.pull(whole)
-    Assert.len(shown, 0, "关闭阈值后，相同百分比仍视为一致")
-
-    cfg.webdav_ignore_small_progress_diff = prior_tolerance
-    remote_fraction = 0.0089
-    RemoteData.progressUploadGuardEnabled = function() return true end
-    shown, upserted = {}, {}
-    Progress.clearConflicts(id)
-    Progress.pull(whole)
-    Assert.len(shown, 1, "首次开书发现远端领先时弹窗，不用等到相差一个百分点")
-    Assert.is_false(require("book.progress").canPush(id), "询问时关书不能推送")
-    shown[1].cancel_callback()
-    Assert.eq(upserted[1].extra.webdav_overwrite_marker, "seen-marker")
-    RemoteData.progressUploadGuardEnabled = enabled
+    Assert.len(shown, 0, "相同百分比视为一致")
     Session.current = current
 end
 
--- 书架已经采用云端进度时，开书还要用同一阈值比较设备上的阅读位置。
+-- 书架已经采用云端进度时，开书用同一个 1% 口径比较设备上的阅读位置。
 do
-    local cfg = require("utils.settings").getSource("local")
-    local prior_tolerance = cfg.webdav_ignore_small_progress_diff
     local jumped_to
     local snapshot = {
         identity = { source_id = "local", stable_id = "webdav://b1.epub" },
@@ -811,28 +787,25 @@ do
         },
     }
     pending_row = { fraction = 0.405, page = 81, total_pages = 200, sync_status = 1 }
-    cfg.webdav_ignore_small_progress_diff = nil
     Progress.applyLocalPending(snapshot)
-    Assert.is_nil(jumped_to, "默认阈值在恢复时仍忽略小差额")
-
-    cfg.webdav_ignore_small_progress_diff = false
-    Progress.applyLocalPending(snapshot)
-    Assert.eq(jumped_to, 81, "关闭阈值后恢复书架拉取的小幅云端进度")
+    Assert.eq(jumped_to, 81, "给出了页码就按页码跳")
 
     jumped_to = nil
     snapshot.page = 81
     Progress.applyLocalPending(snapshot)
     Assert.is_nil(jumped_to, "精确页码相同则不跳转")
+
     snapshot.page = 80
     snapshot.doc_fraction = pending_row.fraction
     Progress.applyLocalPending(snapshot)
-    Assert.is_nil(jumped_to, "比例相同则不跳转")
+    Assert.eq(jumped_to, 81, "百分比相同也按已给出的页码跳")
 
+    jumped_to = nil
     snapshot.doc_fraction = 0.4
     snapshot.identity.stable_id = "b1"
+    pending_row = { fraction = 0.405, sync_status = 1 }
     Progress.applyLocalPending(snapshot)
-    Assert.is_nil(jumped_to, "纯本地书仍使用默认阈值")
-    cfg.webdav_ignore_small_progress_diff = prior_tolerance
+    Assert.is_nil(jumped_to, "没有精确位置时，不足一个百分点不跳")
 end
 
 for _, name in ipairs({
