@@ -34,10 +34,10 @@ end
 function M.plan()
     local settings = MoonSettings.get("features.lockscreen")
     local component = M.component()
-    local background_mode = settings.lock_screen_background or "bing"
+    local background_mode = settings.lock_screen_background
     if not Background.validMode(background_mode) then background_mode = "bing" end
     local asset = Background.background(background_mode)
-    local position = settings.lock_screen_position or "center-center"
+    local position = settings.lock_screen_position
     if component.supports_position == false or not Layout.validPosition(position) then
         position = "center-center"
     end
@@ -188,6 +188,14 @@ function M.build(plan, cb)
             end
             -- 统计页等主体里的封面是异步下载 / 解码的：不等它落定，子进程画到的就只是占位封面。
             pending_blocks = blocks
+            -- 子进程 fork 时机由 workers.system 调度：主进程的位图只能在回调里（子进程已结束）释放。
+            local function release()
+                for _idx, list in ipairs({ blocks, bg.blocks or {} }) do
+                    for _jdx, block in ipairs(list) do
+                        if block.widget and block.widget.free then block.widget:free() end
+                    end
+                end
+            end
             local function write()
                 image_job, pending_blocks = nil, nil
                 if cancelled then return end
@@ -204,6 +212,7 @@ function M.build(plan, cb)
                     timeout = 120,
                     on_done = function(result)
                         write_job = nil
+                        release()
                         if cancelled then return end
                         if not (result and result.ok) then
                             if path and result and result.err
@@ -216,11 +225,13 @@ function M.build(plan, cb)
                     end,
                     on_failed = function(job_err)
                         write_job = nil
+                        release()
                         if cancelled then return end
                         cb(false, job_err)
                     end,
                     on_cancelled = function()
                         write_job = nil
+                        release()
                     end,
                 })
                 if cancelled and write_job and write_job.cancel then

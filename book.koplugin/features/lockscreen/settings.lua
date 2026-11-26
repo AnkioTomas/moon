@@ -33,11 +33,6 @@ function M.removeAds()
     return (code == 0 or code == true) and not M.hasAds()
 end
 
---- 当前生效的主体配置；位置和宽窄是否可改由它的能力位决定。
-local function component()
-    return require("features.lockscreen.compose").component()
-end
-
 --- 接管前的 screensaver_* 快照存放键（照 pinyin 的布局快照做法）。
 local PREVIOUS_KEY = "book_lockscreen_previous_screensaver"
 --- 被接管的 KOReader 设置键
@@ -151,10 +146,9 @@ end
 --- 自定义留言，空则用公共默认句子。
 ---@return string
 function M.customMessage()
-    local Text = require("utils.text")
-    local U = require("features.lockscreen.components.util")
     local message = MoonSettings.get("features.lockscreen").lock_screen_custom_message
-    return type(message) == "string" and Text.trim(message) ~= "" and message or U.FALLBACK_MESSAGE
+    return require("utils.text").trim(message) ~= "" and message
+        or require("features.lockscreen.setting").defaults.lock_screen_custom_message
 end
 
 -- 背景与主体拆开前，这些主体自带背景（无视用户选的背景）：搬成等价的「背景, 主体」。
@@ -214,7 +208,8 @@ end
 --- 设置主体位置；主体不支持定位或位置非法则忽略。
 ---@param position string
 function M.setPosition(position)
-    if component().supports_position ~= false and require("features.lockscreen.layout").validPosition(position) then
+    if require("features.lockscreen.compose").component().supports_position ~= false
+        and require("features.lockscreen.layout").validPosition(position) then
         save("lock_screen_position", position)
     end
 end
@@ -222,7 +217,7 @@ end
 --- 设置宽/窄面板；固定形态主体忽略该设置，保留其他主体的偏好。
 ---@param wide boolean
 function M.setWide(wide)
-    if component().supports_narrow ~= false then
+    if require("features.lockscreen.compose").component().supports_narrow ~= false then
         save("lock_screen_wide", wide == true)
     end
 end

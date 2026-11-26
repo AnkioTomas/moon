@@ -83,7 +83,20 @@ function Editor:apply(mut)
     self.saved_path = nil
     self.state = Editor.mergeState(self.state)
     self:persist()
-    self:refreshPreview()
+    self:schedulePreview()
+end
+
+--- 先显示「生成中…」，下一帧画完再同步生成（整张卡渲染会冻住点按反馈）。
+--- 已在排队就不重排：那次生成读的就是最新选项。
+function Editor:schedulePreview()
+    if self.preview_busy then return end
+    self.preview_busy = true
+    self.overlay:updateView()
+    UIManager:tickAfterNext(function()
+        if not self.closed then
+            Guard.call("share preview", function() self:refreshPreview() end)
+        end
+    end)
 end
 
 --- 字体行状态：未选或已清空时是自动（优先宋体），否则是字体选择器里的名字。
@@ -95,7 +108,8 @@ end
 
 --- 全屏查看预览图；点任意处退出。长图按宽度铺满，可上下滑。
 ---@param path string
-function Editor.showFullscreen(path)
+---@param size { w: number, h: number } 图的像素尺寸（生成时已知，不再为取尺寸解一遍图）
+function Editor.showFullscreen(path, size)
     local ImageWidget = require("ui/widget/imagewidget")
     local Box = require("ui.themes.widgets.box")
     local Modal = require("ui.themes.widgets.modal")
@@ -108,9 +122,6 @@ function Editor.showFullscreen(path)
         close_callback = function() UIManager:setDirty(nil, "full") end,
     }
     local w, h = viewer.dimen.w, viewer.dimen.h
-    local probe = ImageWidget:new{ file = path, file_do_cache = false }
-    local size = probe:getSize()
-    probe:free()
     local scale = math.min(w / math.max(1, size.w), h / math.max(1, size.h))
     local shown_h = size.h * scale
     if shown_h > h then
@@ -170,19 +181,16 @@ function Editor:preview(width)
     if self.preview_busy then
         return Overlay.previewPlaceholder(width, preview_h, _("生成中…"))
     end
-    local path = self.preview_path
+    local path, size = self.preview_path, self.preview_size
     if not path then
         return Overlay.previewPlaceholder(width, preview_h, _("未生成"))
     end
     local ImageWidget = require("ui/widget/imagewidget")
     local inner_w = math.max(1, width - 2)
     local inner_h = math.max(1, preview_h - 2)
-    local probe = ImageWidget:new{ file = path, file_do_cache = false }
-    local size = probe:getSize()
-    probe:free()
     local scale = math.min(inner_w / math.max(1, size.w), inner_h / math.max(1, size.h))
     local tap = require("ui.widgets.book").tappable(width, preview_h, function()
-        Editor.showFullscreen(path)
+        Editor.showFullscreen(path, size)
     end)
     tap[1] = Overlay.previewBox(width, CenterContainer:new{
         dimen = Geom:new{ w = inner_w, h = inner_h },
@@ -263,8 +271,6 @@ function Editor:sections()
     rows[#rows + 1] = choiceRow(_("主题"), Editor.themeItems(), state.theme, "style", function(value)
         self:apply(function()
             self.state.theme = value
-            if value == "scenic" and not Card.SCENIC[self.state.art] then self.state.art = "sunset" end
-            if value == "vista" and not Card.VISTA[self.state.art] then self.state.art = "dawn" end
         end)
     end)
     local auto_font = not state.font_id
@@ -319,15 +325,18 @@ function Editor:sections()
             callback = function() self:saveImage() end,
         })
     end
-    rows[#rows + 1] = function(iw)
-        return Row.widget({
-            width = iw,
-            kind = "nav",
-            icon = "share",
-            title = _("分享"),
-            chevron = false,
-            callback = function() self:shareImage() end,
-        })
+    -- 分享经远程管理起服；停用了远程管理就不给入口，免得绕过用户设置把服务拉起来。
+    if not require("features.manage").isSkipped("remote") then
+        rows[#rows + 1] = function(iw)
+            return Row.widget({
+                width = iw,
+                kind = "nav",
+                icon = "share",
+                title = _("分享"),
+                chevron = false,
+                callback = function() self:shareImage() end,
+            })
+        end
     end
     return { { title = _("书摘"), rows = rows } }
 end
@@ -335,23 +344,23 @@ end
 function Editor:refreshPreview()
     local old = self.preview_path
     local path = Paths.tmpname(".png")
-    local ok, err = Card.write(self.state.theme, self.payload, path, self.preview_width, self:opts())
+    local ok, err, layout = Card.write(self.state.theme, self.payload, path, self.preview_width, self:opts())
     self.preview_busy = false
     if not ok then
         os.remove(path)
         self.preview_path = nil
         Toast:new{ text = T(_("书摘图生成失败：%1"), tostring(err)), timeout = 3 }:show()
-        if self.overlay and self.overlay.updateView then self.overlay:updateView() end
+        self.overlay:updateView()
         return
     end
     self.preview_path = path
+    self.preview_size = { w = layout.width, h = layout.height }
     if old and old ~= path then os.remove(old) end
-    if self.overlay and self.overlay.updateView then self.overlay:updateView() end
+    self.overlay:updateView()
 end
 
 function Editor:show()
     local editor = self
-    self.preview_busy = true
     self.overlay = Overlay:new{
         spec = {
             title = _("书摘"),
@@ -364,12 +373,7 @@ function Editor:show()
         end,
     }
     self.overlay:show()
-    -- 先出壳再生成预览，避免首帧卡住。
-    UIManager:nextTick(function()
-        if not editor.closed then
-            Guard.call("share preview", function() editor:refreshPreview() end)
-        end
-    end)
+    self:schedulePreview()
 end
 
 function Editor:cleanup()
@@ -387,22 +391,11 @@ function Editor:close()
     if self.close_callback then self.close_callback() end
 end
 
----@return string|nil
+---@return string
 function Editor:screenshotDir()
-    local dir
-    if G_reader_settings and G_reader_settings.readSetting then
-        local shot = G_reader_settings:readSetting("screenshot_dir")
-        if type(shot) == "string" and shot ~= "" then dir = shot end
-    end
-    if not dir then
-        local ok, DataStorage = pcall(require, "datastorage")
-        if ok and DataStorage.getDataDir then
-            dir = DataStorage:getDataDir() .. "/screenshots"
-        else
-            dir = Paths.tmpDir and Paths.tmpDir() or "/tmp"
-        end
-    end
-    return dir
+    local shot = G_reader_settings:readSetting("screenshot_dir")
+    if type(shot) == "string" and shot ~= "" then return shot end
+    return require("datastorage"):getDataDir() .. "/screenshots"
 end
 
 function Editor:fileName()

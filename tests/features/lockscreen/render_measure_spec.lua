@@ -77,12 +77,5 @@ faces, boxes = {}, {}
 Assert.eq(Render.measureText("书名", 80, 14, true, { face = "./fonts/noto/NotoSansCJKsc-Regular.otf" }), 24)
 Assert.eq(boxes[1].name, "cfont")
 
--- 连 cfont 都没有时估一个高度，仍然不构造 TextBoxWidget。
-boxes = {}
-local RenderEmpty = stub(function() return nil end) -- getFace(_, font) 一律 nil
-local h = RenderEmpty.measureText("书摘一行字", 100, 20, false, { face = "missing.otf", line_height = 0.2 })
-Assert.is_true(h >= 20)
-Assert.eq(#boxes, 0, "没有可用 face 时不创建 TextBoxWidget")
-
 unload()
 return true

@@ -38,7 +38,6 @@ end
 package.preload["features.lockscreen.components.util"] = function()
     return {
         MUTED = 3, RULE = 5,
-        FALLBACK_MESSAGE = "默认",
         duration = function(seconds) return tostring(seconds) end,
         progressBlocks = function(x, y, width)
             return { { kind = "rule", x = x, y = y, width = width, height = 8 } }, 8

@@ -242,7 +242,7 @@ end
 ---@return boolean
 function M.resolvable(mode)
     if M.find(mode) then return true end
-    local _, ready = externalBackgrounds()
+    local _list, ready = externalBackgrounds()
     return not ready
 end
 

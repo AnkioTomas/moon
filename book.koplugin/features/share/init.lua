@@ -9,22 +9,9 @@
 require("l10n").apply()
 
 local Ext = require("utils.extension")
-local Paths = require("utils.paths")
 local _ = require("gettext")
 
 local Share = {}
-
-local lfs = require("libs/libkoreader-lfs")
-
----@param stable_id string|nil
----@param source_id string|nil
----@return string|nil
-local function coverOf(stable_id, source_id)
-    if type(stable_id) ~= "string" or stable_id == "" then return nil end
-    if type(source_id) ~= "string" or source_id == "" then return nil end
-    local path = Paths.coverPath(stable_id, source_id)
-    return lfs.attributes(path, "mode") == "file" and path or nil
-end
 
 --- 从当前阅读会话和文档属性收集书名、作者、章节、封面。
 ---@param highlight table|nil
@@ -53,7 +40,7 @@ local function bookContext(highlight, ctx)
         title = title or "",
         authors = authors or "",
         chapter = chapter or "",
-        cover = coverOf(stable_id, source_id),
+        cover = require("features.lockscreen.components.library").coverPath(stable_id, source_id),
         source_id = source_id,
         stable_id = stable_id,
     }
@@ -102,12 +89,6 @@ function Share.payloadFromNote(entry, ctx)
     return payload
 end
 
---- 打开样式选择并生成分享图。
----@param payload table
-function Share.open(payload)
-    require("features.share.dialog").open(payload)
-end
-
 Ext.add("highlight.buttons", {
     key = "share",
     factory = function(highlight, index)
@@ -119,7 +100,7 @@ Ext.add("highlight.buttons", {
                 if highlight and highlight.onClose then
                     highlight:onClose()
                 end
-                Share.open(payload)
+                require("features.share.dialog").open(payload)
             end,
         }
     end,
@@ -129,7 +110,7 @@ Ext.add("note.item_actions", {
     text = _("书摘"),
     icon = "share",
     run = function(entry, ctx)
-        Share.open(Share.payloadFromNote(entry, ctx))
+        require("features.share.dialog").open(Share.payloadFromNote(entry, ctx))
     end,
 })
 

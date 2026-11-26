@@ -113,7 +113,7 @@ end
 ---@return boolean
 function M.resolvable(id)
     if M.find(id) then return true end
-    local _, ready = externalComponents()
+    local _list, ready = externalComponents()
     return not ready
 end
 

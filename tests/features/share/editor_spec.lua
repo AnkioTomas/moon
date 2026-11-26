@@ -87,7 +87,7 @@ package.preload["features.share.card"] = function()
         normalize = function(opts) return opts end,
         write = function(theme, payload, path, width, opts)
             writes[#writes + 1] = { theme = theme, path = path, width = width, opts = opts, text = payload.text }
-            return true
+            return true, nil, { width = width, height = 1000 }
         end,
     }
 end
@@ -187,6 +187,7 @@ package.preload["ui.widgets.fontpicker"] = function()
 end
 
 Kit.install("paper")
+require("ui/uimanager").tickAfterNext = function(_self, fn) fn() end
 
 package.loaded["features.share.editor"] = nil
 local Editor = require("features.share.editor")

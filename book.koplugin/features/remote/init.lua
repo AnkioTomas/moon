@@ -17,6 +17,7 @@ suspend 停服、resume 按标记恢复；停服时释放静态资源缓存。
 
 local logger = require("utils.log")
 local Settings = require("utils.settings")
+local Fs = require("utils.fs")
 local Text = require("utils.text")
 local Guard = require("ui.guard")
 local Pair = require("features.remote.pair")
@@ -26,12 +27,12 @@ local Remote = {
     _server = nil, ---@type table|nil server 实例（也是 insertZMQ 的句柄）
     _resume = false, ---@type boolean suspend 前在跑，resume 时恢复
     _temp_seq = 0,
+    _screen_at = 0, ---@type number 上次编码投屏 PNG 的时刻
     --- Kindle 实际打孔的端口：stop 必须用它拆规则，不能读当前配置（运行中改端口会泄漏旧规则）
     _punched_port = nil, ---@type number|nil
     _layout = nil,
     _io_queue = {},
     _io_job = nil,
-    _io_stopping = false,
     _clip = "", ---@type string 设备最后复制的文本镜像
     _clip_hooked = false,
 }
@@ -274,9 +275,9 @@ end
 
 -- 文件系统重活串行跑子进程：避免阻塞 UI，也避免多个远程请求同时 fork 撑爆设备。
 local function pumpIO()
-    if Remote._io_job or Remote._io_stopping or #Remote._io_queue == 0 then return end
+    if Remote._io_job or #Remote._io_queue == 0 then return end
     local item = table.remove(Remote._io_queue, 1)
-    Remote._io_job = true -- Job.run 失败时会同步回调；先放哨兵避免回调后被覆盖。
+    Remote._io_job = true -- Job.run 失败时会同步回调；先置位，回调里清掉。
 
     local function finish(result, err)
         Remote._io_job = nil
@@ -284,7 +285,7 @@ local function pumpIO()
         pumpIO()
     end
 
-    local job = require("workers.job").run(item.worker, {
+    require("workers.job").run(item.worker, {
         name = item.name,
         kind = "light",
         timeout = 30 * 60,
@@ -298,7 +299,6 @@ local function pumpIO()
             finish(nil, "cancelled")
         end,
     })
-    if Remote._io_job then Remote._io_job = job end
 end
 
 ---@param name string
@@ -329,15 +329,12 @@ local function runFilesystem(name, operation, cb, cleanup)
     pumpIO()
 end
 
-local function stopFilesystemJobs()
-    Remote._io_stopping = true
-    if type(Remote._io_job) == "table" then Remote._io_job:cancel() end
-    Remote._io_job = nil
+--- 停服只丢弃排队的任务；在跑的那条让它跑完：中途杀子进程会在目标处留下半截复制 / 半截恢复。
+local function dropQueuedFilesystemJobs()
     for _idx, item in ipairs(Remote._io_queue) do
         if item.cleanup then item.cleanup() end
     end
     Remote._io_queue = {}
-    Remote._io_stopping = false
 end
 
 -- ── handlers（server 的全部 IO 接缝）──────────────────
@@ -442,6 +439,26 @@ local function copyFile(src, dst)
     return true
 end
 
+--- 同目录下不撞名的新路径：name (2).ext、name (3).ext …（目录不拆扩展名）。
+---@param path string
+---@param is_dir boolean
+---@return string
+local function uniquePath(path, is_dir)
+    local lfs = require("libs/libkoreader-lfs")
+    local dir, name = path:match("^(.*)/([^/]+)$")
+    local stem, ext = name, ""
+    if not is_dir then
+        local s, e = name:match("^(.+)(%.[^.]+)$")
+        if s then stem, ext = s, e end
+    end
+    local n, target = 2, path
+    while lfs.symlinkattributes(target) do
+        target = string.format("%s/%s (%d)%s", dir, stem, n, ext)
+        n = n + 1
+    end
+    return target
+end
+
 --- 上传落位：重名策略由网页明确传入；os.rename 失败（跨设备）退化为复制。
 ---@param temp string
 ---@param dir string
@@ -456,9 +473,7 @@ local function saveUpload(temp, dir, name, cb, conflict)
         return
     end
     dir = resolved
-    local stem, ext = name:match("^(.*)(%.[^.]*)$")
-    stem, ext = stem or name, ext or ""
-    local target, n = dir .. "/" .. name, 2
+    local target = dir .. "/" .. name
     local existing = lfs.attributes(target)
     -- 询问阶段与实际落位之间可能有竞态；默认退化为保留两者，绝不静默覆盖。
     if conflict == "ask" and existing then
@@ -470,10 +485,7 @@ local function saveUpload(temp, dir, name, cb, conflict)
         return
     end
     if conflict == "rename" then
-        while lfs.attributes(target) do
-            target = string.format("%s/%s (%d)%s", dir, stem, n, ext)
-            n = n + 1
-        end
+        target = uniquePath(target, false)
     elseif existing and existing.mode ~= "file" then
         os.remove(temp)
         cb(nil, "target is not a file")
@@ -535,33 +547,6 @@ local function mkdirOne(path)
     return lfs.mkdir(path)
 end
 
---- 递归删除，不跟随软链接：链接只删链接本身。
----@param path string 已校验范围的条目路径
----@return boolean|nil, any
-local function purge(path)
-    local lfs = require("libs/libkoreader-lfs")
-    local attr = lfs.symlinkattributes(path)
-    if not attr then
-        return nil, "not found"
-    end
-    if attr.mode ~= "directory" then
-        return os.remove(path)
-    end
-    local ok, iter, state = pcall(lfs.dir, path)
-    if not ok or not iter then
-        return nil, "cannot open"
-    end
-    for name in iter, state do
-        if name ~= "." and name ~= ".." then
-            local d_ok, d_err = purge(path .. "/" .. name)
-            if not d_ok then
-                return nil, d_err
-            end
-        end
-    end
-    return lfs.rmdir(path)
-end
-
 ---@param path string
 ---@return boolean|nil, any
 local function deleteRecursive(path)
@@ -575,7 +560,10 @@ local function deleteRecursive(path)
     if isSecret(entry) then
         return nil, "protected path"
     end
-    return purge(entry)
+    if not require("libs/libkoreader-lfs").symlinkattributes(entry) then
+        return nil, "not found"
+    end
+    return Fs.removeTree(entry)
 end
 
 --- 删除后按 KOReader 文件管理器的规则清 KOReader 记的状态（文件：.sdr、阅读历史、收藏；
@@ -627,14 +615,14 @@ local function extractZip(archive)
         return nil, "target exists"
     end
     local staging = target .. ".moon-extract.part"
-    purge(staging)
+    Fs.removeTree(staging)
     local made, make_err = lfs.mkdir(staging)
     if not made then return nil, make_err end
 
     local reader = require("ffi/archiver").Reader:new()
     local function fail(err)
         reader:close()
-        purge(staging)
+        Fs.removeTree(staging)
         return nil, err
     end
     if not reader:open(archive) then
@@ -671,12 +659,12 @@ local function extractZip(archive)
     local iterate_err = reader.err
     reader:close()
     if iterate_err then
-        purge(staging)
+        Fs.removeTree(staging)
         return nil, iterate_err
     end
     local moved, move_err = os.rename(staging, target)
     if not moved then
-        purge(staging)
+        Fs.removeTree(staging)
         return nil, move_err
     end
     return target
@@ -823,10 +811,8 @@ local function getStatus()
         status.battery = Device.powerd:getCapacity()
         status.charging = Device.powerd:isCharging() and true or false
     end
-    local DataStorage = require("datastorage")
-    -- 旧版 KOReader 的 df 只返回 total, free，没有第三个 available
-    local _total, free, available = require("ffi/util").df(DataStorage:getDataDir())
-    status.storage_available = available or free
+    local disk = Fs.disk(require("datastorage"):getDataDir())
+    status.storage_available = disk and disk.available
 
     local session = require("reader.session").current()
     if session then
@@ -888,18 +874,27 @@ local function frameTag(bb)
     return string.format('"%d-%d-%08x"', bb:getWidth(), bb:getHeight(), bit.band(h, 0xffffffff))
 end
 
+--- 两次 PNG 编码的最小间隔（秒）：编码在主线程，翻页 / 转圈时每次轮询都编码会堵 UI。
+local SCREEN_INTERVAL = 1
+
 --- 当前屏幕镜像。passcode 锁着时不投：屏上是解锁键盘。
+--- 浏览器已有一帧（带 etag）时按 SCREEN_INTERVAL 节流，间隔内一律 304。
 ---@param etag string|nil
 ---@return string|nil png, string|number tag, string|nil msg
 local function getScreen(etag)
     if require("features.passcode").isLocked() then
         return nil, 403, "locked"
     end
+    local now = require("socket").gettime()
+    if etag and now - Remote._screen_at < SCREEN_INTERVAL then
+        return nil, 304
+    end
     local bb = require("device").screen.bb
     local tag = frameTag(bb)
     if etag == tag then
         return nil, 304
     end
+    Remote._screen_at = now
     local path = tempPath() .. ".png"
     bb:writePNG(path)
     local f = assert(io.open(path, "rb"))
@@ -939,26 +934,6 @@ end
 
 local MAX_TREE_ENTRIES = 20000
 local MAX_TEXT_BYTES = 4 * 1024 * 1024
-
---- 同目录下不撞名的新路径：name (2).ext、name (3).ext …（目录不拆扩展名）。
----@param path string
----@param is_dir boolean
----@return string
-local function uniquePath(path, is_dir)
-    local lfs = require("libs/libkoreader-lfs")
-    local dir, name = path:match("^(.*)/([^/]+)$")
-    local stem, ext = name, ""
-    if not is_dir then
-        local s, e = name:match("^(.+)(%.[^.]+)$")
-        if s then stem, ext = s, e end
-    end
-    local n, target = 2, path
-    while lfs.symlinkattributes(target) do
-        target = string.format("%s/%s (%d)%s", dir, stem, n, ext)
-        n = n + 1
-    end
-    return target
-end
 
 --- 递归复制：不跟随软链接（链接跳过，免得把范围外的内容拷进来）；凭证文件跳过。
 ---@param src string
@@ -1041,7 +1016,7 @@ local function transfer(op, path, to, conflict)
             if isProtected(dst) then
                 return nil, "protected path"
             end
-            local purged, p_err = purge(dst)
+            local purged, p_err = Fs.removeTree(dst)
             if not purged then
                 return nil, p_err
             end
@@ -1054,11 +1029,11 @@ local function transfer(op, path, to, conflict)
     end
     local copied, c_err = copyTree(src, dst, { left = MAX_TREE_ENTRIES })
     if not copied then
-        purge(dst)
+        Fs.removeTree(dst)
         return nil, c_err
     end
     if op == "move" then
-        local purged, p_err = purge(src)
+        local purged, p_err = Fs.removeTree(src)
         if not purged then
             return nil, p_err
         end
@@ -1285,12 +1260,6 @@ local function buildLogsZip(diag, diag_notes, deferred)
     local lfs = require("libs/libkoreader-lfs")
     local Device = require("device")
     local notes = {}
-    local function is(name)
-        local f = Device[name]
-        local ok, v = pcall(function() return f and f(Device) end)
-        if not ok then notes[#notes + 1] = "Device." .. name .. " failed: " .. tostring(v) end
-        return ok and v
-    end
     local KO = { "^crash.*%.log$", "^crash%.log%.old$", "^crash%.log%.%d+$", "^reader%.log$", "^koreader.*%.log$" }
     local data = DataStorage:getFullDataDir()
     local install = lfs.currentdir() or "."
@@ -1303,12 +1272,12 @@ local function buildLogsZip(diag, diag_notes, deferred)
     if install ~= data and DataStorage.getDataDir and DataStorage:getDataDir() ~= data then
         spec[#spec + 1] = { dir = DataStorage:getDataDir(), prefix = "koreader-datadir/", patterns = KO }
     end
-    if is("isKobo") then
+    if Device:isKobo() then
         spec[#spec + 1] = { dir = "/mnt/onboard/.kobo", prefix = "kobo/", patterns = { "%.log$" } }
         spec[#spec + 1] = { dir = "/mnt/onboard/.adds/koreader", prefix = "kobo-koreader/", patterns = KO }
-    elseif is("isKindle") then
+    elseif Device:isKindle() then
         spec[#spec + 1] = { dir = "/mnt/us/koreader", prefix = "kindle-koreader/", patterns = KO }
-    elseif is("isPocketBook") then
+    elseif Device:isPocketBook() then
         spec[#spec + 1] = { dir = "/mnt/ext1/applications/koreader", prefix = "pocketbook-koreader/", patterns = KO }
         spec[#spec + 1] = { dir = "/mnt/ext1/system/logs", prefix = "pocketbook/", patterns = { "%.log$" } }
     end
@@ -1319,22 +1288,17 @@ local function buildLogsZip(diag, diag_notes, deferred)
     for _idx, e in ipairs(diag or {}) do extras[#extras + 1] = e end
     for _idx, n in ipairs(diag_notes or {}) do notes[#notes + 1] = n end
     extras, notes = Logs.finishExtras(extras, deferred, notes)
-    if is("isAndroid") then
+    if Device:isAndroid() then
         -- 应用只能读到自己进程的 logcat；取不到就记 skipped
-        local ok_l, text = pcall(function()
-            local h = io.popen("logcat -d -t 5000 2>/dev/null")
-            if not h then return "" end
-            local t = h:read("*a") or ""
-            h:close()
-            return t
-        end)
-        extras[#extras + 1] = { name = "android-logcat.txt", text = ok_l and text or ("error: " .. tostring(text)) }
+        local h = io.popen("logcat -d -t 5000 2>/dev/null")
+        local text = h and h:read("*a") or ""
+        if h then h:close() end
+        extras[#extras + 1] = { name = "android-logcat.txt", text = text }
     end
 
-    local ok_v, Version = pcall(require, "version")
     local info = {
         plugin_version = require("bookversion"),
-        koreader_version = ok_v and Version:getCurrentRevision() or ("? (" .. tostring(Version) .. ")"),
+        koreader_version = require("version"):getCurrentRevision(),
         device = tostring(Device.model or "?"),
         startup_mode = require("utils.mem").startupMode(),
         language = require("gettext").current_lang or G_reader_settings:readSetting("language") or "C",
@@ -1374,7 +1338,7 @@ local function restoreBackup(temp, cb)
             text = _("备份已通过远程管理恢复，正在重启 KOReader…"),
         }:show()
         require("ui/uimanager"):scheduleIn(1, require("utils.restart").now)
-    end)
+    end, function() os.remove(temp) end)
 end
 
 --- 格式化月读数据（书库、进度、阅读记录、全部配置、缓存，保留日志、字体与补丁备份）与 crash.log：
@@ -1565,7 +1529,7 @@ function Remote.stop()
     Remote._server:stop()
     Remote._server = nil
     Pair.cancel()
-    stopFilesystemJobs()
+    dropQueuedFilesystemJobs()
     kindleHole(false)
     logger.info("book remote stopped")
 end

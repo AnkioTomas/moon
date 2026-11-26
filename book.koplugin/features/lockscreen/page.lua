@@ -59,12 +59,6 @@ local function generate(desktop)
     end
 end
 
---- 设置项变更：只重建设置页，不自动出图——改完几项再点「刷新锁屏图」一次生成。
----@param desktop table 桌面实例
-local function refreshAfterChange(desktop)
-    desktop:updateView()
-end
-
 --- 导航行；opts 即 Row.widget 参数（宽度在绘制时补上）。
 ---@param opts table
 ---@return fun(iw: number): table
@@ -84,7 +78,7 @@ local function choiceRow(desktop, opts)
         opts.width = iw
         opts.on_select = function(value)
             if opts.apply(value) == false then return end
-            refreshAfterChange(desktop)
+            desktop:updateView()
         end
         return Row.choice(opts)
     end
@@ -105,7 +99,7 @@ local function choosePath(desktop, current, is_file, apply)
         filter = is_file and function(name) return Image.suffix(name) ~= nil end or nil,
         on_select = function(path)
             apply(path)
-            refreshAfterChange(desktop)
+            desktop:updateView()
         end,
     }:show()
 end
@@ -119,7 +113,7 @@ local function editMessage(desktop)
         ok_text = _("保存"),
         callback = function(text)
             Settings.setCustomMessage(text)
-            refreshAfterChange(desktop)
+            desktop:updateView()
         end,
     }:show()
 end
@@ -150,12 +144,8 @@ function Lockscreen:rows(desktop)
                 status = enabled and _("开") or _("关"), status_on = enabled,
                 callback = function()
                     Settings.setMode(enabled and "ko" or "compose")
-                    if enabled then
-                        desktop:updateView()
-                    else
-                        desktop:updateView()
-                        generate(desktop)
-                    end
+                    desktop:updateView()
+                    if not enabled then generate(desktop) end
                 end,
             })
         end,
@@ -251,7 +241,7 @@ function Lockscreen:rows(desktop)
                     current_id = Typo.fontId,
                     on_select = function(_item, id, name)
                         Settings.setTypoFont(id, name)
-                        refreshAfterChange(desktop)
+                        desktop:updateView()
                     end,
                 }
                 return false
@@ -312,7 +302,7 @@ function Lockscreen:rows(desktop)
                 HitokotoSettings.showTypes({
                     on_change = function() changed = true end,
                     on_close = function()
-                        if changed then refreshAfterChange(desktop) end
+                        if changed then desktop:updateView() end
                     end,
                 })
             end,
@@ -325,8 +315,9 @@ function Lockscreen:rows(desktop)
         callback = function() generate(desktop) end,
     }
 
+    -- 分享经远程管理起服；停用了远程管理就不给入口，免得绕过用户设置把服务拉起来。
     local path = generatedPath()
-    if path then
+    if path and not require("features.manage").isSkipped("remote") then
         rows[#rows + 1] = navRow{
             icon = "share", title = _("分享锁屏图"),
             callback = function() require("features.remote.screenshot").share(path) end,

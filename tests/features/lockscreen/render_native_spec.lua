@@ -228,6 +228,20 @@ local ok_run, err_run = xpcall(function()
     ffi.C.free(image.data)
     os.remove(card)
 
+    -- 灰度画布（BB8）上的局部遮罩：白底 × 黑 50% = round(127.5) = 128，区域外不动。
+    color_screen = false
+    local gray_ok, gray_err = Render.write(path, nil, {
+        { kind = "overlay", x = 2, y = 3, width = 4, height = 2, color = BB.COLOR_BLACK, alpha = 0.5 },
+    })
+    Assert.is_true(gray_ok, tostring(gray_err))
+    decoded, image = Png.decodeFromFile(path, 1)
+    Assert.is_true(decoded)
+    Assert.eq(image.data[3 * 8 + 2], 128, "遮罩左上角")
+    Assert.eq(image.data[4 * 8 + 5], 128, "遮罩右下角")
+    Assert.eq(image.data[3 * 8 + 1], 255, "遮罩左侧不动")
+    Assert.eq(image.data[5 * 8 + 2], 255, "遮罩下方不动")
+    ffi.C.free(image.data)
+
     ok_size, err_size = Render.writeSize(card, 8, 8, {
         { kind = "border", x = 1, y = 1, width = 6, height = 6, border = 1, color = BB.ColorRGB32(0x20, 0x20, 0x20, 0xFF) },
     }, cream)

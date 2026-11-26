@@ -13,6 +13,8 @@ finishExtras + build 各做一次（禁止主线程读 sdr / 设置文件，也�
 @module koplugin.book.features.remote.logs
 --]]
 
+local Fs = require("utils.fs")
+
 local M = {}
 
 M.PER_FILE = 4 * 1024 * 1024
@@ -534,24 +536,16 @@ function M.gatherExtras()
     -- 0) 设备事实
     try("device", function()
         local Device = require("device")
-        local DataStorage = require("datastorage")
         local platforms = {}
         for _idx, name in ipairs({
             "isKindle", "isKobo", "isAndroid", "isPocketBook", "isCervantes",
             "isRemarkable", "isSonyPRSTUX", "isSDL",
         }) do
-            local fn = Device[name]
-            local ok, v = pcall(function() return fn and fn(Device) end)
-            if ok and v then
+            if Device[name](Device) then
                 platforms[#platforms + 1] = name:match("^is(.+)$"):lower()
             end
         end
-        local total, free, avail = require("ffi/util").df(DataStorage:getDataDir())
-        local connected
-        do
-            local ok_n, v = pcall(function() return require("ui/network/manager"):isConnected() end)
-            connected = ok_n and v == true
-        end
+        local disk = Fs.disk(require("datastorage"):getDataDir()) or {}
         local battery
         if Device:hasBattery() and Device.powerd then
             battery = Device.powerd:getCapacity()
@@ -562,10 +556,10 @@ function M.gatherExtras()
             screen_w = Device.screen and Device.screen:getWidth(),
             screen_h = Device.screen and Device.screen:getHeight(),
             dpi = Device.screen and Device.screen:getDPI(),
-            storage_total = total,
-            storage_free = free,
-            storage_avail = avail or free,
-            connected = connected,
+            storage_total = disk.total,
+            storage_free = disk.total and disk.total - disk.used,
+            storage_avail = disk.available,
+            connected = require("ui/network/manager"):isConnected() == true,
             has_battery = Device:hasBattery() and true or false,
             battery = battery,
             startup_mode = require("utils.mem").startupMode(),
@@ -575,11 +569,7 @@ function M.gatherExtras()
     -- 1) 启用插件
     try("plugins", function()
         local PluginLoader = require("pluginloader")
-        local enabled, disabled = PluginLoader.enabled_plugins, PluginLoader.disabled_plugins
-        if (not enabled or not disabled) and PluginLoader.loadPlugins then
-            enabled, disabled = PluginLoader:loadPlugins()
-        end
-        add("diag/plugins.txt", M.pluginsText(enabled, disabled))
+        add("diag/plugins.txt", M.pluginsText(PluginLoader.enabled_plugins, PluginLoader.disabled_plugins))
     end)
 
     -- 2) KOReader 全局设置（密钥键已掩；字符串路径托名；正文脱敏在 build）
@@ -678,11 +668,7 @@ function M.gatherExtras()
         local file = doc and doc.file
         local view_mode = ui and ui.view and ui.view.view_mode
         local copt = ui and ui.doc_settings and ui.doc_settings:readSetting("copt_status_line")
-        local header
-        if doc and doc.getHeaderHeight then
-            local ok_h, h = pcall(function() return doc:getHeaderHeight() end)
-            if ok_h then header = h end
-        end
+        local header = doc and doc.getHeaderHeight and doc:getHeaderHeight()
         add("diag/session.txt", M.sessionText({
             open = true,
             source_id = id.source_id,
@@ -718,7 +704,7 @@ function M.gatherExtras()
     -- 7) 最近打开：只解析身份与路径
     try("sdr-recent", function()
         local ReadHistory = require("readhistory")
-        pcall(function() ReadHistory:_read() end)
+        ReadHistory:_read()
         local Store = require("book.store")
         local jobs, seen = {}, {}
         local hist = ReadHistory.hist or {}

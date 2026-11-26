@@ -404,13 +404,11 @@ local ASSETS = {
     ["/update.js"] = { "update.js", "application/javascript; charset=utf-8" },
 }
 
---- 文件戳（mtime+size）；取不到 lfs（离线测试）时返回 nil，退化为永久缓存。
+--- 文件戳（mtime+size）。
 ---@param path string
 ---@return string|nil
 local function assetStamp(path)
-    local ok, lfs = pcall(require, "libs/libkoreader-lfs")
-    if not ok or type(lfs) ~= "table" or not lfs.attributes then return nil end
-    local attr = lfs.attributes(path)
+    local attr = require("libs/libkoreader-lfs").attributes(path)
     if not attr then return nil end
     return tostring(attr.modification) .. ":" .. tostring(attr.size)
 end

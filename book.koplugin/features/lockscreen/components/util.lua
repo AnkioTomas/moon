@@ -19,7 +19,6 @@ U.DIM = Blitbuffer.COLOR_GRAY_4
 U.RULE = Blitbuffer.COLOR_GRAY_5
 -- 进度条 / 柱图的空轨道，同主题 progress.track（0xDD）。COLOR_GRAY_N 是 0xNN，数字越小越黑。
 U.TRACK = Blitbuffer.COLOR_GRAY_D
-U.FALLBACK_MESSAGE = "读书不觉已春深，一寸光阴一寸金。"
 --- 插件根目录下的 logo.png（账单 / 票根页眉共用）。
 U.LOGO_PATH = (debug.getinfo(1, "S").source:match("^@(.+)/features/lockscreen/components/[^/]+$") or "") .. "/logo.png"
 

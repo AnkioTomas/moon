@@ -178,17 +178,6 @@ end
 ---@return number
 function M.measureText(text, width, size, bold, opts)
     local args = textBoxOpts(text, width, size, bold, opts)
-    if not args.face then
-        -- 连 cfont 都没有时不要去构造 TextBoxWidget（getAdjustedFace 会对 nil face 崩溃）。
-        opts = opts or {}
-        local leading = 1 + (opts.line_height or 0.3)
-        local w = math.max(1, width or 1)
-        local px = math.max(1, size or 1)
-        -- 无字体时按近似字数估高：UTF-8 中文大约 3 字节一字。
-        local chars = math.max(1, math.ceil(#tostring(text or "") / 3))
-        local per = math.max(1, math.floor(w / px))
-        return math.max(px, math.ceil(chars / per) * px * leading)
-    end
     local widget = TextBoxWidget:new(args)
     local height = widget:getSize().h
     widget:free()
@@ -245,7 +234,7 @@ end
 --- 像素 / 颜色的亮度（0-255）。
 ---@param c ffi.cdata*
 ---@return number
-local function lumaOf(c)
+function M.lumaOf(c)
     if c.getColorRGB32 then
         local rgb = c:getColorRGB32()
         return 0.299 * rgb.r + 0.587 * rgb.g + 0.114 * rgb.b
@@ -268,7 +257,7 @@ local function backdropLuma(bb, x, y, width, height)
         for col = 0, 11 do
             local px = math.min(cw - 1, math.max(0, math.floor(x + width * (col + 0.5) / 12)))
             local py = math.min(ch - 1, math.max(0, math.floor(y + height * (row + 0.5) / 6)))
-            local l = lumaOf(bb:getPixel(px, py))
+            local l = M.lumaOf(bb:getPixel(px, py))
             sum, sum2, n = sum + l, sum2 + l * l, n + 1
         end
     end
@@ -283,7 +272,7 @@ end
 ---@return ffi.cdata*
 local function contrastColor(color, luma)
     local light = luma < 165
-    local own = lumaOf(color)
+    local own = M.lumaOf(color)
     if (own >= 128) == light and math.abs(own - luma) >= 64 then return color end
     if Blitbuffer.isColor8(color) then
         local inverted = 255 - color.a
@@ -318,7 +307,7 @@ local function paintText(bb, block, w)
         color = contrastColor(color, luma)
         -- 照片这类杂乱底：再描一圈反向色，亮暗交错处也读得清。
         if spread > 28 then
-            halo = lumaOf(color) < 128 and Blitbuffer.COLOR_WHITE or Blitbuffer.COLOR_BLACK
+            halo = M.lumaOf(color) < 128 and Blitbuffer.COLOR_WHITE or Blitbuffer.COLOR_BLACK
         end
     end
     if block.box ~= false then
@@ -359,6 +348,20 @@ local function paintRect(bb, x, y, width, height, color, radius)
     end
 end
 
+--- 取出颜色的 RGB 分量（0–255）。
+---@param color BlitColor
+---@return number, number, number
+local function rgbOf(color)
+    if Blitbuffer.isColor8(color) then
+        return color.a, color.a, color.a
+    end
+    if color.getColorRGB32 then
+        local c = color:getColorRGB32()
+        return c.r, c.g, c.b
+    end
+    return 0, 0, 0
+end
+
 --- 在两色之间插值，不走 Theme.mix（会补饱和，把设计稿渐变推离原色）。
 ---@param from BlitColor
 ---@param to BlitColor
@@ -367,18 +370,8 @@ end
 local function mixColors(from, to, t)
     if t <= 0 then return from end
     if t >= 1 then return to end
-    local function rgb(color)
-        if Blitbuffer.isColor8(color) then
-            return color.a, color.a, color.a
-        end
-        if color.getColorRGB32 then
-            local c = color:getColorRGB32()
-            return c.r, c.g, c.b
-        end
-        return 0, 0, 0
-    end
-    local r1, g1, b1 = rgb(from)
-    local r2, g2, b2 = rgb(to)
+    local r1, g1, b1 = rgbOf(from)
+    local r2, g2, b2 = rgbOf(to)
     local r = math.max(0, math.min(255, math.floor(r1 + (r2 - r1) * t + 0.5)))
     local g = math.max(0, math.min(255, math.floor(g1 + (g2 - g1) * t + 0.5)))
     local b = math.max(0, math.min(255, math.floor(b1 + (b2 - b1) * t + 0.5)))
@@ -404,20 +397,6 @@ local function lightenRounded(bb, x, y, width, height, radius, by)
     bb:lightenRect(x, y + radius, width, height - radius * 2, by)
 end
 
---- 取出颜色的 RGB 分量（0–255）。
----@param color BlitColor
----@return number, number, number
-local function rgbOf(color)
-    if Blitbuffer.isColor8(color) then
-        return color.a, color.a, color.a
-    end
-    if color.getColorRGB32 then
-        local c = color:getColorRGB32()
-        return c.r, c.g, c.b
-    end
-    return 0, 0, 0
-end
-
 --- 把带不透明度的颜色叠到已有像素上（用于风景页脚遮罩、静影暗角）。
 ---@param alpha number 0..1
 local function blendRect(bb, x, y, width, height, color, alpha)
@@ -435,12 +414,11 @@ local function blendRect(bb, x, y, width, height, color, alpha)
         return
     end
     local cr, cg, cb = rgbOf(color)
-    local typ = bb.getType and bb:getType() or nil
-    if typ == Blitbuffer.TYPE_BBRGB32 and bb.data then
-        local ffi = require("ffi")
-        local data = ffi.cast("uint8_t *", bb.data)
-        local stride = tonumber(bb.stride)
-        local inv = 1 - alpha
+    -- 画布只会是 writePNG 新建的 BB8 / RGB32（无旋转、无反色），直接改像素数据。
+    local data = require("ffi").cast("uint8_t *", bb.data)
+    local stride = tonumber(bb.stride)
+    local inv = 1 - alpha
+    if bb:getType() == Blitbuffer.TYPE_BBRGB32 then
         for row = 0, height - 1 do
             local dest = (y + row) * stride + x * 4
             for col = 0, width - 1 do
@@ -453,27 +431,11 @@ local function blendRect(bb, x, y, width, height, color, alpha)
         return
     end
     local target = math.floor(0.299 * cr + 0.587 * cg + 0.114 * cb + 0.5)
-    local inv = 1 - alpha
     for row = 0, height - 1 do
+        local dest = (y + row) * stride + x
         for col = 0, width - 1 do
-            local px = bb:getPixel(x + col, y + row)
-            local g = 255
-            if type(px) == "number" then
-                g = px
-            elseif px then
-                if px.getColor8 then
-                    local ok, c8 = pcall(function() return px:getColor8() end)
-                    if ok and c8 and type(c8.a) == "number" then g = c8.a end
-                elseif type(px.a) == "number" then
-                    g = px.a
-                end
-            end
-            local v = math.max(0, math.min(255, math.floor(g * inv + target * alpha + 0.5)))
-            if typ == Blitbuffer.TYPE_BBRGB32 then
-                bb:setPixel(x + col, y + row, Blitbuffer.ColorRGB32(v, v, v, 0xFF))
-            else
-                bb:setPixel(x + col, y + row, Blitbuffer.Color8(v))
-            end
+            local i = dest + col
+            data[i] = math.max(0, math.min(255, math.floor(data[i] * inv + target * alpha + 0.5)))
         end
     end
 end

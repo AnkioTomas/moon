@@ -154,10 +154,7 @@ end
 
 --- 缓存失效时异步重建（唤醒 / 桌面回到前台 / 联网）。不进电源键路径。
 local function refreshIfStale(reason)
-    if not Settings.isCompose() then return end
-    local plan = Compose.plan()
-    if Compose.cacheValid(plan) then return end
-    M.refresh(nil, false, reason)
+    if Settings.isCompose() then M.refresh(nil, false, reason) end
 end
 
 local function hookDesktopActivated()

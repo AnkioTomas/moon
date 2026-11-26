@@ -33,6 +33,9 @@ package.preload["ui.fonts"] = function()
     return { settingsFontsDir = function() return require("support.config").dir() .. "/fonts" end }
 end
 
+package.preload["fontlist"] = function()
+    return { fontdir = "/nonexistent-fonts", fontlist = {}, getFontList = function(self) return self.fontlist end }
+end
 package.loaded["features.share.card"] = nil
 local Card = require("features.share.card")
 
@@ -142,8 +145,26 @@ end
 local m = metrics()
 local payload = { text = SAMPLE, title = "东坡乐府", authors = "苏轼", chapter = "水调歌头", cover = "/tmp/cover.png" }
 
+--- layout 里全部会画出来的文案。
+local function texts(layout)
+    local out = {}
+    local function add(s)
+        if type(s) == "string" and s ~= "" then out[#out + 1] = s end
+    end
+    if layout.calendar then
+        add(layout.calendar.meta)
+        add(layout.calendar.day)
+        add(layout.calendar.week)
+    end
+    add(layout.running)
+    for _idx, key in ipairs({ "mark", "watermark", "quote", "title", "byline", "brand" }) do
+        if layout[key] then add(layout[key].text) end
+    end
+    return out
+end
+
 local function no_wechat(layout, style)
-    local joined = table.concat(Card.texts(layout), "\n")
+    local joined = table.concat(texts(layout), "\n")
     Assert.is_nil(joined:find("来自阅读笔记", 1, true), "不要 slogan")
     Assert.is_nil(joined:find("微信", 1, true))
     Assert.is_nil(joined:find("书摘", 1, true), "不要书摘 kicker")
@@ -189,7 +210,7 @@ for _idx, style in ipairs(Card.STYLES) do
     Assert.eq(layout.title.text, "《东坡乐府》")
     Assert.eq(layout.byline.text, "苏轼  ·  水调歌头")
     Assert.eq(layout.brand.text, "月读")
-    local joined = table.concat(Card.texts(layout), "\n")
+    local joined = table.concat(texts(layout), "\n")
     Assert.is_nil(joined:find("微信", 1, true))
     Assert.is_nil(joined:find("来自阅读笔记", 1, true))
     if style.id == "calendar" then

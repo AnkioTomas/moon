@@ -56,6 +56,7 @@ end
 
 -- ── 全局：图 / 铺法 / 透明度 ──────────────
 
+math.randomseed(os.time())
 local picks = {} -- 文件夹 → { picked = 本轮抽中的图, previous = 上一轮的图（重抽时避开） }
 
 --- 文件夹壁纸：从里面随机抽一张，每次启动 / 唤醒换一张（同一轮固定，不然每次重绘都变）。
@@ -64,15 +65,13 @@ local picks = {} -- 文件夹 → { picked = 本轮抽中的图, previous = 上�
 local function folderPick(dir)
     local state = picks[dir] or {}
     picks[dir] = state
-    if state.picked and Image.ok(state.picked) then return state.picked end
+    if state.picked then return state.picked end
     local files = {}
     for name in lfs.dir(dir) do
-        local path = dir .. "/" .. name
-        if Image.suffix(name) and Image.ok(path) then files[#files + 1] = path end
+        if Image.suffix(name) then files[#files + 1] = dir .. "/" .. name end
     end
     if #files == 0 then return nil end
     table.sort(files)
-    math.randomseed(os.time())
     state.picked = files[math.random(#files)]
     if #files > 1 and state.picked == state.previous then state.picked = files[state.picked == files[1] and 2 or 1] end
     return state.picked
@@ -607,9 +606,8 @@ function M.onReaderReady(plugin)
         if ui.document ~= document then return end
         local img = decodeSurface(path, w, h, nil, contain, opacity)
         if not img then return end
-        if cache.bb and cache.bb.free and cache.key ~= key then cache.bb:free() end
-        cache.key, cache.bb = key, img
         img:writePNG(file)
+        img:free()
         reader_key = key
         document:setBackgroundImage(file)
         M.ignoreReaderBackgroundStats(document)

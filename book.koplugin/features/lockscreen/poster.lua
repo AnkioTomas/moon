@@ -245,8 +245,6 @@ function M.cache_key()
     local parts = {}
     local retryable = 0
     local shelf = books(SHELF_LIMIT)
-    -- 没开过的网络书本地没封面：联网时后台补下载，落盘后键变化，下次锁屏重画。
-    require("features.lockscreen.components.cover_prefetch").run(shelf)
     for _idx, book in ipairs(shelf) do
         if book.cover then
             parts[#parts + 1] = (book.source_id or "") .. "\0" .. book.stable_id .. "+"
@@ -320,6 +318,8 @@ function M.blocks(rect)
     local w = math.max(1, tonumber(rect.w) or 1)
     local h = math.max(1, tonumber(rect.h) or 1)
     local shelf = books(SHELF_LIMIT)
+    -- 没开过的网络书本地没封面：联网时后台补下载，落盘后键变化，下次锁屏重画。
+    require("features.lockscreen.components.cover_prefetch").run(shelf)
     if #shelf == 0 then
         return {{
             text = _("书库暂无书籍"),

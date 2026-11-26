@@ -5,6 +5,7 @@ features.remote.logs：日志脱敏、收集白名单、打包（假 Writer）�
 --]]
 
 local Assert = require("support.assert")
+package.loaded["device"] = { isKindle = function() return false end }
 local Logs = require("features.remote.logs")
 
 local function has(s, sub)

@@ -19,6 +19,8 @@ local _ = require("gettext")
 
 local Card = {}
 
+local PLUGIN_ROOT = debug.getinfo(1, "S").source:match("^@(.+)/features/share/[^/]+$")
+
 --- 设计稿宽度（CSS 像素）；输出宽度按它等比放大。
 Card.DESIGN_WIDTH = 375
 
@@ -454,10 +456,7 @@ end
 function Card.fontDirs()
     local lfs = require("libs/libkoreader-lfs")
     local dirs = { "./fonts", "./fonts/noto" }
-    local ok_list, FontList = pcall(require, "fontlist")
-    if ok_list and type(FontList.fontdir) == "string" then
-        dirs[#dirs + 1] = FontList.fontdir
-    end
+    dirs[#dirs + 1] = require("fontlist").fontdir
     dirs[#dirs + 1] = require("utils.paths").fontsDir()
     dirs[#dirs + 1] = require("ui.fonts").settingsFontsDir()
     local home = os.getenv("HOME") or ""
@@ -504,11 +503,7 @@ end
 ---@return string
 function Card.registerFont(path)
     if type(path) ~= "string" or path == "" or path == "cfont" then return path end
-    local abs = path
-    local ok_util, ffiutil = pcall(require, "ffi/util")
-    if ok_util and ffiutil.realpath then
-        abs = ffiutil.realpath(path) or path
-    end
+    local abs = require("ffi/util").realpath(path) or path
     if abs:sub(1, 1) ~= "/" then
         local lfs = require("libs/libkoreader-lfs")
         if lfs.currentdir then
@@ -517,8 +512,7 @@ function Card.registerFont(path)
         end
     end
     if abs:sub(1, 1) ~= "/" then return path end
-    local ok, FontList = pcall(require, "fontlist")
-    if not ok or not FontList.getFontList then return abs end
+    local FontList = require("fontlist")
     FontList:getFontList()
     for _idx, item in ipairs(FontList.fontlist or {}) do
         if item == abs then return abs end
@@ -579,8 +573,7 @@ end
 ---@return number|nil
 function Card.ttcFaceIndex(path, bold)
     if type(path) ~= "string" or not path:lower():match("%.ttc$") then return nil end
-    local ok, FT = pcall(require, "ffi/freetype")
-    if not ok or not FT.getFaceCount then return nil end
+    local FT = require("ffi/freetype")
     local n = FT.getFaceCount(path)
     if not n or n <= 0 then return nil end
     local best_i, best_score
@@ -712,12 +705,9 @@ end
 --- 插件自带 logo.png。
 ---@return string
 function Card.logoPath()
-    local src = debug.getinfo(1, "S").source
-    local root = src:match("^@(.+)/features/share/[^/]+$")
-    if root then
-        local path = root .. "/logo.png"
-        local lfs = require("libs/libkoreader-lfs")
-        if lfs.attributes(path, "mode") == "file" then return path end
+    if PLUGIN_ROOT then
+        local path = PLUGIN_ROOT .. "/logo.png"
+        if require("libs/libkoreader-lfs").attributes(path, "mode") == "file" then return path end
     end
     return "logo.png"
 end
@@ -728,46 +718,7 @@ end
 function Card.artPath(id)
     local entry = Card.SCENIC[id] or Card.VISTA[id]
     if not entry then return nil end
-    local src = debug.getinfo(1, "S").source
-    local root = src:match("^@(.+)/features/share/[^/]+$")
-    if root then
-        local path = root .. "/features/share/art/" .. entry.file
-        local lfs = require("libs/libkoreader-lfs")
-        if lfs.attributes(path, "mode") == "file" then return path end
-        return path
-    end
-    return "features/share/art/" .. entry.file
-end
-
----@return string
-function Card.pluginRoot()
-    local src = debug.getinfo(1, "S").source
-    return src:match("^@(.+)/features/share/[^/]+$")
-end
-
----@return number
-function Card.canvasWidth()
-    return Card.OUTPUT_WIDTH
-end
-
---- 读取像素亮度；Color8 用 .a，RGB 走 getColor8，避免把 cdata 误读成留白。
----@param px any
----@return number
-local function pixelLuma(px)
-    if type(px) == "number" then return px end
-    if type(px) ~= "table" and type(px) ~= "cdata" and type(px) ~= "userdata" then
-        return 255
-    end
-    if px.getColor8 then
-        local ok, c8 = pcall(function() return px:getColor8() end)
-        if ok and c8 and type(c8.a) == "number" then return c8.a end
-    end
-    if type(px.a) == "number" then return px.a end
-    if type(px.l) == "number" then return px.l end
-    if type(px.r) == "number" then
-        return math.floor(0.299 * px.r + 0.587 * (px.g or px.r) + 0.114 * (px.b or px.r) + 0.5)
-    end
-    return 255
+    return (PLUGIN_ROOT and PLUGIN_ROOT .. "/" or "") .. "features/share/art/" .. entry.file
 end
 
 --- 量出「」字模左侧留白，好把墨迹贴到卡片左缘（中文引号左侧空白很大）。
@@ -776,8 +727,7 @@ end
 ---@return number
 function Card.quoteBearing(face, size, faceindex)
     local fallback = math.floor((size or 24) * 0.6 + 0.5)
-    local ok, TextBoxWidget = pcall(require, "ui/widget/textboxwidget")
-    if not ok then return fallback end
+    local TextBoxWidget = require("ui/widget/textboxwidget")
     local Render = require("features.lockscreen.render")
     local opened = Render.getFace(face, size, faceindex)
     if not opened then return fallback end
@@ -790,7 +740,7 @@ function Card.quoteBearing(face, size, faceindex)
         bgcolor = Blitbuffer.COLOR_WHITE,
     }
     -- getSize 会触发绘制，保证能读到 _bb。
-    if widget.getSize then pcall(function() widget:getSize() end) end
+    widget:getSize()
     local bearing = fallback
     local measured_ok, measured = pcall(function()
         local bb = widget._bb
@@ -798,7 +748,7 @@ function Card.quoteBearing(face, size, faceindex)
         local w, h = bb:getWidth(), bb:getHeight()
         for x = 0, w - 1 do
             for y = 0, h - 1 do
-                if pixelLuma(bb:getPixel(x, y)) < 240 then return x end
+                if Render.lumaOf(bb:getPixel(x, y)) < 240 then return x end
             end
         end
         return fallback
@@ -1048,7 +998,7 @@ function Card.layout(style, payload, width, metrics, opts)
     style = opts.theme or style
     assert(Card.isStyle(style), "unknown share style")
     metrics = metrics or Card.defaultMetrics(opts)
-    width = math.floor(tonumber(width) or Card.canvasWidth())
+    width = math.floor(tonumber(width) or Card.OUTPUT_WIDTH)
     local unit = width / Card.DESIGN_WIDTH
     local function px(n) return math.max(0, math.floor(n * unit + 0.5)) end
     local function fontSize(css) return css * unit / metrics.dpi end
@@ -1643,29 +1593,6 @@ function Card.blocks(layout)
         }
     end
     return blocks
-end
-
---- 收集 layout 里全部会画出来的文案，供测试断言没有 kicker / slogan。
----@param layout table
----@return string[]
-function Card.texts(layout)
-    local out = {}
-    local function add(s)
-        if type(s) == "string" and s ~= "" then out[#out + 1] = s end
-    end
-    if layout.calendar then
-        add(layout.calendar.meta)
-        add(layout.calendar.day)
-        add(layout.calendar.week)
-    end
-    if layout.running then add(layout.running) end
-    if layout.mark then add(layout.mark.text) end
-    if layout.watermark then add(layout.watermark.text) end
-    if layout.quote then add(layout.quote.text) end
-    if layout.title then add(layout.title.text) end
-    if layout.byline then add(layout.byline.text) end
-    if layout.brand then add(layout.brand.text) end
-    return out
 end
 
 --- 写出分享 PNG。

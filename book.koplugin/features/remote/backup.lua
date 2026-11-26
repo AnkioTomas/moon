@@ -14,6 +14,8 @@ ffi/archiver 的 Writer / Reader 与 lfs 由调用方传入，离线测试可替
 @module koplugin.book.features.remote.backup
 --]]
 
+local Fs = require("utils.fs")
+
 local Backup = {}
 
 Backup.MARKER = "moon-backup.txt"
@@ -93,21 +95,6 @@ function Backup.build(output, root, Writer, lfs)
     return output
 end
 
----@param lfs table
----@param path string
-local function rmtree(lfs, path)
-    local attr = lfs.symlinkattributes(path)
-    if not attr then return end
-    if attr.mode == "directory" then
-        for child in lfs.dir(path) do
-            if child ~= "." and child ~= ".." then rmtree(lfs, path .. "/" .. child) end
-        end
-        lfs.rmdir(path)
-    else
-        os.remove(path)
-    end
-end
-
 --- 格式化：删 root 下全部顶层条目（书库、笔记、进度、统计、配置、缓存、词库……）与给定文件（crash.log 等）。
 --- 保留 fonts（主进程 mmap 着，删了会 SIGBUS）、backups（补丁原文件，还原核心补丁要用）与 book.log*。
 ---@param lfs table
@@ -119,7 +106,7 @@ function Backup.format(lfs, root, files)
     local left = false
     for name in lfs.dir(root) do
         if name ~= "." and name ~= ".." and name ~= "fonts" and name ~= "backups" and not name:match("^book%.log") then
-            rmtree(lfs, root .. "/" .. name)
+            Fs.removeTree(root .. "/" .. name)
             if lfs.attributes(root .. "/" .. name, "mode") then left = true end
         end
     end
@@ -162,7 +149,7 @@ local function replace(lfs, from, dest, name)
     local suffixes = name:match("%.sqlite3$") and { "", "-wal", "-shm" } or { "" }
     for _idx, suffix in ipairs(suffixes) do
         local cur, old = dest .. suffix, dest .. suffix .. ".old"
-        rmtree(lfs, old)
+        Fs.removeTree(old)
         if lfs.attributes(cur, "mode") then
             if not os.rename(cur, old) then
                 putBack()
@@ -173,11 +160,11 @@ local function replace(lfs, from, dest, name)
     end
     local moved, err = os.rename(from, dest)
     if not moved then
-        rmtree(lfs, dest)
+        Fs.removeTree(dest)
         putBack()
         return nil, err
     end
-    for _idx, pair in ipairs(aside) do rmtree(lfs, pair[2]) end
+    for _idx, pair in ipairs(aside) do Fs.removeTree(pair[2]) end
     return true
 end
 
@@ -190,12 +177,12 @@ end
 ---@return string|nil err
 function Backup.restore(archive, root, Reader, lfs)
     local staging = root .. "/" .. Backup.STAGING
-    rmtree(lfs, staging)
+    Fs.removeTree(staging)
     if not lfs.mkdir(staging) then return nil, "cannot create staging" end
     local reader = Reader:new()
     local function fail(err)
         reader:close()
-        rmtree(lfs, staging)
+        Fs.removeTree(staging)
         return nil, err
     end
     if not reader:open(archive) then return fail("not a moon backup") end
@@ -212,11 +199,11 @@ function Backup.restore(archive, root, Reader, lfs)
     local iterate_err = reader.err
     reader:close()
     if iterate_err then
-        rmtree(lfs, staging)
+        Fs.removeTree(staging)
         return nil, iterate_err
     end
     if lfs.attributes(staging .. "/" .. Backup.MARKER, "mode") ~= "file" then
-        rmtree(lfs, staging)
+        Fs.removeTree(staging)
         return nil, "not a moon backup"
     end
     os.remove(staging .. "/" .. Backup.MARKER)
@@ -227,7 +214,7 @@ function Backup.restore(archive, root, Reader, lfs)
     end
     table.sort(names)
     if #names == 0 then
-        rmtree(lfs, staging)
+        Fs.removeTree(staging)
         return nil, "backup is empty"
     end
     for _idx, name in ipairs(names) do
@@ -237,12 +224,12 @@ function Backup.restore(archive, root, Reader, lfs)
         else
             local moved, err = replace(lfs, staging .. "/" .. name, dest, name)
             if not moved then
-                rmtree(lfs, staging)
+                Fs.removeTree(staging)
                 return nil, err
             end
         end
     end
-    rmtree(lfs, staging)
+    Fs.removeTree(staging)
     return names
 end
 

@@ -47,7 +47,7 @@ package.preload["features.lockscreen.components.quote_panel"] = function()
 end
 
 package.preload["features.lockscreen.components.util"] = function()
-    return { FALLBACK_MESSAGE = "fallback" }
+    return {}
 end
 
 package.preload["reader.session"] = function()
