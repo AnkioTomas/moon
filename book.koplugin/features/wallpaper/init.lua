@@ -10,8 +10,13 @@
 阅读页（reader，默认关）：crengine 把正文整屏铺满不透明，垫在下面看不见，所以改用它自带的
 平铺背景图接口：按屏幕尺寸渲染成 PNG 交给 `document:setBackgroundImage`，正文直接画在图上。
 只有 crengine 文档（EPUB / TXT / HTML 等）有这个接口，PDF / 漫画不生效；打开书时设置，改开关下次开书生效。
-`setBackgroundImage(tiled)` 会把整屏背景计入 drawn-images 统计；KOReader 用 coverage≥7.5%
-判「图片页」（dither / 可选每页全刷）。阅读壁纸不是正文图，装上后要从统计里扣掉这一屏。
+两件与刷新相关的事：
+1. `setBackgroundImage` 把整屏背景计入 drawn-images；KOReader 用 coverage≥7.5% 判「图片页」
+   （dither / 可选每页全刷）。阅读壁纸不是正文图，装上后要从统计里扣掉这一屏。
+2. PW5/PW6 等 MTK（以及 Zelda REAGL）上 `waveform_partial` 默认就是 REAGL/GLR16，驱动会把
+   这类波形强制成 UPDATE_MODE_FULL——诊断里 flashing=false 仍是整屏 FULL。照片壁纸一开，
+   每次翻页的 REAGL FULL 看起来就像「关了全刷还是每页闪」。装阅读壁纸时把 partial 临时
+   降到 GL16（保持 PARTIAL），关书再还原。
 
 位图按「路径 + 尺寸 + 铺法 + 透明度」只缓存一张：两个作用面尺寸不同会来回换，但界面
 一次只画一处，换一次解一次可接受；改设置经 invalidate 丢弃。
@@ -489,6 +494,69 @@ function M.wrap(scope, w, h, child)
 end
 
 local reader_key
+--- 阅读壁纸启用期间替换掉的 Screen.waveform_partial；nil = 未替换。
+local saved_partial
+
+--- REAGL/GLR16 之外的灰阶 partial。MTK/Zelda 上是 GL16(=3)，老 Carta REAGL 上是 GL16(=5)。
+--- 读到的常量若仍等于当前 reagl（头文件未装 / 装错族），丢掉走回退表。
+---@return number|nil
+---@param screen table|nil
+local function nonReaglPartial(screen)
+    screen = screen or require("device").screen
+    local reagl = screen.waveform_reagl
+    if not reagl then return nil end
+    local function accept(mode)
+        mode = tonumber(mode)
+        if mode and mode ~= reagl then return mode end
+    end
+    local ffi = require("ffi")
+    local C = ffi.C
+    local device = require("device")
+    if device.isMTK and device:isMTK() then
+        local ok, mode = pcall(function() return C.MTK_WAVEFORM_MODE_GL16 end)
+        if ok then
+            local got = accept(mode)
+            if got then return got end
+        end
+    end
+    if device.isZelda and device:isZelda() then
+        local ok, mode = pcall(function() return C.WAVEFORM_MODE_ZELDA_GL16 end)
+        if ok then
+            local got = accept(mode)
+            if got then return got end
+        end
+    end
+    do
+        local ok, mode = pcall(function() return C.WAVEFORM_MODE_GL16 end)
+        if ok then
+            local got = accept(mode)
+            if got then return got end
+        end
+    end
+    -- 头文件不可用或族不对：按已知 REAGL 编号回退
+    if reagl == 4 then return 3 end
+    if reagl == 8 or reagl == 9 or reagl == 6 then return 5 end
+    return nil
+end
+
+--- 阅读壁纸装上时：若本机 partial 就是 REAGL，临时换成 GL16，避免每页被驱成 FULL。
+function M.demoteReaderReagl()
+    local screen = require("device").screen
+    if saved_partial ~= nil then return end
+    local reagl = screen.waveform_reagl
+    if not (reagl and screen.waveform_partial == reagl) then return end
+    local gl16 = nonReaglPartial(screen)
+    if not gl16 or gl16 == screen.waveform_partial then return end
+    saved_partial = screen.waveform_partial
+    screen.waveform_partial = gl16
+end
+
+--- 关书 / 退出：还原被阅读壁纸改过的 partial 波形。
+function M.restoreReaderPartial()
+    if saved_partial == nil then return end
+    require("device").screen.waveform_partial = saved_partial
+    saved_partial = nil
+end
 
 --- cre `setBackgroundImage(tiled)` 每页往 drawn-images 加一整屏；阅读壁纸不是正文图，
 --- 装上后扣掉这一屏，否则 KOReader 会按「图片页」dither / 默认每页全刷。
@@ -513,10 +581,16 @@ end
 function M.onReaderReady(plugin)
     local ui = plugin.ui
     local document = ui.document
-    if not (document and document.setBackgroundImage and M.enabled("reader")) then return end
+    if not (document and document.setBackgroundImage and M.enabled("reader")) then
+        M.restoreReaderPartial()
+        return
+    end
     local w, h = Screen:getWidth(), Screen:getHeight()
     local path = M.path("reader")
-    if not path then return end
+    if not path then
+        M.restoreReaderPartial()
+        return
+    end
     local contain, opacity = M.contain("reader"), M.opacity("reader")
     local key = table.concat({ path, w, h, contain and "contain" or "cover", opacity }, "|")
     Paths.ensureCacheRoot()
@@ -524,6 +598,7 @@ function M.onReaderReady(plugin)
     if reader_key == key and lfs.attributes(file, "mode") then
         document:setBackgroundImage(file)
         M.ignoreReaderBackgroundStats(document)
+        M.demoteReaderReagl()
         return
     end
     local queued_rev = revision
@@ -538,8 +613,19 @@ function M.onReaderReady(plugin)
         reader_key = key
         document:setBackgroundImage(file)
         M.ignoreReaderBackgroundStats(document)
+        M.demoteReaderReagl()
         require("ui/uimanager"):setDirty(ui.dialog, "partial")
     end))
+end
+
+M.events = {
+    CloseDocument = function(_plugin)
+        M.restoreReaderPartial()
+    end,
+}
+
+function M.onExit(_plugin)
+    M.restoreReaderPartial()
 end
 
 local Ext = require("utils.extension")

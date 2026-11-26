@@ -14,7 +14,16 @@ package.loaded["utils.settings"] = {
     save = function() end,
 }
 
-package.loaded["device"] = { screen = { getWidth = function() return 100 end, getHeight = function() return 100 end } }
+package.loaded["device"] = {
+    screen = {
+        getWidth = function() return 100 end,
+        getHeight = function() return 100 end,
+        -- PW6/MTK：partial 默认 = REAGL(GLR16=4)
+        waveform_partial = 4,
+        waveform_reagl = 4,
+    },
+    isMTK = function() return true end,
+}
 package.loaded["utils.image"] = {
     ok = function() return true end,
     suffix = function(name) return name:match("%.png$") end,
@@ -186,6 +195,30 @@ do
     local before = document.getDrawnImagesStatistics
     Wallpaper.ignoreReaderBackgroundStats(document)
     Assert.eq(document.getDrawnImagesStatistics, before)
+end
+
+-- 阅读壁纸：REAGL partial 临时降到 GL16，关书还原（否则 MTK 每页 UPD=FULL）。
+do
+    -- widget_stubs 可能换过 device：补上 MTK 波形字段，demote 读的是 require("device").screen。
+    local device = require("device")
+    device.isMTK = device.isMTK or function() return true end
+    local screen = device.screen
+    screen.waveform_partial, screen.waveform_reagl = 4, 4
+    Wallpaper.demoteReaderReagl()
+    Assert.eq(screen.waveform_partial, 3, "REAGL→GL16")
+    Wallpaper.demoteReaderReagl()
+    Assert.eq(screen.waveform_partial, 3, "重复调用不叠层")
+    Wallpaper.restoreReaderPartial()
+    Assert.eq(screen.waveform_partial, 4, "关书还原 REAGL")
+    Wallpaper.restoreReaderPartial()
+    Assert.eq(screen.waveform_partial, 4, "未替换时还原是空操作")
+
+    -- 本机 partial 本来就不是 REAGL：不动
+    screen.waveform_partial, screen.waveform_reagl = 5, 4
+    Wallpaper.demoteReaderReagl()
+    Assert.eq(screen.waveform_partial, 5)
+    Wallpaper.restoreReaderPartial()
+    Assert.eq(screen.waveform_partial, 5)
 end
 
 -- 非全屏弹窗不按整屏 dimen 贴壁纸，否则会盖掉下层页面只剩淡壁纸+网点。
