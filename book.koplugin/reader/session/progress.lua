@@ -145,8 +145,15 @@ local function atDocumentStart(snapshot)
     return frac <= eps
 end
 
+--- 百分比只认显示出来的一位小数。静读天下的 .po 也只存这一位，差不到这一位是舍入。
+---@param fraction number|nil
+---@return integer
+local function percentTenth(fraction)
+    return math.floor(Progress.clampFraction(fraction) * 1000 + 0.5)
+end
+
 --- 边车恢复出来的位置和交给进度的位置不是同一处。
---- 有精确坐标就只比坐标。没有坐标时，百分比是调用方事先算好的，差 ≥1% 才算不同。
+--- 有精确坐标就只比坐标。没有坐标时，比事先算好的百分数，显示值变了才算不同。
 ---@param snapshot ReaderSessionSnapshot
 ---@param row ProgressPosition
 ---@return boolean
@@ -164,7 +171,7 @@ local function documentMissesPending(snapshot, row)
         if not page or not total then return true end
         return total ~= saved_total or page ~= saved_page
     end
-    return math.abs(Progress.clampFraction(snapshot.doc_fraction) - Progress.clampFraction(row.fraction)) >= 0.01
+    return percentTenth(snapshot.doc_fraction) ~= percentTenth(row.fraction)
 end
 
 --- 冷打开：用已经准备好的位置恢复阅读。
@@ -493,11 +500,10 @@ local function progressDiffers(local_pos, remote_pos, id, snapshot, page_level)
         -- 同 spine 内判不出先后（远端只有 spine 粒度、或元素路径不可比）就算同一位置，交回本地。
         local cmp = spineCmp(local_pos, remote_pos)
         if cmp ~= nil then return cmp ~= 0 end
-        -- 两端都取不到 spine（没定位 / 单文档）才退回「一页」容差兜底。
-        local tol = 0.01
+        -- 两端都取不到 spine 时，只按一页的比例兜底。没有总页数就比不了，不用百分比凑。
         local total = tonumber(remote_pos.total_pages)
-        if total and total > 0 then tol = math.max(tol, 1 / total) end
-        return math.abs((local_pos and local_pos.fraction or 0) - (remote_pos.fraction or 0)) >= tol
+        if not total or total <= 0 then return false end
+        return math.abs((local_pos and local_pos.fraction or 0) - (remote_pos.fraction or 0)) >= (1 / total)
     end
     local toc = chapterToc(snapshot)
     if toc then
@@ -511,8 +517,8 @@ local function progressDiffers(local_pos, remote_pos, id, snapshot, page_level)
             end
             local doc = snapshot.ui.document
             if here and remote_pos.locator then
-                -- 双方都有定位：只比页 / 比字符串。微信等源的远端 chapter_fraction 可能是
-                -- 正文字符比，本地是排版页比，1% 阈值会假冲突 → 静默 adopt → 跳来跳去。
+                -- 双方都有定位：只比页 / 比字符串。远端 chapter_fraction 可能是字符比，
+                -- 本地是排版页比，拿百分比比会假冲突。
                 if tonumber(id.chapter_idx) == local_idx
                     and doc.isXPointerInDocument and doc.getPageFromXPointer
                     and doc:isXPointerInDocument(here) and doc:isXPointerInDocument(remote_pos.locator) then
@@ -520,17 +526,25 @@ local function progressDiffers(local_pos, remote_pos, id, snapshot, page_level)
                 end
                 return here ~= remote_pos.locator
             end
+            -- 只有一边有坐标：百分比不能把精确位置说成冲突，也不能把云端坐标吞掉。
+            if here and here ~= "" then return false end
+            if type(remote_pos.locator) == "string" and remote_pos.locator ~= "" then return true end
             -- 云端只记到章（京东 / 拷贝漫画等不回章内位置）：同章即一致，以本地章内位置为准。
             -- 拿全书比例反推只会落在章首，每次开书都假冲突。
             local remote_within = remote_pos.chapter_fraction
             if remote_within == nil then
                 return false
             end
-            return math.abs((local_pos.chapter_fraction or 0) - remote_within) >= 0.01
+            return percentTenth(local_pos.chapter_fraction) ~= percentTenth(remote_within)
         end
     end
-    local local_frac = local_pos and local_pos.fraction or 0
-    return math.abs(local_frac - remote_pos.fraction) >= 0.01
+    local remote_locator = remote_pos.locator
+    if type(here) == "string" and here ~= "" and type(remote_locator) == "string" and remote_locator ~= "" then
+        return true
+    end
+    if type(here) == "string" and here ~= "" then return false end
+    if type(remote_locator) == "string" and remote_locator ~= "" then return true end
+    return percentTenth(local_pos and local_pos.fraction) ~= percentTenth(remote_pos.fraction)
 end
 
 --- 采纳云端位置时的落库坐标：页级源的远端只有 spine 粒度，同 spine 时

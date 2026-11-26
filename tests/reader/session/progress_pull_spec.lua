@@ -188,11 +188,12 @@ do
     Assert.eq(#shown, 0, "已决议后同一会话不再问")
 end
 
--- 同章已同步进度与远端章内差 <1% → 不弹窗，复用本次响应直接落库。
+-- 同章、章内百分数的显示值不同：已同步则跟云端。差不到 1% 不再当成同一处。
 Progress.clearConflicts()
 shown = {}
 synced = {}
 remote_upserted = {}
+adopted = {}
 pulled = 0
 pending_row = {
     fraction = 0.41,
@@ -209,16 +210,21 @@ Progress.pull(snapshot())
 Stubs.flush()
 
 Assert.eq(pulled, 1)
-Assert.eq(#shown, 0, "差异 <1% 时不弹窗")
-Assert.eq(#synced, 0, "已有远端响应时不应再启动完整同步")
-Assert.eq(#remote_upserted, 1, "应直接保存本次远端响应")
+Assert.eq(#shown, 1, "百分数变了要跟过去")
+Assert.is_nil(shown[1].ok_callback, "已同步是静默跟随，不是选择框")
+Assert.len(adopted, 1)
+Assert.eq(#remote_upserted, 0, "跟云端走采纳，不走一致落库")
 
--- 本地脏进度已与云端基本一致 → 只推不拉，避免第二次 getProgress。
+-- 显示的百分数相同、本地脏 → 只推不拉，避免第二次 getProgress。
+shown = {}
 synced = {}
 remote_upserted = {}
+adopted = {}
+pending_row.chapter_fraction = 0.11
 pending_row.sync_status = 0
 Progress.pull(snapshot())
 Stubs.flush()
+Assert.eq(#shown, 0, "百分数相同不弹窗")
 Assert.eq(synced[1], "b1")
 Assert.is_true(synced.dirty_only, "脏本地只需上传")
 Assert.eq(#remote_upserted, 0, "不能用远端覆盖脏本地")
@@ -761,7 +767,7 @@ do
     shown = {}
     Progress.clearConflicts(id)
     Progress.pull(whole)
-    Assert.len(shown, 0, "不足一个百分点的差异不当成冲突")
+    Assert.len(shown, 0, "已有坐标时，百分比不能制造冲突")
 
     id.source = { getProgressAsync = function(_, _, cb)
         cb({ fraction = pending_row.fraction })
@@ -773,7 +779,7 @@ do
     Session.current = current
 end
 
--- 书架已经采用云端进度时，开书用同一个 1% 口径比较设备上的阅读位置。
+-- 书架已经采用云端进度时，开书按坐标或显示的百分数恢复，不再用 1% 死区。
 do
     local jumped_to
     local snapshot = {
@@ -805,7 +811,7 @@ do
     snapshot.identity.stable_id = "b1"
     pending_row = { fraction = 0.405, sync_status = 1 }
     Progress.applyLocalPending(snapshot)
-    Assert.is_nil(jumped_to, "没有精确位置时，不足一个百分点不跳")
+    Assert.eq(jumped_to, 81, "百分数变了就按事先算好的百分比跳")
 end
 
 for _, name in ipairs({
