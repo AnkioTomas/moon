@@ -1,4 +1,5 @@
 --[[-- 桌面返回键：登记 group.Back；叠层 / 详情先关；页内 onBack；根页广播 Exit 退出。 --]]
+---@diagnostic disable: missing-fields
 
 local Assert = require("support.assert")
 

@@ -93,7 +93,7 @@ end
 local function buildCard(self, result, width)
     local t = Theme.current()
     local gap = Theme.px(t.space.md)
-    local row = select(1, Hero.widget(nil, nil, {
+    local row = (Hero.widget(nil, nil, {
         title = result.title,
         authors = result.author,
         intro = result.intro,
@@ -129,13 +129,10 @@ function Results:init()
     self:updateView()
 end
 
---- 关闭结果页并强制重绘下层。
+--- 关闭结果页，局刷露出下层。
 ---@return boolean
 function Results:onClose()
-    UIManager:close(self)
-    UIManager:nextTick(function()
-        UIManager:setDirty("all", "full")
-    end)
+    UIManager:close(self, "ui")
     return true
 end
 
@@ -185,7 +182,7 @@ function Results:updateView()
     local function turn(n)
         self.page = n
         self:updateView()
-        UIManager:setDirty(self, "full")
+        UIManager:setDirty(self, "ui")
     end
 
     self:setPanel(Box:new{

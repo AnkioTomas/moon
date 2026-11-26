@@ -94,6 +94,7 @@ local Desktop = InputContainer:extend{
 ---@field plugin BookPlugin|nil
 ---@field source BookSource|nil
 ---@field desktop BookDesktop
+---@field shelf_memo table|nil 首页组装时挂上，组件共读一次最近书架
 
 local PAGES = { home = true, library = true, store = true, insight = true, settings = true }
 local CHILDREN = { "topbar", "home", "library", "store", "insight", "settings" }
@@ -284,7 +285,8 @@ function Desktop:onEvent(event, payload)
     broadcast(self, "onEvent", event, payload)
 end
 
---- 这些源没有「登录」：configured() 要么恒真，要么只表示本地目录。
+--- 这些源没有「登录」：configured() 恒真（18ta）、只看设备（kindle）或只表示配了书库目录（local），
+--- 源 meta 也没有能区分的字段，只能在这里列出。
 local NOT_LOGIN = { ["local"] = true, kindle = true, ["18ta"] = true }
 
 --- 叠层链上最近一层账号页的书源。
@@ -299,18 +301,13 @@ local function accountSourceId(desktop)
     end
 end
 
---- 这个源是不是用户登录过的账号。拷贝漫画的 configured() 只表示有默认站点，不算登录。
+--- 这个源是不是用户登录过的账号。
 ---@param id string
 ---@return boolean
 local function sourceLoggedIn(id)
     if NOT_LOGIN[id] then return false end
-    local Registry = require("source.registry")
-    if id == "copymanga" then
-        return require("source.copymanga.auth").hasSession() == true
-    end
-    if type(Registry.resolve) ~= "function" then return false end
-    local source = Registry.resolve(id)
-    return source ~= nil and type(source.configured) == "function" and source:configured() == true
+    local source = require("source.registry").resolve(id)
+    return source ~= nil and source:configured() == true
 end
 
 --- 启用的源里，只有这一个登录过。
@@ -318,7 +315,6 @@ end
 ---@return boolean
 local function soleLogin(id)
     local Registry = require("source.registry")
-    if type(Registry.listEnabled) ~= "function" then return false end
     local found
     for _idx, meta in ipairs(Registry.listEnabled()) do
         if sourceLoggedIn(meta.id) then
@@ -334,10 +330,9 @@ end
 --- 登录 / 改连接不离开账号页。只有这一个源登录过时，才把它设为当前源。
 function Desktop:onSourceChanged()
     local Registry = require("source.registry")
-    local from_reload = type(Registry.reloadLanding) == "function" and Registry.reloadLanding()
-    if from_reload then
+    if Registry.reloadLanding() then
         local id = accountSourceId(self)
-        if id and soleLogin(id) and type(Registry.setActive) == "function" then
+        if id and soleLogin(id) then
             Registry.setActive(id)
         end
     end
@@ -389,11 +384,13 @@ function Desktop:init()
 end
 
 --- 桌面回到前台：打开后、系统唤醒（Resume 经 UIManager 广播直达，插件不要再转发，否则重复）。
+--- 当前页重建一次：首页组件读到新数据；休眠时被 deactivate 取消的页内加载随 updateView 重新发起。
 function Desktop:activate()
     if self.closed then return end
     self.active = true
     notify(self.topbar, "activate")
     notify(self:page(self.tab), "activate")
+    self:updateView()
     -- 扩展的前台维护（更新检查、校时等）走桌面 Resume，不在插件 init / 网络回调里抢跑。
     Ext.emit("desktop.activated", self)
     require("desktop.welcome").promptDocs(self)

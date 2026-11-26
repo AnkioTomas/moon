@@ -11,7 +11,6 @@ local CoverCell = require("ui.widgets.cover")
 local CenterContainer = require("ui/widget/container/centercontainer")
 local Geom = require("ui/geometry")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
-local HorizontalSpan = require("ui/widget/horizontalspan")
 local LeftContainer = require("ui/widget/container/leftcontainer")
 local MoonSettings = require("utils.settings")
 local VerticalGroup = require("ui/widget/verticalgroup")
@@ -105,14 +104,13 @@ function M:showSettings(desktop)
     }:show()
 end
 
---- 固定列数下的单元格度量（宽度决定封面，封顶到网格封面高度上限）。
+--- 固定列数下的单元格度量（宽度决定封面，封顶到 max_h）。最近阅读列表也用它。
 ---@param width number
+---@param cols integer
+---@param extra number 封面下书名 / 作者占高
+---@param max_h number 封面高度上限
 ---@return number slot_w, number cw, number ch, number gap, number row_gap, number cell_h
-local function metrics(width)
-    local cols = M.cols()
-    local lib = CoverCell.libraryConf(); lib.home = true
-    local extra = Book.captionExtra(M.showTitle(), M.showAuthor(), lib.kobo)
-    local max_h = CoverCell.gridCoverMaxH()
+function M.metrics(width, cols, extra, max_h)
     local slot_w, cw, ch, _cols, gap, row_gap, cell_h = CoverCell.denseCoverMetrics(math.max(1, width), 0, {
         title_extra = extra, max_h = max_h, min_cols = cols, max_cols = cols,
     })
@@ -124,14 +122,29 @@ local function metrics(width)
     return slot_w, cw, ch, gap, row_gap, cell_h
 end
 
-local function headerHeight()
+--- 封面配置：title / author 取本组件自己的开关，不跟图书馆。
+---@return table
+local function coverConf()
+    local lib = CoverCell.libraryConf()
+    lib.home, lib.title, lib.author = true, M.showTitle(), M.showAuthor()
+    return lib
+end
+
+local function metrics(width, lib)
+    return M.metrics(width, M.cols(), Book.captionExtra(lib.title, lib.author, lib.kobo), CoverCell.gridCoverMaxH())
+end
+
+--- 区块标题行高（caption 实测 + xs 下边距）。
+---@return number
+function M.headerHeight()
     return Text.line("caption", "0"):getSize().h + Theme.px(Theme.current().space.xs)
 end
+local headerHeight = M.headerHeight
 
 --- 自动行数默认按两行给内容高度，编辑页设成「填满」时再按分配高度多放。
 ---@return BookHomeHeightSpec
 function M:heightRange(_ctx, opts)
-    local _sw, _cw, _ch, _gap, row_gap, cell_h = metrics(opts.width)
+    local _sw, _cw, _ch, _gap, row_gap, cell_h = metrics(opts.width, coverConf())
     local rows = M.rows() == 0 and 2 or M.rows()
     return { height = headerHeight() + cell_h * rows + row_gap * (rows - 1) }
 end
@@ -156,7 +169,8 @@ function M:createWidget()
     local ctx, opts = self.ctx, self.opts
     local t = Theme.current()
     local w, h = opts.width, opts.height
-    local slot_w, cw, ch, gap, row_gap, cell_h = metrics(w)
+    local lib = coverConf()
+    local slot_w, cw, ch, gap, row_gap, cell_h = metrics(w, lib)
     local grid_h = math.max(1, h - headerHeight())
     local fit = math.max(1, math.floor((grid_h + row_gap) / (cell_h + row_gap)))
     local rows = M.rows() == 0 and fit or math.min(M.rows(), fit)
@@ -166,19 +180,9 @@ function M:createWidget()
     if #books > 0 then
         ctx.on_detail = function(book) require("desktop.detail").open(ctx.desktop, "library", book) end
         local on_open = CoverCell.opener(self, ctx, require("desktop.open").book)
-        body = VerticalGroup:new{ align = "left" }
-        local lib = CoverCell.libraryConf(); lib.home = true
-        for r = 1, math.ceil(#books / cols) do
-            if r > 1 then body[#body + 1] = VerticalSpan:new{ width = row_gap } end
-            local row = HorizontalGroup:new{}
-            for c = 1, cols do
-                local book = books[(r - 1) * cols + c]
-                if not book then break end
-                if c > 1 then row[#row + 1] = HorizontalSpan:new{ width = gap } end
-                row[#row + 1] = (CoverCell.build(ctx, book, slot_w, cw, ch, on_open, true, M.showTitle(), M.showAuthor(), lib))
-            end
-            body[#body + 1] = row
-        end
+        body = require("desktop.pages.library").buildGrid(ctx, books, {
+            rows = rows, cols = cols, pad = 0, gap = gap, row_gap = row_gap, slot_w = slot_w, cw = cw, ch = ch,
+        }, on_open, true, lib)
     else
         body = CenterContainer:new{
             dimen = Geom:new{ w = w, h = grid_h },

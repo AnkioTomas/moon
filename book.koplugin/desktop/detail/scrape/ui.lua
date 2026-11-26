@@ -9,7 +9,6 @@
 @module koplugin.book.desktop.detail.scrape.ui
 --]]
 
-local UIManager = require("ui/uimanager")
 local Results = require("desktop.detail.scrape.results")
 local Search = require("desktop.detail.scrape.search")
 local Image = require("ui.themes.widgets.image")
@@ -228,8 +227,6 @@ local function showResults(identity, results, source, on_done)
         end,
     }
     page:show()
-    -- 全屏页盖住来源列表：不强制整屏刷新，只会有零星区域被重画
-    UIManager:setDirty(page, "full")
 end
 
 --- 执行搜索。在飞句柄挂在 owner.scrape_job 上，owner 关闭时取消（连同「搜索中」提示）。

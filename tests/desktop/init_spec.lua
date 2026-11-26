@@ -117,8 +117,10 @@ end
 
 do -- Resume：只唤醒顶栏与当前页，触发静默更新检查，并 Sync.open 扫盘
     local n = #synced
+    local old_content = desk.layers[1]
     desk:activate()
     Assert.is_true(desk.active)
+    Assert.is_true(desk.layers[1] ~= old_content, "唤醒重建当前页：休眠中被取消的加载重新发起")
     Assert.eq(drain(), "topbar.resume,home.resume")
     Assert.eq(checks[1], "/plugins/book.koplugin")
     Assert.eq(#synced, n + 1, "回前台触发书架同步")
@@ -274,7 +276,10 @@ do -- 换源：广播给各子件，留在当前页签
     drain()
     local source = { id = "next" }
     local synced_before = #synced
-    package.loaded["source.registry"] = { current = function() return source end }
+    package.loaded["source.registry"] = {
+        current = function() return source end,
+        reloadLanding = function() return false end,
+    }
     desk:onSourceChanged()
     package.loaded["source.registry"] = nil
     Assert.eq(desk.source, source)

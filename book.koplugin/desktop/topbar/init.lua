@@ -35,7 +35,6 @@ local Tasks = require("workers.tasks")
 local UIManager = require("ui/uimanager")
 local WidgetContainer = require("ui/widget/container/widgetcontainer")
 local datetime = require("datetime")
-local ffiUtil = require("ffi/util")
 local util = require("util")
 local Theme = require("ui.themes")
 local Icon = require("ui.themes.widgets.icon")
@@ -104,7 +103,7 @@ local ITEMS = {
     {
         id = "memory",
         label = _("剩余内存"), icon = "memory", sample = "128M", bar_icon = "memory",
-        interval = 120,
+        minute = true,
         read = function()
             local avail = util.calcFreeMem()
             if avail == nil then return nil end
@@ -132,15 +131,11 @@ local ITEMS = {
     {
         id = "storage",
         label = _("剩余存储"), icon = "hard_drive", sample = "2.1G", bar_icon = "hard_drive",
-        interval = 600,
+        minute = true,
         read = function()
-            -- 旧版 KOReader 的 df 只返回 total, free，没有第三个 available
-            local total, free, avail = ffiUtil.df(DataStorage:getDataDir())
-            if not total then return nil end
-            ---@cast free number
-            avail = avail or free
-            if avail == nil then return nil end
-            return util.getFriendlySize(avail), "hard_drive"
+            local disk = require("utils.fs").disk(DataStorage:getDataDir())
+            if not disk then return nil end
+            return util.getFriendlySize(disk.available), "hard_drive"
         end,
     },
     {
@@ -163,7 +158,7 @@ local ITEMS = {
     {
         id = "battery",
         label = _("电池"), icon = "battery_android_full", sample = "85%", bar_icon = "battery_android_full",
-        interval = 600,
+        minute = true,
         events = { Charging = true, NotCharging = true },
         read = function()
             if not (Device:hasBattery() and Device.powerd) then return nil end

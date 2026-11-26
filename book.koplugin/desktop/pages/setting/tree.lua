@@ -71,22 +71,18 @@ function Tree.features(desktop)
     local Hooks = require("utils.external")
     for _idx, source in ipairs(require("utils.extension").list("setting.entries")) do
         local name = source.name
-        if source.entries then
-            -- 单个 feature 抛错不应拖垮整页设置（更新后新旧模块混跑时尤其容易）。
-            local ok, entries = pcall(source.entries, desktop)
-            if not ok then
-                require("utils.log").err("feature setting entries failed", name, entries)
-            elseif type(entries) ~= "table" or entries.order or entries.page or entries.row or entries.sections then
-                -- 单条也必须是数组。误返回一条设置表时不能静默丢掉。
-                error("feature " .. name .. " setting: entries must return a list")
-            else
-                for i, entry in ipairs(entries) do
-                    local item = copy(entry)
-                    item.owner = "feature " .. name
-                    if item.page then item.id = "feature:" .. name .. ":" .. (entry.id or i) end
-                    out[#out + 1] = item
-                end
-            end
+        -- 单个 feature 抛错不应拖垮整页设置（更新后新旧模块混跑时尤其容易）：弹错误页，跳过它。
+        local entries = source.entries
+            and require("ui.guard").call("feature " .. name .. " setting entries", source.entries, desktop) or {}
+        if type(entries) ~= "table" or entries.order or entries.page or entries.row or entries.sections then
+            -- 单条也必须是数组。误返回一条设置表时不能静默丢掉。
+            error("feature " .. name .. " setting: entries must return a list")
+        end
+        for i, entry in ipairs(entries) do
+            local item = copy(entry)
+            item.owner = "feature " .. name
+            if item.page then item.id = "feature:" .. name .. ":" .. (entry.id or i) end
+            out[#out + 1] = item
         end
     end
     for _idx, ext in ipairs(Hooks.collect("setting")) do

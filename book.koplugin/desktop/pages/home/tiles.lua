@@ -179,7 +179,7 @@ function M:createWidget()
     local gap = Theme.px(Theme.current().space.sm)
     local card_w = math.floor((w - gap) / 2)
     local data = collect(self.ctx.source)
-    self.key = keyOf(data)
+    self.key, self.day = keyOf(data), os.date("%Y-%m-%d")
     local cards = tiles(card_w, data)
     local function row(a, b)
         return HorizontalGroup:new{ align = "top", a, HorizontalSpan:new{ width = gap }, b }
@@ -204,7 +204,7 @@ end
 
 --- 回到桌面时已跨天：连续天数、近 7 天窗口都挪了，重画。
 function M:onActivate()
-    if self.slot and keyOf(collect(self.ctx.source)) ~= self.key then self:refresh() end
+    if self.slot and self.day ~= os.date("%Y-%m-%d") then self:refresh() end
 end
 
 return M

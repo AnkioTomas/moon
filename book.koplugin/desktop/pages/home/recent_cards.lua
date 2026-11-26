@@ -157,7 +157,7 @@ local warp_order = {} ---@type string[]
 
 local function warpClear()
     for key, entry in pairs(warp_cache) do
-        if entry.warp and entry.warp.free then entry.warp:free() end
+        entry.warp:free()
         warp_cache[key] = nil
     end
     warp_order = {}
@@ -168,16 +168,15 @@ end
 local function warpPut(key, entry)
     if warp_cache[key] then
         local old = warp_cache[key]
-        if old.warp and old.warp ~= entry.warp and old.warp.free then old.warp:free() end
+        if old.warp ~= entry.warp then old.warp:free() end
     else
         warp_order[#warp_order + 1] = key
     end
     warp_cache[key] = entry
     while #warp_order > WARP_MAX do
         local evict = table.remove(warp_order, 1)
-        local old = warp_cache[evict]
+        warp_cache[evict].warp:free()
         warp_cache[evict] = nil
-        if old and old.warp and old.warp.free then old.warp:free() end
     end
 end
 
@@ -746,7 +745,7 @@ end
 ---@return integer
 function M._warpCacheSize()
     local n = 0
-    for _ in pairs(warp_cache) do n = n + 1 end
+    for _key in pairs(warp_cache) do n = n + 1 end
     return n
 end
 

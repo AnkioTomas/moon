@@ -123,8 +123,6 @@ function Store:chipGroups()
     return not self.search and self.groups or {}
 end
 
----@param opts table
----@return BookStorePage
 --- 设置开启且不是混合模式时，把书城来源改成当前书源。
 --- 当前书源不在书城列表里、或已是当前选择，则不动。混合模式保持上一次的选择。
 ---@return boolean 选择变了
@@ -145,6 +143,8 @@ function Store:applyFollow()
     return false
 end
 
+---@param opts table
+---@return BookStorePage
 function Store:new(opts)
     opts.provider_id = MoonSettings.get("store").provider
     opts.page = 1

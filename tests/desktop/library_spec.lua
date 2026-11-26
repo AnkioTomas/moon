@@ -382,6 +382,22 @@ library:fetch()
 Assert.eq(library.page, 1)
 Assert.eq(pages_asked[1], 5)
 Assert.eq(pages_asked[2], 1)
+
+-- 翻页：旧页内容留到新结果回来，不先清空重建出「加载中…」。
+local pending
+catalog.listLibraryAsync = function(_, opts, cb)
+    pending = { page = opts.page, cb = cb }
+    return { cancel = function() end }
+end
+local old_state = { books = { book } }
+library.state, library.page, library.total = old_state, 1, library.page_size * 3
+local before = view_updates
+library:gotoPage(2)
+Assert.eq(library.state, old_state, "结果回来前保留旧页")
+Assert.eq(view_updates, before, "翻页本身不重建")
+Assert.eq(pending.page, 2)
+pending.cb({ data = {}, count = library.total })
+Assert.eq(view_updates, before + 1, "结果回来重建一次")
 catalog.listLibraryAsync = real_list
 
 -- 换源：清筛选与缓存，页签和视图保留。

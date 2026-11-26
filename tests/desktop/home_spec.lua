@@ -82,7 +82,7 @@ do -- switchTab 语义：activate(true) 只记前台，紧随其后的 updateVie
     desktop:updateView()
     Assert.eq(drain(), "recent_hero.resume")
     home:activate()
-    Assert.eq(desktop.updates, 3, "系统唤醒不传参：重建一次")
+    Assert.eq(desktop.updates, 2, "唤醒由 Desktop:activate 统一重建，页自己不再重建")
     Assert.eq(drain(), "", "已活跃的组件不重复 resume")
 end
 

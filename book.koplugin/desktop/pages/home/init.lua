@@ -40,6 +40,7 @@ local _ = require("gettext")
 ---@field visible table<string, boolean>
 ---@field editing boolean
 ---@field active boolean 首页 Tab 处于前台
+---@field shelf_memo table 本轮组装共用的最近书架读取结果（Base.readShelf），shelf_changed 作废
 ---@field focus string|nil 下次组装时优先显示含该组件的页，用完即清
 local Home = {}
 Home.__index = Home
@@ -52,6 +53,7 @@ function Home:new(opts)
     opts.visible = {}
     opts.editing = false
     opts.active = false
+    opts.shelf_memo = {}
     return setmetatable(opts, self)
 end
 
@@ -326,10 +328,13 @@ local function assemble(self)
     local t = Theme.current()
     local w, h = ctx.width, ctx.height
     local pager_h = Theme.px(t.control.height)
-    -- 浏览态先按整页排。只有一页就不放底部翻页条，高度还给内容。
-    -- 排出来超过一页再扣掉翻页条重排。编辑态翻页条中间是「添加 / 完成」，始终留着。
-    local show_pager = self.editing == true
+    -- 浏览态按上次是否多页决定留不留翻页条；排出来页数和这个猜测不符才重排一次。
+    -- 编辑态翻页条中间是「添加 / 完成」，始终留着。
+    local show_pager = self.editing or self.pages > 1
     local body_h = show_pager and math.max(1, h - pager_h) or h
+    -- 本次组装的组件共用一份最近书架（见 Base:shelf）；shelf_changed 时作废。
+    self.shelf_memo = {}
+    ctx.shelf_memo = self.shelf_memo
     ensureLayout(self, ctx, body_h)
 
     local wrap
@@ -354,10 +359,10 @@ local function assemble(self)
         focus = self.focus,
     })
     self.focus = nil
-    if not show_pager and self.pages > 1 then
+    if not self.editing and show_pager ~= (self.pages > 1) then
         body:free()
-        show_pager = true
-        body_h = math.max(1, h - pager_h)
+        show_pager = not show_pager
+        body_h = show_pager and math.max(1, h - pager_h) or h
         body, self.page, self.pages, self.visible = Layout.build(ctx, self.components, self.page, {
             body_height = body_h,
             wrap = wrap,
@@ -442,12 +447,10 @@ function Home:updateView()
     return widget
 end
 
---- switchTab 传 changed（布尔）且紧接着整页重建，这里只记前台；
---- Desktop:activate（系统唤醒 / 关书回桌面）不传参，重建一次让读最近书架等组件拿到新数据。
----@param changed boolean|nil
-function Home:activate(changed)
+--- 只记前台：调用方（switchTab / Desktop:activate）紧接着整页重建，组件由 applyVisible 启动。
+---@param _changed boolean|nil
+function Home:activate(_changed)
     self.active = true
-    if changed == nil then redraw(self) end
 end
 
 --- 退出编辑态，然后暂停全部组件。
@@ -481,8 +484,8 @@ function Home:onEvent(event, payload)
         end
         return
     end
+    if event == "shelf_changed" then self.shelf_memo.key = nil end
     broadcast(self, "onEvent", event, payload)
-    -- 换源后 Desktop 必然 switchTab("home") 重建首页，这里再建一次是白做。
     if event == "home_refresh" or event == "detail_dirty" then redraw(self) end
 end
 

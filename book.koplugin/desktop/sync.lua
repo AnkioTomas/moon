@@ -88,44 +88,35 @@ end
 -- 唤醒半联网时 isConnected 往往已经为真，不会再收到 NetworkConnected；失败后过几秒再试一两次。
 local RETRY_DELAYS = { 3, 8 }
 
-local retry_tick, retry_desktop
-local retry_step = 0
-local opening_from_retry = false
-
-local function cancelRetry()
-    if retry_tick then
-        require("ui/uimanager"):unschedule(retry_tick)
-        retry_tick = nil
+--- 重试状态挂在桌面实例上：_retry_tick 待执行的预约，_retry_step 已用掉的 RETRY_DELAYS 档数。
+---@param desktop table
+local function cancelRetry(desktop)
+    if desktop._retry_tick then
+        require("ui/uimanager"):unschedule(desktop._retry_tick)
+        desktop._retry_tick = nil
     end
-    retry_desktop = nil
-    retry_step = 0
-end
-
-local function runRetry()
-    local desktop = retry_desktop
-    retry_tick, retry_desktop = nil, nil
-    if not desktop or desktop.closed or desktop.active == false then
-        retry_step = 0
-        return
-    end
-    opening_from_retry = true
-    Sync.open(desktop)
-    opening_from_retry = false
+    desktop._retry_step = nil
 end
 
 ---@param desktop table
 local function scheduleRetry(desktop)
-    if not desktop or desktop.closed or desktop.active == false then return end
-    if retry_tick then return end
-    local delay = RETRY_DELAYS[retry_step + 1]
+    if desktop.closed or desktop.active == false or desktop._retry_tick then return end
+    local step = (desktop._retry_step or 0) + 1
+    local delay = RETRY_DELAYS[step]
     if not delay then
-        retry_step = 0
+        desktop._retry_step = nil
         return
     end
-    retry_step = retry_step + 1
-    retry_desktop = desktop
-    retry_tick = runRetry
-    require("ui/uimanager"):scheduleIn(delay, retry_tick)
+    desktop._retry_step = step
+    desktop._retry_tick = function()
+        desktop._retry_tick = nil
+        if desktop.closed or desktop.active == false then
+            desktop._retry_step = nil
+            return
+        end
+        Sync.open(desktop, true)
+    end
+    require("ui/uimanager"):scheduleIn(delay, desktop._retry_tick)
 end
 
 --- 书架同步出错的提示：手动刷新（增量与全量）每次都提示；后台同步只在联网且是对端/配置问题时提示
@@ -330,8 +321,9 @@ end
 
 --- 桌面变为可见（新开 / 换源）：后台同步统计（5 分钟节流）与书架。首页先读本地数据，成功后由回调刷新。
 ---@param desktop table
-function Sync.open(desktop)
-    if not opening_from_retry then cancelRetry() end
+---@param from_retry boolean|nil 半联网重试发起：沿用当前重试档位，不重计
+function Sync.open(desktop, from_retry)
+    if not from_retry then cancelRetry(desktop) end
     local is_mixed = mixed()
     for _idx, source in ipairs(targets(desktop, true)) do
         syncStats(desktop, source)
@@ -365,28 +357,19 @@ end
 ---@param desktop table
 ---@param force boolean|nil
 function Sync.refresh(desktop, force)
-    cancelRetry()
+    cancelRetry(desktop)
     force = force == true
     local source = desktop.source
     if not source then return end
-    if not mixed() and not source:configured() then
-        require("ui.themes.widgets.confirm"):new{
-            text = _("请先完成数据源设置，再刷新书库。"),
-            ok_text = _("去登录"),
-            ok_callback = function()
-                require("desktop.pages.setting.source").openAccount(desktop, source.id)
-            end,
-        }:show()
-        return
-    end
     local list = targets(desktop)
     if #list == 0 then
-        -- 混合模式下一个已配置的源都没有：打开账号页，不要只 toast。
+        -- 单源未配置直达该源账号页；混合模式一个已配置的源都没有则打开账号总页。不要只 toast。
+        local id = not mixed() and source.id or nil
         require("ui.themes.widgets.confirm"):new{
             text = _("请先完成数据源设置，再刷新书库。"),
             ok_text = _("去登录"),
             ok_callback = function()
-                require("desktop.pages.setting.source").openAccount(desktop)
+                require("desktop.pages.setting.source").openAccount(desktop, id)
             end,
         }:show()
         return
@@ -414,16 +397,16 @@ end
 --- 桌面关闭：取消还在等的半联网重试。
 ---@param desktop table
 function Sync.onClose(desktop)
-    if retry_desktop == desktop then cancelRetry() end
+    cancelRetry(desktop)
 end
 
 --- 网络恢复：若正等半联网重试，立刻再同步一次（不另开一轮无限重试）。
----@param desktop table|nil
+---@param desktop table|nil 桌面没开时为 nil，那时也没有待重试
 function Sync.onNetworkConnected(desktop)
-    if not retry_tick then return end
-    if desktop and retry_desktop and desktop ~= retry_desktop then return end
-    require("ui/uimanager"):unschedule(retry_tick)
-    runRetry()
+    local tick = desktop and desktop._retry_tick
+    if not tick then return end
+    require("ui/uimanager"):unschedule(tick)
+    tick()
 end
 
 --- 源登录失效（静默续期失败）时引导重新登录。由 main 经 ``source.auth`` 注入；

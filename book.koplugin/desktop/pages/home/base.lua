@@ -175,12 +175,24 @@ function Base.readShelf(ctx)
     return require("book.catalog").recentShelf(source and source.id, 24)
 end
 
+--- 最近书架快照：ctx.shelf_memo（首页每次组装给一张，shelf_changed 清掉 key）在时同次组装只查一次。
+---@param ctx table
+---@return { recent: table|nil, reading: table[], err: string|nil, key: string }
+local function loadShelf(ctx)
+    local memo = ctx.shelf_memo or {}
+    if not memo.key then
+        memo.recent, memo.reading, memo.err = Base.readShelf(ctx)
+        memo.key = Base.shelfKey(memo.recent, memo.reading, memo.err)
+    end
+    return memo
+end
+
 --- 读最近书架并登记签名（shelf_changed 据此判断要不要重建）；返回 Catalog.recentShelf 的三个值。
 ---@return table|nil recent, table[] reading, string|nil err
 function Base:shelf()
-    local recent, reading, err = Base.readShelf(self.ctx)
-    self.shelf_key = Base.shelfKey(recent, reading, err)
-    return recent, reading, err
+    local shelf = loadShelf(self.ctx)
+    self.shelf_key = shelf.key
+    return shelf.recent, shelf.reading, shelf.err
 end
 
 --- 有插件实例时打开书籍，否则（离屏预览）经桌面打开详情。
@@ -201,8 +213,7 @@ end
 ---@param event string|table 父组件转发的事件名称或事件对象
 function Base:onEvent(event)
     if event ~= "shelf_changed" or not (self.shelf_key and self.active) then return end
-    local key = Base.shelfKey(Base.readShelf(self.ctx))
-    if key ~= self.shelf_key then self:refresh() end
+    if loadShelf(self.ctx).key ~= self.shelf_key then self:refresh() end
 end
 
 --- 空书架入口：整块可点，进入图书馆并清除旧的筛选和分页状态。

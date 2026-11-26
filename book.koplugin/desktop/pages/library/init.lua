@@ -98,7 +98,7 @@ end
 function Library:visibleTabs()
     local chosen = {}
     for _idx, id in ipairs(MoonSettings.get("ui").library_tabs) do chosen[id] = true end
-    local source = self.desktop and self.desktop.source
+    local source = self.desktop.source
     local folder = source and source.id == "local" and localRoot() ~= ""
     local tabs = {}
     for _idx, g in ipairs(groupTabs()) do
@@ -399,13 +399,13 @@ function Library:metrics()
     return Library.gridMetrics(w, h, Library.tabsHeight(), CoverCell.libraryConf())
 end
 
---- 按网格度量铺满一页封面格子（放不下的整行丢弃）。
+--- 按网格度量铺满一页封面格子（放不下的整行丢弃）。首页书架 / 最近阅读列表也用它。
 ---@param ctx table 构建上下文，提供尺寸、数据源和桌面宿主
 ---@param books table 按展示顺序排列的书籍列表
----@param m table 预先计算的网格布局尺寸
+---@param m table 网格度量：rows / cols / pad / gap / row_gap / slot_w / cw / ch
 ---@param on_open fun(book: table, cover: table, cw: number, ch: number)
 ---@param show_status boolean|nil 是否显示书籍状态信息
----@param lib table|nil CoverCell.libraryConf()；书城不传
+---@param lib table|nil CoverCell.libraryConf()（title / author 即封面下是否显示书名 / 作者）；书城不传
 ---@return table
 local function buildGrid(ctx, books, m, on_open, show_status, lib)
     -- 文件夹条目没有详情 / 状态角标，整卡只用来进目录。
@@ -427,6 +427,7 @@ local function buildGrid(ctx, books, m, on_open, show_status, lib)
     end
     return grid
 end
+Library.buildGrid = buildGrid
 
 --- 正文空态：加载中 / 错误 / 空列表；sub 是副文案；action 是可选按钮（去登录等）。
 ---@param w number
@@ -821,41 +822,24 @@ function Library:buildPage(ctx)
     end
 
     local m = self:metrics()
-    local left
     local g = self:currentGroup()
-    if g.key then
+    local dir = g.id == "folder" and self:currentDir()
+    -- 下钻中（分组里 / 文件夹非根）：「上级」+ 当前名，返回与返回键同一条路。
+    local name = g.key and (self.filter[g.key] or g.empty)
+        or dir and dir ~= localRoot() and (dir:match("([^/]+)$") or dir)
+    local left
+    if name then
         local back = Button:new{
             icon = "arrow_back", variant = "ghost", size = "small",
-            callback = function() self:closeGroup() end,
+            callback = function() self:onBack() end,
         }
-        local name = self.filter[g.key] or g.empty
         left = function(avail)
             local room = avail - back:getSize().w - Theme.px(t.space.sm)
             return { back, Text.line("body", name, { bold = true, color = t.color.accent,
                 width = math.max(Theme.px(t.space.md), room) }) }
         end
-    elseif g.id == "folder" then
-        local root = localRoot()
-        local dir = self:currentDir()
-        if dir ~= root then
-            local back = Button:new{
-                icon = "arrow_back", variant = "ghost", size = "small",
-                callback = function()
-                    local parent = dir:match("^(.*)/[^/]+$")
-                    self:openDir(parent and #parent > #root and parent or nil)
-                end,
-            }
-            local name = dir:match("([^/]+)$") or dir
-            left = function(avail)
-                local room = avail - back:getSize().w - Theme.px(t.space.sm)
-                return { back, Text.line("body", name, { bold = true, color = t.color.accent,
-                    width = math.max(Theme.px(t.space.md), room) }) }
-            end
-        else
-            left = { Text.line("caption", T(_("%1 项"), self.total), muted) }
-        end
     else
-        left = { Text.line("caption", T(_("%1 本书"), self.total), muted) }
+        left = { Text.line("caption", T(dir and _("%1 项") or _("%1 本书"), self.total), muted) }
     end
     local state = self.state or {}
     local books = state.books
@@ -864,7 +848,7 @@ function Library:buildPage(ctx)
     ctx.on_detail = on_detail
     local body
     if not books or #books == 0 then
-        local source = self.desktop and self.desktop.source
+        local source = self.desktop.source
         local need_login = books and #books == 0 and not state.err and g.id ~= "folder"
             and source and source.id ~= "local" and not source:configured()
             and not MoonSettings.get("source").library_mixed
@@ -1068,7 +1052,8 @@ function Library:pages()
     return math.max(1, math.ceil(self.total / self.page_size))
 end
 
---- 跳转到指定页并重建；分组列表本地翻页，不发请求。
+--- 跳转到指定页；分组列表本地翻页，不发请求。
+--- 书籍页保留旧内容直接查，结果回来才重建：先画「加载中…」再画结果是两次墨水屏刷新。
 ---@param page number 当前页码，从 1 开始
 function Library:gotoPage(page)
     page = WindowInput.page(page, self:pages())
@@ -1082,8 +1067,7 @@ function Library:gotoPage(page)
         return
     end
     self.page = page
-    self.state = nil
-    self.desktop:updateView()
+    self:fetch()
 end
 
 --- 手动刷新书库。force 为真时全量，否则增量；源不支持同步时直接返回。

@@ -102,5 +102,17 @@ end, "duplicate page x")
 -- 登记方误返回单条设置表
 a_entries = function() return { group = "reader", order = 1, page = page } end
 Assert.errors(function() Tree.features({}) end, "must return a list")
+
+-- 登记方抛错：经 guard 报告，跳过这个 feature，不拖垮整页
+local reported = {}
+package.loaded["ui.guard"] = { call = function(label, fn, ...)
+    local ok, result = pcall(fn, ...)
+    if ok then return result end
+    reported[#reported + 1] = label
+end }
+a_entries = function() error("boom") end
+Assert.len(Tree.features({}), #b_entries, "只跳过抛错的 a")
+Assert.eq(reported[1], "feature a setting entries")
+package.loaded["ui.guard"] = nil
 Ext.reset()
 package.loaded["utils.external"] = nil

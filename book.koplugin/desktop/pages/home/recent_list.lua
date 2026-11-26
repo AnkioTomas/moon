@@ -8,9 +8,8 @@ local Book = require("ui.widgets.book")
 local CoverCell = require("ui.widgets.cover")
 local CenterContainer = require("ui/widget/container/centercontainer")
 local Geom = require("ui/geometry")
-local HorizontalGroup = require("ui/widget/horizontalgroup")
-local HorizontalSpan = require("ui/widget/horizontalspan")
 local MoonSettings = require("utils.settings")
+local Shelf = require("desktop.pages.home.shelf")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
 local Theme = require("ui.themes")
@@ -32,80 +31,64 @@ local M = {
 setmetatable(M, require("desktop.pages.home.base"))
 M.__index = M
 
+local function home() return MoonSettings.get("desktop.pages.home") end
+
+local function save(key, value)
+    local h = home()
+    h[key] = value
+    MoonSettings.save("desktop.pages.home", h)
+end
+
 --- 读取最近阅读网格行数；非法值回退到两行。
 ---@return number
 function M.rows()
-    local n = math.floor(tonumber(MoonSettings.get("desktop.pages.home").home_recent_list_rows) or DEFAULT_ROWS)
-    if n == MIN_ROWS then return MIN_ROWS end
-    return MAX_ROWS
+    return math.floor(tonumber(home().home_recent_list_rows) or DEFAULT_ROWS) == MIN_ROWS and MIN_ROWS or MAX_ROWS
 end
 
 --- 规范化并保存最近阅读网格行数。
 ---@param n number|nil
 function M.saveRows(n)
-    n = math.floor(tonumber(n) or DEFAULT_ROWS)
-    if n ~= MIN_ROWS then n = MAX_ROWS end
-    local home = MoonSettings.get("desktop.pages.home")
-    home.home_recent_list_rows = n
-    MoonSettings.save("desktop.pages.home", home)
+    save("home_recent_list_rows", math.floor(tonumber(n) or DEFAULT_ROWS) == MIN_ROWS and MIN_ROWS or MAX_ROWS)
 end
 
 --- 读取最近阅读网格列数；夹到书架列数范围。
 ---@return number
 function M.cols()
-    local n = math.floor(tonumber(MoonSettings.get("desktop.pages.home").home_recent_list_cols) or DEFAULT_COLS)
-    return math.max(MIN_COLS, math.min(MAX_COLS, n))
+    return math.max(MIN_COLS, math.min(MAX_COLS, math.floor(tonumber(home().home_recent_list_cols) or DEFAULT_COLS)))
 end
 
 --- 规范化并保存最近阅读网格列数。
 ---@param n number|nil
 function M.saveCols(n)
-    n = math.max(MIN_COLS, math.min(MAX_COLS, math.floor(tonumber(n) or DEFAULT_COLS)))
-    local home = MoonSettings.get("desktop.pages.home")
-    home.home_recent_list_cols = n
-    MoonSettings.save("desktop.pages.home", home)
+    save("home_recent_list_cols", math.max(MIN_COLS, math.min(MAX_COLS, math.floor(tonumber(n) or DEFAULT_COLS))))
 end
 
 --- 读取封面下是否显示书名；缺省视为显示。
 ---@return boolean
 function M.showTitle()
-    return MoonSettings.get("desktop.pages.home").home_recent_list_show_title ~= false
+    return home().home_recent_list_show_title ~= false
 end
 
---- 规范化并保存封面下是否显示书名。
 ---@param on boolean|nil
-function M.saveShowTitle(on)
-    local home = MoonSettings.get("desktop.pages.home")
-    home.home_recent_list_show_title = on ~= false
-    MoonSettings.save("desktop.pages.home", home)
-end
+function M.saveShowTitle(on) save("home_recent_list_show_title", on ~= false) end
 
 --- 读取封面下是否显示作者；独立开关，不跟图书馆的 library_author。
 ---@return boolean
 function M.showAuthor()
-    return MoonSettings.get("desktop.pages.home").home_recent_list_show_author == true
+    return home().home_recent_list_show_author == true
 end
 
---- 规范化并保存封面下是否显示作者。
 ---@param on boolean|nil
-function M.saveShowAuthor(on)
-    local home = MoonSettings.get("desktop.pages.home")
-    home.home_recent_list_show_author = on == true
-    MoonSettings.save("desktop.pages.home", home)
-end
+function M.saveShowAuthor(on) save("home_recent_list_show_author", on == true) end
 
 --- 是否把第一本（最近读的那本）也排进列表；缺省不排，留给「当前阅读」大卡片。
 ---@return boolean
 function M.showFirst()
-    return MoonSettings.get("desktop.pages.home").home_recent_list_show_first == true
+    return home().home_recent_list_show_first == true
 end
 
 ---@param on boolean
-function M.saveShowFirst(on)
-    local home = MoonSettings.get("desktop.pages.home")
-    home.home_recent_list_show_first = on
-    MoonSettings.save("desktop.pages.home", home)
-end
+function M.saveShowFirst(on) save("home_recent_list_show_first", on) end
 
 --- 列表要显示的书：按设置丢掉已读完；其余在读，开关打开时第一本排在最前。
 ---@param recent Book|nil
@@ -194,23 +177,11 @@ end
 ---@return number cell_h
 local function gridMetrics(width, area_h)
     local cols = M.cols()
-    local lib = CoverCell.libraryConf(); lib.home = true
-    local extra = Book.captionExtra(M.showTitle(), M.showAuthor(), lib.kobo)
+    local extra = Book.captionExtra(M.showTitle(), M.showAuthor(), CoverCell.libraryConf().kobo)
     -- 单行时宽度决定封面尺寸；用剩余高度压缩会留下无意义的横向空隙。
     -- 多行才需要受区域高度约束，避免整组网格溢出。
     local max_h = M.rows() == 1 and math.huge or CoverCell.gridCoverMaxH(area_h)
-    local slot_w, cw, ch, _cols, gap, row_gap, cell_h = CoverCell.denseCoverMetrics(
-        math.max(1, width), 0, {
-        title_extra = extra,
-        max_h = max_h,
-        min_cols = cols,
-        max_cols = cols,
-    })
-    if ch > max_h then
-        ch = max_h
-        cw = CoverCell.stretchW(slot_w, math.max(1, math.min(slot_w, math.floor(ch * 2 / 3))), ch)
-        cell_h = ch + extra
-    end
+    local slot_w, cw, ch, gap, row_gap, cell_h = Shelf.metrics(width, cols, extra, max_h)
     area_h = area_h or 0
     local rows = M.rows()
     if area_h > 0 and rows > 1 then
@@ -226,11 +197,7 @@ local function gridMetrics(width, area_h)
     return slot_w, cw, ch, cols, gap, row_gap, cell_h
 end
 
---- 区块标题行高（caption 实测 + xs 下边距）。
----@return number
-local function sectionHeight()
-    return Text.line("caption", "0"):getSize().h + Theme.px(Theme.current().space.xs)
-end
+local sectionHeight = Shelf.headerHeight
 
 --- 按所选行列计算内容高度。分页条始终占位：单页也画出按钮，底部才不是一条空的。
 ---@param _ctx table 构建上下文
@@ -251,46 +218,23 @@ end
 ---@param grid_h number 网格区域高度，单位像素
 ---@param page number 当前页码，从 1 开始
 ---@param on_open fun(book: Book, cover: table, cw: number, ch: number)
----@return table
----@return number
----@return number
----@return number
+---@return table grid
+---@return number page
+---@return number pages
 local function buildGrid(ctx, books, width, grid_h, page, on_open)
-    local slot_w, cw, ch, cols, gap, row_gap, cell_h = gridMetrics(width, grid_h)
-    local lib = CoverCell.libraryConf(); lib.home = true
+    local slot_w, cw, ch, cols, gap, row_gap = gridMetrics(width, grid_h)
+    local lib = CoverCell.libraryConf()
+    lib.home, lib.title, lib.author = true, M.showTitle(), M.showAuthor()
     local rows = M.rows()
-    local page_size = math.max(1, cols * rows)
+    local page_size = cols * rows
     local pages = math.max(1, math.ceil(#books / page_size))
     page = math.max(1, math.min(page, pages))
     local first = (page - 1) * page_size + 1
-    local last = math.min(#books, first + page_size - 1)
-    local grid = VerticalGroup:new{ align = "left" }
-    local row = HorizontalGroup:new{}
-    local col = 0
-    local used = 0
-
-    --- 把当前累计的网格单元打包为一行并清空行缓冲。
-    local function flushRow()
-        if used > 0 then
-            table.insert(grid, VerticalSpan:new{ width = row_gap })
-            used = used + row_gap
-        end
-        table.insert(grid, row)
-        used = used + cell_h
-        row = HorizontalGroup:new{}
-        col = 0
-    end
-
-    for i = first, last do
-        if col > 0 then
-            table.insert(row, HorizontalSpan:new{ width = gap })
-        end
-        table.insert(row, (CoverCell.build(ctx, books[i], slot_w, cw, ch, on_open, true, M.showTitle(), M.showAuthor(), lib)))
-        col = col + 1
-        if col == cols then flushRow() end
-    end
-    if col > 0 then flushRow() end
-    return grid, used, page, pages
+    local grid = require("desktop.pages.library").buildGrid(ctx,
+        { unpack(books, first, math.min(#books, first + page_size - 1)) }, {
+        rows = rows, cols = cols, pad = 0, gap = gap, row_gap = row_gap, slot_w = slot_w, cw = cw, ch = ch,
+    }, on_open, true, lib)
+    return grid, page, pages
 end
 
 --- 根据可用空间组装最近阅读封面网格和分页条。
@@ -307,11 +251,11 @@ function M:createWidget()
     local page, pages = 1, 1
     local content
     if #books > 0 then
-        local grid, used
+        local grid
         ctx.on_detail = function(book)
             require("desktop.detail").open(ctx.desktop, "library", book)
         end
-        grid, _used, page, pages = buildGrid(ctx, books, w, grid_h, self.page or 1, CoverCell.opener(self, ctx, require("desktop.open").book))
+        grid, page, pages = buildGrid(ctx, books, w, grid_h, self.page or 1, CoverCell.opener(self, ctx, require("desktop.open").book))
         -- 按格子真实高度留白。用 cell_h 记账会在格子更高时再垫一行，整列就高出分配高度。
         content = VerticalGroup:new{ align = "left", grid, VerticalSpan:new{ width = math.max(0, grid_h - grid:getSize().h) } }
     else

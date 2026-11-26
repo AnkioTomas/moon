@@ -266,7 +266,7 @@ function Source.openAccount(desktop, source_id)
     if not source_id then return end
     local mod = Source.loadSetting(source_id)
     if not configurable(mod) then return end
-    local meta = type(SourceRegistry.meta) == "function" and SourceRegistry.meta(source_id) or nil
+    local meta = SourceRegistry.meta(source_id)
     local title = (meta and meta.name) or source_id
     if type(mod.rows) ~= "function" and type(mod.sections) ~= "function" then
         if type(mod.open) == "function" then mod.open(desktop.plugin) end

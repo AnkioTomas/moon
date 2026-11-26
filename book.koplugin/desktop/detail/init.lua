@@ -212,7 +212,7 @@ function Detail:onCloseWidget()
     end
     -- 封面 BlitBuffer 只在 free 时释放。
     local body = self[1] --[[@as WidgetContainer|nil]]
-    if body and body.free then body:free() end
+    if body then body:free() end
     Modal.onCloseWidget(self)
 end
 
