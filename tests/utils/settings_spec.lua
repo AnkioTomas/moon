@@ -46,6 +46,7 @@ end
 -- 默认值来自各拥有者的 setting.lua
 Assert.eq(type(Settings.get("source").active_source), "string")
 Assert.eq(type(Settings.get("store").zlib_enabled), "boolean")
+Assert.is_true(Settings.get("store").follow_source)
 Assert.eq(type(Settings.get("ui").ui_scale), "number")
 Assert.eq(type(Settings.get("desktop").library_sort), "string")
 Assert.eq(type(Settings.get("desktop").home_topbar_items), "table")

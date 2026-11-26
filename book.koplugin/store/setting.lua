@@ -10,6 +10,8 @@ return {
         enabled = true,
         zlib_enabled = false,
         opds_enabled = false,
+        -- 非混合时书城来源跟着当前书源走；混合模式保持上次选择。
+        follow_source = true,
         provider = "",
     },
 }

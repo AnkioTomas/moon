@@ -331,7 +331,7 @@ function Source.storeShortcut(desktop, plugin, id)
     error("unknown store " .. tostring(id))
 end
 
---- 书城页：总开关 + 各后端；挂在设置「桌面」分组。
+--- 书城页：总开关、跟随当前书源、各后端；挂在设置「桌面」分组。
 ---@param ctx table
 ---@return table
 function Source:storeSections(ctx)
@@ -348,6 +348,23 @@ function Source:storeSections(ctx)
                 store.enabled = not on
                 MoonSettings.save("store")
                 require("ui/uimanager"):broadcastEvent(require("ui/event"):new("StoreChanged"))
+            end,
+        })
+    end, function(iw)
+        local on = store.follow_source ~= false
+        return Row.widget({
+            width = iw,
+            icon = "sync_alt", title = _("跟随当前书源"),
+            subtitle = _("非混合时与当前书源一致，混合模式保持上次选择"),
+            toggle = on,
+            callback = function()
+                store.follow_source = not on
+                MoonSettings.save("store")
+                local page = desktop.store
+                if store.follow_source and page and page:applyFollow() then
+                    page:reset()
+                    desktop:updateView()
+                end
             end,
         })
     end }

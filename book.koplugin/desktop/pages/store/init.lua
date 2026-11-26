@@ -86,9 +86,8 @@ function Store.providers()
     return list
 end
 
---- 当前来源。
---- 非混合：记住的仍可用 → 当前活跃源（可搜）→ Z站 → 列表第一个。
---- 混合：记住的仍可用 → Z站 → 列表第一个。
+--- 当前来源：记住的仍可用 → 非混合时的当前活跃源 → Z站 → 列表第一个。
+--- 跟随当前书源不在这里改选择，见 `applyFollow`（换源 / 打开书城时写回 provider）。
 ---@return StoreProvider|nil
 function Store:provider()
     local list = Store.providers()
@@ -126,13 +125,35 @@ end
 
 ---@param opts table
 ---@return BookStorePage
+--- 设置开启且不是混合模式时，把书城来源改成当前书源。
+--- 当前书源不在书城列表里、或已是当前选择，则不动。混合模式保持上一次的选择。
+---@return boolean 选择变了
+function Store:applyFollow()
+    local settings = MoonSettings.get("store")
+    if settings.follow_source == false then return false end
+    if MoonSettings.get("source").library_mixed then return false end
+    local active = require("source.registry").activeId()
+    if not active or active == self.provider_id then return false end
+    for _idx, p in ipairs(Store.providers()) do
+        if p.id == active then
+            self.provider_id = active
+            settings.provider = active
+            MoonSettings.save("store")
+            return true
+        end
+    end
+    return false
+end
+
 function Store:new(opts)
     opts.provider_id = MoonSettings.get("store").provider
     opts.page = 1
     opts.page_size = 12
     opts.total = 0
     opts.trail = {}
-    return setmetatable(opts, self)
+    local page = setmetatable(opts, self)
+    page:applyFollow()
+    return page
 end
 
 function Store:cancel()
@@ -168,6 +189,7 @@ Store.destroy = Store.cancel
 ---@param payload table|nil
 function Store:onEvent(event, payload)
     if event == "source_changed" then
+        self:applyFollow()
         self:reset()
         return
     end

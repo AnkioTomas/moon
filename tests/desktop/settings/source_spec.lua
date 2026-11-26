@@ -174,6 +174,9 @@ Assert.len(store, 1)
 Assert.eq(store[1].title, "书城")
 local store_rows = store[1].rows
 Assert.eq(store_rows[1]().title, "书城")
+Assert.eq(store_rows[2]().title, "跟随当前书源")
+Assert.is_true(store_rows[2]().toggle, "默认开启")
+Assert.eq(store_rows[2]().subtitle, "非混合时与当前书源一致，混合模式保持上次选择")
 Assert.eq(store_rows[#store_rows - 1]().title, "Z-Library")
 Assert.eq(store_rows[#store_rows]().title, "OPDS")
 -- OPDS：未开启；二级页面里先只有开关一行，开启后才出现目录配置入口。
@@ -194,6 +197,25 @@ Assert.is_true(opds_rows[1]().toggle)
 Assert.eq(opds_rows[2]().title, "OPDS 目录")
 Assert.eq(opds_rows[2]().status, "未配置")
 store_cfg.opds_enabled = false
+
+-- 跟随当前书源：关掉只记开关；打开且选择变了才复位书城页。
+local applied, reset_n, updates = 0, 0, 0
+desktop.store = {
+    applyFollow = function() applied = applied + 1; return true end,
+    reset = function() reset_n = reset_n + 1 end,
+}
+local prev_update = desktop.updateView
+desktop.updateView = function() updates = updates + 1 end
+store_rows[2]().callback()
+Assert.is_false(store_cfg.follow_source)
+Assert.eq(applied, 0, "关掉不改当前选择")
+store_rows[2]().callback()
+Assert.is_true(store_cfg.follow_source)
+Assert.eq(applied, 1)
+Assert.eq(reset_n, 1)
+Assert.eq(updates, 1)
+desktop.updateView = prev_update
+desktop.store = nil
 
 -- 书库组的快捷入口和书城页进的是同一层：开关 + 配置。
 local zlib_row = src.storeShortcut(desktop, nil, "zlib")

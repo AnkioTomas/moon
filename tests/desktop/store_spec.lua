@@ -350,3 +350,49 @@ Assert.not_nil(store.state)
 store:activate(true)
 Assert.is_nil(store.state)
 Assert.is_nil(store.books)
+
+-- 跟随当前书源（默认开）：非混合换源改选择并记住；混合和关掉都保持上一个。
+store_settings.follow_source = true
+store_settings.provider = "zlib"
+store.provider_id = "zlib"
+active_id = "wechat"
+source_settings.library_mixed = false
+local saved_before = saved
+store.trail = { { title = "x", feed = "f" } }
+store:onEvent("source_changed")
+Assert.eq(store.provider_id, "wechat")
+Assert.eq(store_settings.provider, "wechat")
+Assert.eq(saved, saved_before + 1)
+Assert.len(store.trail, 0, "换源仍然复位")
+
+active_id = "local"
+store:onEvent("source_changed")
+Assert.eq(store.provider_id, "wechat", "当前源不在书城列表里就保持上一个")
+
+source_settings.library_mixed = true
+active_id = "wechat"
+store.provider_id = "zlib"
+store_settings.provider = "zlib"
+saved_before = saved
+store:onEvent("source_changed")
+Assert.eq(store.provider_id, "zlib", "混合保持上一个")
+Assert.eq(saved, saved_before)
+
+store_settings.follow_source = false
+source_settings.library_mixed = false
+store:onEvent("source_changed")
+Assert.eq(store.provider_id, "zlib", "关掉后不跟随")
+
+store_settings.follow_source = true
+store_settings.provider = "zlib"
+active_id = "wechat"
+local followed = Store:new{ desktop = desktop, name = "store" }
+Assert.eq(followed.provider_id, "wechat", "打开书城时跟随当前书源")
+Assert.eq(store_settings.provider, "wechat")
+
+source_settings.library_mixed = true
+store_settings.provider = "zlib"
+local kept = Store:new{ desktop = desktop, name = "store" }
+Assert.eq(kept.provider_id, "zlib", "混合打开时保持记住的选择")
+source_settings.library_mixed = false
+active_id = nil
