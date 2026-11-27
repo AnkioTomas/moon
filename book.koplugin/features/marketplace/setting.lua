@@ -13,6 +13,8 @@ local Setting = {}
 Setting.defaults = {
     filter = { tab = "browse", q = "", category = "", kind = "moon" },
 }
+-- source_install_skip：用户关掉或安装失败的旧书源 id，不再弹自动安装。
+Setting.keys = { "source_install_skip" }
 
 ---@param desktop BookDesktop
 ---@return BookSettingEntry[]

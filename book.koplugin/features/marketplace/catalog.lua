@@ -320,6 +320,14 @@ function Catalog.get(uid)
     return decodePayload(DB.rowexec("SELECT payload FROM marketplace_plugins WHERE uid = ?;", uid))
 end
 
+--- 按安装目录名取插件。目录名在刷新时由 Installed.pluginDir 写入。
+---@param dir string
+---@return table|nil
+function Catalog.byPluginDir(dir)
+    if type(dir) ~= "string" or dir == "" then return nil end
+    return decodePayload(DB.rowexec("SELECT payload FROM marketplace_plugins WHERE plugin_dir = ?;", dir))
+end
+
 --- 按筛选条件列出完整插件对象（全走 SQLite，按更新时间倒序）。
 ---@param query string|nil
 ---@param category string|nil

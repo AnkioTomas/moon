@@ -65,6 +65,7 @@ end
 
 require("utils.extension").add("desktop.activated", function(desk)
     Marketplace.scheduleAutoRefresh(desk)
+    require("features.marketplace.migrate").offer(desk)
 end)
 
 return Marketplace
