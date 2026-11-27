@@ -646,6 +646,23 @@ do
     package.loaded["features.ime.script"] = nil
 end
 
+-- 换布局前放弃未提交的输入码：光标还在码上就删掉；光标离开则保留文本
+do
+    local kb = newKeyboard()
+    typeCode(kb, "ni")
+    Assert.eq(text(kb), "ni")
+    Bar.abandon()
+    Assert.eq(text(kb), "")
+    kb.inputbox:addChars("留")
+    typeCode(kb, "hao")
+    Assert.eq(text(kb), "留hao")
+    kb.inputbox.charpos = 2
+    Bar.abandon()
+    Assert.eq(text(kb), "留hao")
+    Bar.abandon()
+    Assert.eq(text(kb), "留hao")
+end
+
 -- 功能关闭：全透传且摘行
 do
     pinyin_on = false

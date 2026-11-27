@@ -298,6 +298,17 @@ local function refresh()
     })
 end
 
+--- 换输入法前丢掉未提交的拼写。光标还在输入码上就删掉这些字符；
+--- 光标已经离开则只清状态，不改文本。
+function Bar.abandon()
+    local inputbox = Bar._keyboard and Bar._keyboard.inputbox
+    if inputbox and Bar.lookup.code ~= "" and codeAtCursor(inputbox) then
+        rawReplaceBeforeCursor(inputbox, #Bar.lookup.preedit, "")
+    end
+    clearCode()
+    refresh()
+end
+
 --- 候选条挂进键盘：addKeys 建完整棵树后，把首行 HorizontalGroup 整条顶掉。
 --- 布局树：kb[1]=BottomContainer → 键盘框 FrameContainer → CenterContainer
 --- → VerticalGroup，其 [1] 即首行（行内键与 span 交错，奇数位是键）。
