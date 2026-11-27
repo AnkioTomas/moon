@@ -156,8 +156,10 @@ local function scanInstalledFonts()
         seen[file] = true
         local info = FontList.fontinfo[path]
         info = info and info[1]
-        -- 粗体/斜体是同族变体：阅读页按族名 setFontFace 只会落到常规体，列出来选了也不生效
-        if info and (info.bold or info.italic) then return end
+        -- 系统字体目录的粗体/斜体是同族冗余变体（族名相同，选了会落到常规体）才跳过；用户放进设置目录
+        -- 的字体一律如实显示，哪怕内部被标了 bold/italic——很多中文圆体/黑体的常规字重带 bold flag，
+        -- 一刀切会让整个字体消失（用户放进去却看不到、选不了）。
+        if kind == "system" and info and (info.bold or info.italic) then return end
         local name = FontList:getLocalizedFontName(path, 0) or (zh and info and chineseName(info.names))
             or (info and info.name) or file:gsub("%.[^%.]+$", "")
         table.insert(groups[kind], { id = file, name = name, kind = kind, woff = is_woff or nil })

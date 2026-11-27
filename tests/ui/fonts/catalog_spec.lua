@@ -26,8 +26,8 @@ package.preload["fontlist"] = function()
             [root .. "/WenKai.ttf"] = { { name = "LXGW WenKai" } },
             [root .. "/Plain.otf"] = { { name = "Plain Sans" } },
             [root .. "/KaiCN.ttf"] = { { name = "Kai CN", names = { ["zh-cn"] = { [1] = "简体楷" } } } },
-            [root .. "/sub/Bare-Bold.ttf"] = { { name = "Bare", bold = true } },
-            [root .. "/sub/Bare-Italic.ttf"] = { { name = "Bare", italic = true } },
+            [root .. "/sub/Bare-Bold.ttf"] = { { name = "Bare Bold", bold = true } },
+            [root .. "/sub/Bare-Italic.ttf"] = { { name = "Bare Italic", italic = true } },
         },
     }
     function FontList:getFontList() return self.fontlist end
@@ -147,8 +147,10 @@ for _idx, it in ipairs(local_items) do
     out[#out + 1] = it.kind .. ":" .. it.id .. "=" .. it.name
     if it.id == "UserWeb.woff" then woff_item = it end
 end
+-- 用户/本地目录放进来的字体一律如实显示，哪怕内部被标了 bold/italic（回归：kindle 圆体放进去看不到）；
+-- 只有系统字体目录的 bold/italic 同族冗余变体才跳过。
 Assert.eq(table.concat(out, ","), "user:Plain.otf=Plain Sans,user:UserWeb.woff=UserWeb,user:KaiCN.ttf=简体楷,user:WenKai.ttf=霞鹜文楷,"
-    .. "local:Bare-Font.ttf=Bare-Font,system:System.ttf=System Sans")
+    .. "local:Bare-Bold.ttf=Bare Bold,local:Bare-Italic.ttf=Bare Italic,local:Bare-Font.ttf=Bare-Font,system:System.ttf=System Sans")
 Assert.not_nil(woff_item, "用户目录的 woff 字体应被列出")
 Assert.is_true(woff_item.woff, "用户目录的 woff 字体应标明 woff = true")
 
