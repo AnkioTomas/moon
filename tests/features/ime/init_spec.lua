@@ -40,6 +40,7 @@ _G.G_reader_settings = {
 local install_calls = 0
 local install_opts
 package.preload["features.ime.hide_key"] = function() return { onCreate = function() end } end
+package.preload["features.ime.globe"] = function() return { onCreate = function() end } end
 package.preload["features.ime.candidate_bar"] = function()
     return {
         install = function(opts)

@@ -90,6 +90,7 @@ end
 --- 插件启动时恢复已启用的候选栏钩子。
 function IME.onCreate()
     require("features.ime.hide_key").onCreate()
+    require("features.ime.globe").onCreate()
     if not IME.isEnabled() then
         return
     end
