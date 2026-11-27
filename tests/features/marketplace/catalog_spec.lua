@@ -164,5 +164,10 @@ Assert.eq(#Catalog.plugins(), 2, "取消后的迟到回调不得覆盖缓存")
 Catalog.saveCache({ updated_at = 1, plugins = { { owner = "old", repo = "legacy" } } })
 Assert.eq(Catalog.count(), 0)
 
+-- #169 回归：meta 是函数（非表）时取版本不崩，降级到其他字段
+Assert.is_nil(Catalog.catalogVersion({ meta = function() end }))
+Assert.eq(Catalog.catalogVersion({ meta = function() end, release_tag = "v2.0.0" }), "2.0.0")
+Assert.eq(Catalog.catalogVersion({ meta = { version = "3.1" } }), "3.1")
+
 resetAll()
 return true

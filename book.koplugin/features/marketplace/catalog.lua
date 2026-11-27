@@ -164,7 +164,7 @@ end
 function Catalog.catalogVersion(item)
     if type(item) ~= "table" then return nil end
     if type(item.version) == "string" and item.version ~= "" then return item.version end
-    if item.meta and type(item.meta.version) == "string" and item.meta.version ~= "" then
+    if type(item.meta) == "table" and type(item.meta.version) == "string" and item.meta.version ~= "" then
         return item.meta.version
     end
     if type(item.release_tag) == "string" and item.release_tag ~= "" then
