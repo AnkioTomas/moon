@@ -1,7 +1,8 @@
 --[[--
 主体：阅读小卡四宫格（连续阅读、本周、本月挑战、今年读完），半宽两列。
 
-数据全部来自本地阅读统计，计算复用统计页的 book.insight_calc；点按进统计页。
+数据全部来自本地阅读统计（日表走首页 stats_data memo，今年读完用计数查询）；
+计算复用 book.insight_calc；点按进统计页。
 
 @module koplugin.book.desktop.pages.home.tiles
 --]]
@@ -15,8 +16,8 @@ local VerticalSpan = require("ui/widget/verticalspan")
 local Calc = require("book.insight_calc")
 local Catalog = require("book.catalog")
 local MoonSettings = require("utils.settings")
-local StatsDB = require("book.stats_db")
 local Stats = require("desktop.pages.home.stats")
+local StatsData = require("desktop.pages.home.stats_data")
 local Ring = require("ui.widgets.ring")
 local Theme = require("ui.themes")
 local Box = require("ui.themes.widgets.box")
@@ -39,29 +40,27 @@ M.showSettings = Stats.showSettings
 local DAY = 86400
 local VISUAL_H = 28
 
---- 最近一年的日表与今年读完的书，转成 insight_calc 吃的形状。
----@param source table|nil 所属源
+--- 最近一年的日表与今年读完本数，转成 insight_calc 吃的形状。
+---@param ctx table
 ---@return table data { streak, dots, bars, week_seconds, challenge, done, projected }
-local function collect(source)
+local function collect(ctx)
     local now = os.time()
-    local days, finished = {}, {}
-    if source then
-        local scope = Catalog.libraryScope(source.id)
-        for _idx, row in ipairs(StatsDB.dailyBySource(scope, now - 366 * DAY, now + DAY)) do
-            days[row.ymd] = { duration_seconds = row.seconds, pages = row.pages or 0 }
-        end
-        finished = StatsDB.progressBooks(scope, true)
+    local days = {}
+    for _idx, row in ipairs(StatsData.daily(ctx, now - 366 * DAY, now + DAY)) do
+        days[row.ymd] = { duration_seconds = row.seconds, pages = row.pages or 0 }
     end
     local goals = MoonSettings.get("desktop.pages.insight")
     local week = Calc.weekCompare(days, now)
-    local fc = Calc.forecast(days, {}, finished, now)
+    local done = StatsData.finishedYear(ctx, now)
+    local year_start = os.time{ year = tonumber(os.date("%Y", now)), month = 1, day = 1, hour = 0 }
+    local elapsed = math.max(1, math.floor((now - year_start) / DAY) + 1)
     return {
         streak = Calc.streak(days, os.date("%Y-%m-%d", now) --[[@as string]]),
         bars = week.bars,
         week_seconds = week.seconds,
         challenge = Calc.challenge(days, now, goals.month_goal_hours * 3600),
-        done = fc.done,
-        projected = fc.projected,
+        done = done,
+        projected = math.floor(done / elapsed * 365 + 0.5),
         year_goal = goals.year_goal_books,
     }
 end
@@ -178,7 +177,7 @@ function M:createWidget()
     local w, h = self.opts.width, self.opts.height
     local gap = Theme.px(Theme.current().space.sm)
     local card_w = math.floor((w - gap) / 2)
-    local data = collect(self.ctx.source)
+    local data = collect(self.ctx)
     self.key, self.day = keyOf(data), os.date("%Y-%m-%d")
     local cards = tiles(card_w, data)
     local function row(a, b)
@@ -199,7 +198,7 @@ end
 ---@param event string|table 父组件转发的事件名称或事件对象
 function M:onEvent(event)
     if event ~= "stats_changed" or not self.slot then return end
-    if keyOf(collect(self.ctx.source)) ~= self.key then self:refresh() end
+    if keyOf(collect(self.ctx)) ~= self.key then self:refresh() end
 end
 
 --- 回到桌面时已跨天：连续天数、近 7 天窗口都挪了，重画。

@@ -13,11 +13,11 @@ Kit.sections.insight = { month_goal_hours = 0, year_goal_books = 5 }
 Kit.sections.home = Kit.sections.home or {}
 Kit.sections.home.home_stats_opacity = 40
 local noon = os.time{ year = date.year, month = date.month, day = date.day, hour = 12 }
-local daily, finished = {}, {}
+local daily, finished_year = {}, 1
 package.preload["book.stats_db"] = function()
     return {
         dailyBySource = function() return daily end,
-        progressBooks = function() return finished end,
+        finishedCountSince = function() return finished_year end,
     }
 end
 package.preload["book.catalog"] = function()
@@ -30,7 +30,6 @@ end
 for i = 0, 2 do
     daily[#daily + 1] = { ymd = os.date("%Y-%m-%d", noon - i * 86400), seconds = 600, pages = 5 }
 end
-finished[1] = { last_time = os.time(), fraction = 1 }
 
 local switched
 local comp = require("desktop.pages.home.tiles"):new()
@@ -49,7 +48,7 @@ Assert.eq(cards[1].bg_alpha, 40)
 local first = slot[1]
 comp:onEvent("stats_changed")
 Assert.eq(slot[1], first, "数据没变不重建")
-finished[2] = { last_time = os.time(), fraction = 1 }
+finished_year = 2
 comp:onEvent("stats_changed")
 Assert.is_true(slot[1] ~= first, "读完数变了要重建")
 

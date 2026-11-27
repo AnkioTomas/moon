@@ -25,7 +25,7 @@ M.__index = M
 
 
 local Catalog = require("book.catalog")
-local StatsDB = require("book.stats_db")
+local StatsData = require("desktop.pages.home.stats_data")
 
 --- 当前连续阅读天数：今日有读从今天计，否则从昨天计。
 ---@param daily table[] { ymd, seconds }
@@ -52,13 +52,11 @@ local function currentStreak(daily)
     return streak
 end
 
---- 按展示范围汇总首页三卡指标（混合模式跨已启用源）。
----@param source_id string 当前活跃源；混合时由 Catalog.libraryScope 展开
+--- 按展示范围汇总首页三卡指标（混合模式跨已启用源；日表走 stats_data memo）。
+---@param ctx table
 ---@return table
-local function summarize(source_id)
-    local scope = Catalog.libraryScope(source_id)
-    local summary = StatsDB.summaryBySource(scope)
-    local daily = StatsDB.dailyBySource(scope)
+local function summarize(ctx)
+    local summary, daily = StatsData.summary(ctx)
     local today_ymd = os.date("%Y-%m-%d")
     local today_seconds = 0
     for i, row in ipairs(daily) do
@@ -76,10 +74,10 @@ end
 
 
 --- 三张卡的文案（数值、说明）。
----@param source table|nil 所属源
+---@param ctx table
 ---@return string[][]
-local function cards(source)
-    local stats = source and summarize(source.id) or {}
+local function cards(ctx)
+    local stats = StatsData.scope(ctx) and summarize(ctx) or {}
     return {
         { T(_("%1天"), stats.streak or 0), _("连续阅读") },
         { stats.total_text or "—", _("总阅读") },
@@ -125,7 +123,7 @@ end
 function M:createWidget()
     local w, h = self.opts.width, self.opts.height
     local gap = Theme.px(Theme.current().space.sm)
-    local items = cards(self.ctx.source)
+    local items = cards(self.ctx)
     local card_w = math.floor((w - gap * (#items - 1)) / #items)
     local row = HorizontalGroup:new{ align = "center" }
     local key = {}
@@ -143,7 +141,7 @@ end
 function M:onEvent(event)
     if event ~= "stats_changed" or not self.slot then return end
     local key = {}
-    for i, item in ipairs(cards(self.ctx.source)) do key[i] = item[1] end
+    for i, item in ipairs(cards(self.ctx)) do key[i] = item[1] end
     if table.concat(key, "\31") ~= self.key then self:refresh() end
 end
 

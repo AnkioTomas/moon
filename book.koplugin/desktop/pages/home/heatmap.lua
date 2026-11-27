@@ -13,7 +13,7 @@ local HorizontalSpan = require("ui/widget/horizontalspan")
 local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
 local Catalog = require("book.catalog")
-local StatsDB = require("book.stats_db")
+local StatsData = require("desktop.pages.home.stats_data")
 local Theme = require("ui.themes")
 local Box = require("ui.themes.widgets.box")
 local Tap = require("ui.themes.widgets.tap")
@@ -38,22 +38,19 @@ local CELL, MAX_CELL, GAP = 14, 24, 2
 local MAX_WEEKS = 53
 
 --- 最近 weeks 周的档位：levels[周][1..7] 为 0..4，今天之后为 false。
----@param source table|nil 所属源
+---@param ctx table
 ---@param weeks integer
 ---@return (integer|false)[][] levels
 ---@return number total 区间内总秒数
-local function collect(source, weeks)
+local function collect(ctx, weeks)
     local now = os.date("*t")
     -- 取正午推日期：跨夏令时差一小时也落不到隔壁一天
     local today = os.time{ year = now.year, month = now.month, day = now.day, hour = 12 }
     local start = today - ((now.wday + 5) % 7 + (weeks - 1) * 7) * 86400
     local by_day = {}
-    if source then
-        -- 只聚合画得到的那几周，不扫全部历史（每次统计落库都会重算）
-        local rows = StatsDB.dailyBySource(Catalog.libraryScope(source.id), start - 43200, today + 43200)
-        for _idx, row in ipairs(rows) do
-            by_day[row.ymd] = row.seconds
-        end
+    -- 有 memo 时复用全量日表；否则只查这几周
+    for _idx, row in ipairs(StatsData.daily(ctx, start - 43200, today + 43200)) do
+        by_day[row.ymd] = row.seconds
     end
     local seconds, peak, total = {}, 0, 0
     for i = 1, weeks * 7 do
@@ -110,7 +107,7 @@ function M:createWidget()
     if fresh and fresh.weeks == weeks then
         levels, total = fresh.levels, fresh.total
     else
-        levels, total = collect(self.ctx.source, weeks)
+        levels, total = collect(self.ctx, weeks)
     end
     self.weeks, self.key, self.day = weeks, keyOf(levels, total), os.date("%Y-%m-%d") --[[@as string]]
 
@@ -150,7 +147,7 @@ end
 ---@param event string|table 父组件转发的事件名称或事件对象
 function M:onEvent(event)
     if event ~= "stats_changed" or not self.slot then return end
-    local levels, total = collect(self.ctx.source, self.weeks)
+    local levels, total = collect(self.ctx, self.weeks)
     if keyOf(levels, total) == self.key then return end
     self.collected = { weeks = self.weeks, levels = levels, total = total }
     self:refresh()

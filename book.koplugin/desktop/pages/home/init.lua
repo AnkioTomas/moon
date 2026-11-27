@@ -41,6 +41,7 @@ local _ = require("gettext")
 ---@field editing boolean
 ---@field active boolean 首页 Tab 处于前台
 ---@field shelf_memo table 本轮组装共用的最近书架读取结果（Base.readShelf），shelf_changed 作废
+---@field stats_memo table 本轮组装共用的阅读统计日表（stats_data），stats_changed 作废
 ---@field focus string|nil 下次组装时优先显示含该组件的页，用完即清
 local Home = {}
 Home.__index = Home
@@ -54,6 +55,7 @@ function Home:new(opts)
     opts.editing = false
     opts.active = false
     opts.shelf_memo = {}
+    opts.stats_memo = {}
     return setmetatable(opts, self)
 end
 
@@ -332,9 +334,11 @@ local function assemble(self)
     -- 编辑态翻页条中间是「添加 / 完成」，始终留着。
     local show_pager = self.editing or self.pages > 1
     local body_h = show_pager and math.max(1, h - pager_h) or h
-    -- 本次组装的组件共用一份最近书架（见 Base:shelf）；shelf_changed 时作废。
+    -- 本次组装的组件共用一份最近书架 / 统计日表；对应事件作废。
     self.shelf_memo = {}
+    self.stats_memo = {}
     ctx.shelf_memo = self.shelf_memo
+    ctx.stats_memo = self.stats_memo
     ensureLayout(self, ctx, body_h)
 
     local wrap
@@ -485,6 +489,12 @@ function Home:onEvent(event, payload)
         return
     end
     if event == "shelf_changed" then self.shelf_memo.key = nil end
+    -- 组件 ctx 仍引用同一张 memo：清字段再广播，同页多组件只重读一次。
+    if event == "stats_changed" then
+        local memo = self.stats_memo
+        memo.scope_key, memo.daily = nil, nil
+        memo.finished_year, memo.finished_year_for = nil, nil
+    end
     broadcast(self, "onEvent", event, payload)
     if event == "home_refresh" or event == "detail_dirty" then redraw(self) end
 end
