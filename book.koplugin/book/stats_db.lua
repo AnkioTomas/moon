@@ -1056,6 +1056,31 @@ function StatsDB.sessionRows(source_id, from_ts)
     return rows
 end
 
+--- 自 since_ts 起「读完」本数（口径同 progressBooks(finished=true) 的 last_time 过滤）。
+--- 首页小卡只要计数，禁止拉全量书行再在 Lua 里数。
+---@param source_id string|string[]
+---@param since_ts number
+---@return number
+function StatsDB.finishedCountSince(source_id, since_ts)
+    local src, args = DB.sourceClause("b.source_id", source_id)
+    args[#args + 1] = tonumber(since_ts) or 0
+    return tonumber(DB.rowexec(
+        [[SELECT COUNT(*) FROM books b
+          LEFT JOIN pending_progress p
+            ON p.source_id=b.source_id AND p.stable_id=b.stable_id
+          LEFT JOIN (
+            SELECT source_id, stable_id, MAX(start_time) AS last_time
+              FROM reading_stats
+             WHERE record_type IN ('page','page_rollup')
+             GROUP BY source_id, stable_id
+          ) r ON r.source_id=b.source_id AND r.stable_id=b.stable_id
+          WHERE ]] .. src .. [[
+            AND (b.read_state=1 OR (b.read_state=0 AND COALESCE(p.fraction,0)>=0.99))
+            AND COALESCE(r.last_time, p.updated_at, 0)>=?;]],
+        unpack(args)
+    )) or 0
+end
+
 --- 读完（finished=true）或在读的书，附带最后阅读时间和本机累计时长。
 --- 读完 = 手动已读，或未被标未读且进度 ≥ 99%；在读 = 有进度但没读完。
 --- 读完穿过书架过滤：含 `hidden=1`（产品「软删除」）与 `deleted=1`（下架墓碑）；

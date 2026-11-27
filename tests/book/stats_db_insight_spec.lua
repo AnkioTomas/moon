@@ -86,6 +86,10 @@ Assert.eq(ids.done.last_time, 9000, "最后阅读时间取本机记录")
 Assert.eq(ids.done.seconds, 120)
 Assert.eq(ids.manual.last_time, 0, "没记录没进度时间时为 0")
 
+Assert.eq(StatsDB.finishedCountSince("local", 0), #finished, "计数与全量读完列表一致")
+Assert.eq(StatsDB.finishedCountSince("local", 9000), 1, "按 last_time 截断：只有 done")
+Assert.eq(StatsDB.finishedCountSince("local", 9001), 0, "截断之后为空")
+
 local reading = StatsDB.progressBooks("local", false, 5)
 Assert.len(reading, 1, "软删除/下架在读书不进在读列表")
 Assert.eq(reading[1].stable_id, "half")
