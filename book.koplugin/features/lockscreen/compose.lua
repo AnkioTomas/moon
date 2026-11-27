@@ -183,8 +183,12 @@ function M.build(plan, cb)
             if cancelled then return end
             local bg, blocks = layers(plan, path)
             local widgets = {}
-            for _idx, block in ipairs(blocks) do
-                if block.widget then widgets[#widgets + 1] = block.widget end
+            -- 统计页整页是背景块，封面在 bg.blocks 里，不在主体 blocks 里。
+            -- 只等主体的话，写 PNG 时封面还是占位，屏上就剩底色和底部一条。
+            for _idx, list in ipairs({ blocks, bg.blocks or {} }) do
+                for _jdx, block in ipairs(list) do
+                    if block.widget then widgets[#widgets + 1] = block.widget end
+                end
             end
             -- 统计页等主体里的封面是异步下载 / 解码的：不等它落定，子进程画到的就只是占位封面。
             pending_blocks = blocks
