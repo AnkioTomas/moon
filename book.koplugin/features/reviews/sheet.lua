@@ -1,5 +1,6 @@
 --[[--
-段评列表：全屏，标题栏 + 原句引用 + 段评卡片，按卡片实际高度分页；翻到已加载内容末页时自动续拉。
+段评列表：标题栏 + 原句引用 + 段评卡片，按卡片实际高度分页；翻到已加载内容末页时自动续拉。
+缺省全屏。设置「显示方式」为小窗时改成居中卡片（宽度同其它弹窗，高度为屏高的 72%），带遮罩，点卡片外关闭。
 标题栏左侧 [✦] 是「AI 归纳」（已加载到段评且 AI 已配置才有，见 digest.lua）。
 
   +-------------------------------+
@@ -45,6 +46,8 @@ local _ = require("gettext")
 local QUOTE_LINES = 6
 local MAX_THUMBS = 3
 local IMAGE_HEADERS = { Referer = "https://fanqienovel.com/" }
+--- 小窗高度占屏高的比例。宽度用标准弹窗宽，翻页时尺寸不变。
+local WINDOW_HEIGHT = 0.72
 
 --- 全屏查看段评配图；按比例缩进屏幕（不拉变形），点任意处或返回键退出。
 ---@param picture { url: string, headers?: table<string, string> }
@@ -96,12 +99,24 @@ local Sheet = Modal:extend{
     spot = nil,
 }
 
-function Sheet:init()
-    Modal.init(self)
+--- 按当前显示方式定面板尺寸。全屏铺满；小窗是居中卡片，正文区先扣边框、标题栏和翻页条。
+function Sheet:measure()
     local t = self.theme
+    local window = not self.covers_fullscreen
+    self.frame = window and Theme.px(t.dialog.border or 0) or 0
     self.pad = Theme.px(t.space.lg)
-    self.inner_w = self.dimen.w - self.pad * 2
-    self.body_h = self.dimen.h - TitleBar.height() - Theme.px(t.control.height) - self.pad * 2
+    self.panel_w = window and Modal.dialogWidth() or self.dimen.w
+    self.panel_h = window and math.floor(self.dimen.h * WINDOW_HEIGHT) or self.dimen.h
+    local inner = self.panel_w - self.frame * 2
+    self.inner_w = inner - self.pad * 2
+    self.body_h = math.max(1, self.panel_h - self.frame * 2 - TitleBar.height()
+        - Theme.px(t.control.height) - self.pad * 2)
+end
+
+function Sheet:init()
+    self.covers_fullscreen = require("utils.settings").get("features.reviews").display ~= "window"
+    Modal.init(self)
+    self:measure()
     self.items, self.cards, self.page, self.max_idx = self.snapshot or self.reply_preview or {}, {}, 1, 0
     self.loaded = self.snapshot ~= nil or self.reply_preview ~= nil
     self.more = not self.loaded
@@ -259,6 +274,7 @@ function Sheet:card(i, avail)
                 text = body,
                 emoji = true,
                 inline_images = item.inline_images,
+                fullscreen = self.covers_fullscreen ~= false,
             }:show()
         end or nil)
     return self.cards[i]
@@ -324,7 +340,8 @@ end
 
 function Sheet:rebuild()
     local t = self.theme
-    local w, pad = self.dimen.w, self.pad
+    local w, pad = self.panel_w - self.frame * 2, self.pad
+    local inner_h = self.panel_h - self.frame * 2
     local body = VerticalGroup:new{ align = "left" }
     if self.page == 1 then body[#body + 1] = self:quote() end
     local range = self.pages[self.page]
@@ -362,14 +379,14 @@ function Sheet:rebuild()
         VerticalGroup:new{ align = "left", VerticalSpan:new{ width = pad }, body },
     }
     self:setPanel(Box:new{
-        style = { bg = t.color.page },
-        width = w,
-        height = self.dimen.h,
+        style = self.covers_fullscreen and { bg = t.color.page } or t.dialog,
+        width = self.panel_w,
+        height = self.panel_h,
         VerticalGroup:new{
             align = "left",
             bar,
             content,
-            VerticalSpan:new{ width = math.max(0, self.dimen.h - bar:getSize().h - content:getSize().h
+            VerticalSpan:new{ width = math.max(0, inner_h - bar:getSize().h - content:getSize().h
                 - Theme.px(t.control.height)) },
             Pager.widget({
                 width = w,

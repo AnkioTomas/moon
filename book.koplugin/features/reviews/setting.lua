@@ -38,6 +38,7 @@ end
 -- mark_gray：线的灰度（深浅，0 白–100 黑）；mark_opacity：线的不透明度（10–100），与底色混合。
 -- bubble_opacity：段评数量气泡的不透明度（10–100）。所有书源共用，不按源分开。
 -- font_scale：段评列表正文字号百分比（80–200，设置页「段评字号」调整）。
+-- display：段评列表 full 全屏 / window 居中小窗。
 -- chapter_links：章会话的书（微信读书、京东读书）借段评用的关联，按「源 id\0书目 id」记，见 features.reviews.linked。
 Setting.defaults = {
     book_reviews_mark_style = "dashed",
@@ -47,6 +48,7 @@ Setting.defaults = {
     mark_offset = 0,
     font_scale = 100,
     replies_pos = "left",
+    display = "full",
     chapter_links = {},
 }
 
@@ -155,6 +157,23 @@ function Setting.entries(desktop)
                                 MoonSettings.save("features.reviews", reviews)
                                 local ui = require("apps/reader/readerui").instance
                                 if ui and ui.dialog then require("ui/uimanager"):setDirty(ui.dialog, "ui") end
+                                desktop:updateView()
+                            end,
+                        })
+                    end
+                    rows[#rows + 1] = function(iw)
+                        return Row.choice({
+                            width = iw,
+                            icon = "picture_in_picture",
+                            title = _("显示方式"),
+                            items = {
+                                { value = "full", text = _("全屏") },
+                                { value = "window", text = _("小窗") },
+                            },
+                            current = reviews.display or "full",
+                            on_select = function(value)
+                                reviews.display = value
+                                MoonSettings.save("features.reviews", reviews)
                                 desktop:updateView()
                             end,
                         })
