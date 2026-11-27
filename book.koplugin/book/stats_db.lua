@@ -1103,17 +1103,23 @@ function StatsDB.progressBooks(source_id, finished, limit)
         tail = " ORDER BY 7 DESC LIMIT ?"
         args[#args + 1] = math.max(1, tonumber(limit) or 5)
     end
+    -- 先按书聚合阅读记录再 JOIN：相关子查询会按书扫两遍 reading_stats。
     local result, nrows = DB.query(
         [[SELECT b.source_id, b.stable_id, b.title, b.authors, b.category,
                  COALESCE(p.fraction, 0),
-                 COALESCE((SELECT MAX(r.start_time) FROM reading_stats r
-                           WHERE r.source_id=b.source_id AND r.stable_id=b.stable_id
-                             AND r.record_type IN ('page','page_rollup')), p.updated_at, 0),
-                 COALESCE((SELECT SUM(r.duration) FROM reading_stats r
-                           WHERE r.source_id=b.source_id AND r.stable_id=b.stable_id
-                             AND r.record_type IN ('page','page_rollup')), 0)
-          FROM books b LEFT JOIN pending_progress p
+                 COALESCE(r.last_time, p.updated_at, 0),
+                 COALESCE(r.seconds, 0)
+          FROM books b
+          LEFT JOIN pending_progress p
             ON p.source_id=b.source_id AND p.stable_id=b.stable_id
+          LEFT JOIN (
+            SELECT source_id, stable_id,
+                   MAX(start_time) AS last_time,
+                   SUM(duration) AS seconds
+              FROM reading_stats
+             WHERE record_type IN ('page','page_rollup')
+             GROUP BY source_id, stable_id
+          ) r ON r.source_id=b.source_id AND r.stable_id=b.stable_id
           WHERE ]] .. src .. shelf .. " AND " .. cond .. tail .. ";",
         unpack(args)
     )
