@@ -137,18 +137,39 @@ function Source.pickEnabled(desktop)
     }:show()
 end
 
---- 账号页每个书源自己的图标（Material Symbols 名）。
---- 内置源必须在这里有条目；第三方源用设置模块的 rowIcon，都没有才退回 dns。
+--- 账号页图标（Material Symbols 名）。
+--- 插件设置模块的 rowIcon 优先。这张表只兜住还没声明图标的已知书源，都没有才退回 dns。
 local SOURCE_ICONS = {
     ["local"] = "folder",
     moon = "nightlight",
     kindle = "tablet_mac",
-    iread = "headphones",
-    legado = "android",
+    weread = "menu_book",
+    wechat = "menu_book",
+    qidian = "auto_stories",
+    qqreader = "forum",
+    xiaoxiang = "water_drop",
+    changpei = "stylus_note",
+    jdread = "shopping_bag",
+    jjwxc = "history_edu",
+    qimao = "pets",
+    shuqi = "flag",
+    fanqie = "nutrition",
+    dedao = "lightbulb",
+    ireader = "import_contacts",
+    tadu = "castle",
+    netease = "cloud",
+    douban = "star",
+    zhihu = "psychology",
+    kuaikan = "mood",
+    zymk = "comic_bubble",
+    bilimanga = "smart_display",
     copymanga = "photo_library",
+    legado = "android",
+    iread = "headphones",
     kavita = "hub",
     bookorbit = "travel_explore",
     ["18ta"] = "local_library",
+    linguoland = "translate",
 }
 
 --- 一个设置模块能不能出现在账号页：有 rows 或 open 就行。
@@ -300,8 +321,8 @@ function Source:configSections(ctx)
     for _idx, meta in ipairs(SourceRegistry.listEnabled()) do
         local mod = Source.loadSetting(meta.id)
         if meta.id ~= "local" and configurable(mod) then
-            sources[#sources + 1] = entryRow(desktop, plugin, mod, meta.name or meta.id,
-                SOURCE_ICONS[meta.id] or (mod.rowIcon and mod.rowIcon()) or "dns", meta.id)
+            local icon = (mod.rowIcon and mod.rowIcon()) or SOURCE_ICONS[meta.id] or "dns"
+            sources[#sources + 1] = entryRow(desktop, plugin, mod, meta.name or meta.id, icon, meta.id)
         end
     end
     return {
