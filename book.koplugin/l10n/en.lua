@@ -761,7 +761,6 @@ return {
     ["更新信息无效，请稍后再试"] = "Invalid update information. Please try again later.",
     ["新版本缺少插件包，请稍后再试"] = "The new release has no plugin package yet. Please try again later.",
     ["更新包校验失败，请稍后再试"] = "Update package verification failed. Please try again later.",
-    ["更新包过大，已中止下载"] = "Update package is too large; download aborted.",
     ["月读服务"] = "月读 Service",
     ["月读词典"] = "月读 dictionaries",
     ["月读需要 KOReader 2026.07 或更高版本。\n\n当前版本："] = "Moon Reader requires KOReader 2026.07 or newer.\n\nCurrent version: ",

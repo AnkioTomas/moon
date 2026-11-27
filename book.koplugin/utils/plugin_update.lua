@@ -32,8 +32,6 @@ local Github = require("http.github")
 local _ = require("gettext")
 local T = require("ffi/util").template
 
-local MAX_ARCHIVE_BYTES = 100 * 1024 * 1024
-
 ---@class PluginUpdater
 ---@field target table
 ---@field _offered_version string|nil
@@ -168,7 +166,6 @@ local function installFrom(self, url, release, ctx, done, on_progress, on_instal
         timeout = require("http.timeout").net(10),
         allow_redirects = true,
         resume = true,
-        max_bytes = MAX_ARCHIVE_BYTES,
         on_progress = on_progress,
     }, archive, function(ok, err)
         if not ok then return fail(err) end
@@ -273,7 +270,6 @@ local function errorText(err)
         { "^invalid release", _("更新信息无效，请稍后再试") },
         { "^release has no", _("新版本缺少插件包，请稍后再试") },
         { "update checksum mismatch", _("更新包校验失败，请稍后再试") },
-        { "download too large", _("更新包过大，已中止下载") },
     }
     for _idx, entry in ipairs(known) do
         if text:find(entry[1]) then return entry[2] end

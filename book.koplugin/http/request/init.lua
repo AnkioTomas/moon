@@ -30,7 +30,6 @@ Cache.fetch(key, ttl, load, cb) 缓存解码结果，别手写「读缓存 → �
 ---@field accept string|nil get/post 默认 Accept
 ---@field content_type string|nil POST body 的 Content-Type
 ---@field on_progress fun(bytes: number, total: number|nil)|nil 仅 download；total 取自 Content-Length
----@field max_bytes number|nil 仅 download；超限失败
 ---@field resume boolean|nil 仅 download：失败保留 .part，下次带 Range 续传；服务器回 200 时自动重下
 ---@field cache_ttl number|nil 仅 GET；>0 时走 http.cache，秒（按 auth_username 隔离）
 ---@field stale_on_error boolean|nil 仅 GET；缓存未命中且请求失败时回落磁盘上的过期条目
@@ -263,7 +262,7 @@ end
 --- 取消时 stream 必回 on_done("cancelled")，关文件 / 删 .part 都在那里收口。
 --- opts.resume：失败保留 .part，下次带 Range 从已有字节续传；服务器不支持 Range
 --- 回 200 时在拿到响应头后截断重下，调用方无感。
----@param opts HttpRequest 可带 on_progress / max_bytes / resume
+---@param opts HttpRequest 可带 on_progress / resume
 ---@param dest string
 ---@param cb fun(ok: boolean, err: any, res: table|nil)
 ---@return HttpJob
@@ -271,7 +270,6 @@ function Request.download(opts, dest, cb)
     local state = { cancelled = false }
     local tmp = dest .. ".part"
     local target = dest:match("([^/]+)$") or dest
-    local max_bytes = opts.max_bytes
     local written, total = 0, nil
     local response = {}
     local stream_job, write_err
@@ -350,16 +348,9 @@ function Request.download(opts, dest, cb)
                 abort(open_err)
                 return
             end
-            if max_bytes and total and total > max_bytes then
-                abort("download too large")
-            end
         end,
         on_data = function(chunk)
             if write_err or not file or not Request.ok(response.code) then return end
-            if max_bytes and written + #chunk > max_bytes then
-                abort("download too large")
-                return
-            end
             local ok, err = file:write(chunk)
             if not ok then
                 abort(err)

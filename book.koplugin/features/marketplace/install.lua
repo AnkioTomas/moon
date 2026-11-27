@@ -14,7 +14,6 @@ local Request = require("http.request")
 
 local MarketInstall = {}
 
-local MAX_ARCHIVE_BYTES = 50 * 1024 * 1024
 -- 插件目录全进程共享：同一时刻只允许一个安装在写。
 local busy = false
 
@@ -212,7 +211,6 @@ function MarketInstall.perform(plan, opts, cb)
             timeout = require("http.timeout").net(10),
             allow_redirects = true,
             resume = false,
-            max_bytes = MAX_ARCHIVE_BYTES,
             on_progress = opts.on_progress,
         }, dest, dcb)
     end
