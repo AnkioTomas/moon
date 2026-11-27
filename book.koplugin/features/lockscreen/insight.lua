@@ -52,11 +52,10 @@ local function resolved()
     return shown[math.floor(os.time() / 86400) % #shown + 1].id
 end
 
---- 组合图缓存键：页面 + 当前源阅读总时长（读了书就更新）。
+--- 组合图缓存键：页面 + 最近阅读活动时间（读了书就更新；不跑 summary 合并）。
 ---@return string
 function M.cache_key()
-    local summary = StatsDB.summaryBySource(Library.activeSourceId())
-    return resolved() .. ":" .. tostring(summary.total_seconds or 0)
+    return resolved() .. ":" .. tostring(StatsDB.activityStamp(Library.activeSourceId()))
 end
 
 ---@return {text: string, value: string}[]

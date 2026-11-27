@@ -14,8 +14,15 @@ Kit.sections.insight = { hidden_pages = {}, hidden_cards = {} }
 package.preload["features.lockscreen.components.library"] = function()
     return { activeSourceId = function() return "moon" end }
 end
+local summary_calls = 0
 package.preload["book.stats_db"] = function()
-    return { summaryBySource = function() return { total_seconds = 3600 } end }
+    return {
+        activityStamp = function() return 3600 end,
+        summaryBySource = function()
+            summary_calls = summary_calls + 1
+            return { total_seconds = 1 }
+        end,
+    }
 end
 package.loaded["features.lockscreen.insight"] = nil
 
@@ -33,7 +40,7 @@ conf.lock_screen_insight_page = "ranks"
 Assert.eq(Insight.cache_key(), "ranks:3600")
 conf.lock_screen_insight_page = "random"
 Assert.matches(Insight.cache_key(), ":3600$")
-
+Assert.eq(summary_calls, 0, "cache_key 不得再跑 summaryBySource")
 -- 没有任何统计时只画空态文字，不构建页面。
 package.loaded["book.catalog"] = {
     readingInsight = function() return { has_data = false, calendar = { days = {} } } end,

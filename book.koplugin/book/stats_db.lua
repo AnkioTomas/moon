@@ -1056,6 +1056,19 @@ function StatsDB.sessionRows(source_id, from_ts)
     return rows
 end
 
+--- 阅读活动脏标：最近一条统计记录的时间戳。锁屏 cache_key 用，禁止为此跑 summary 合并。
+---@param source_id string|string[]
+---@return number
+function StatsDB.activityStamp(source_id)
+    local src, args = DB.sourceClause("source_id", source_id)
+    return tonumber(DB.rowexec(
+        [[SELECT COALESCE(MAX(CASE WHEN record_type='page_rollup' THEN last_time ELSE start_time END),0)
+          FROM reading_stats WHERE ]] .. src .. [[
+            AND record_type IN ('page','page_rollup','day','hour','total','cloud_session');]],
+        unpack(args)
+    )) or 0
+end
+
 --- 自 since_ts 起「读完」本数（口径同 progressBooks(finished=true) 的 last_time 过滤）。
 --- 首页小卡只要计数，禁止拉全量书行再在 Lua 里数。
 ---@param source_id string|string[]
