@@ -157,7 +157,7 @@ local function sections(desktop)
                             end
                             local on = IME.setEnabled(not IME.isEnabled())
                             require("ui.themes.widgets.toast"):new{
-                                text = on and _("中文键盘已启用，点键盘上的 🌐 键切换中英文") or _("中文键盘已停用"),
+                                text = on and _("中文键盘已启用，点 🌐 切换中英文，长按选择键盘布局") or _("中文键盘已停用"),
                                 timeout = 3,
                             }:show()
                             desktop:updateView()
@@ -171,6 +171,7 @@ local function sections(desktop)
                         kind = "nav",
                         icon = "keyboard",
                         title = _("键盘布局"),
+                        subtitle = IME.isEnabled() and _("长按键盘上的 🌐 键") or nil,
                         status = method.label,
                         status_on = true,
                         callback = function() pickInputMethod(desktop) end,
