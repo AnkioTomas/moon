@@ -9,6 +9,12 @@
 不够就拒绝开跑，避免 Kindle PaperWhite 2 这类 256MB 设备在转码/解包中被 SIGKILL。
 读不到可用内存（非 Linux / 模拟器）不拦截。
 
+crengine 四块解压缓存的上限 = 12.5MB × cre_storage_size_factor（DOC_BUFFER_SIZE = 10MB）。
+KOReader 未设置时默认 40，上限约 500MB。512MB 的 PaperWhite 5 开大书会把缓存顶满，
+OOM 杀掉系统进程，表现为整机重启；重启后缓存清空，所以「现在又能看」。
+用户没设过这项时，按物理内存的 1/4 选系数（夹在 2～39），并在 cacheInit 当次生效后删掉，
+不写进设置文件。用户设过的值一律不动。
+
 Kindle 启动模式复用官方环境变量 STOP_FRAMEWORK（koreader.sh --framework_stop）。
 
 @module koplugin.book.utils.mem
@@ -24,17 +30,50 @@ local CEIL = 40 * MB
 local HEADROOM = 4 * MB
 --- Woff.toSfnt 用 inflate.stream 的 64KB 分块写盘（已核对 utils.inflate.CHUNK）。
 local WOFF_INFLATE_CHUNK = 65536
+--- crengine 四块解压缓存在 factor=1 时的合计（2.5+4.5+4.5+1 MB）。
+local CRE_CACHE_BASE = 13107200
+local CRE_FACTOR_MIN = 2
+--- KOReader credocument.lua 的默认值。算出来 ≥40 就不必改。
+local CRE_FACTOR_DEFAULT = 40
 
 Mem.INSUFFICIENT = "memory insufficient"
+
+--- calcFreeMem 的两个返回值：可用（已打折）、物理总量。非 Linux 为 nil, nil。
+---@return number|nil available
+---@return number|nil total
+local function memInfo()
+    local util = require("util")
+    local calc = util and util.calcFreeMem
+    if type(calc) ~= "function" then return nil, nil end
+    local available, total = calc()
+    if type(available) ~= "number" or available <= 0 then available = nil end
+    if type(total) ~= "number" or total <= 0 then total = nil end
+    return available, total
+end
 
 --- 当前大致可用字节（KOReader util.calcFreeMem，已留 85% 余量）；非 Linux（读不到 /proc/meminfo）为 nil。
 ---@return number|nil
 function Mem.availableBytes()
-    local util = require("util")
-    local calc = util and util.calcFreeMem
-    if type(calc) ~= "function" then return nil end
-    local free = calc()
-    return type(free) == "number" and free > 0 and free or nil
+    return (memInfo())
+end
+
+--- 物理内存字节数（MemTotal，不打折）。读不到为 nil。
+---@return number|nil
+function Mem.totalBytes()
+    return (select(2, memInfo()))
+end
+
+--- 未设置 cre_storage_size_factor 时该用的系数。
+--- 缓存上限取物理内存的 1/4，再换成系数。≥ KOReader 默认 40 时返回 nil（保持默认）。
+---@param total_bytes number|nil
+---@return number|nil
+function Mem.creStorageFactor(total_bytes)
+    total_bytes = tonumber(total_bytes)
+    if not total_bytes or total_bytes <= 0 then return nil end
+    local factor = math.floor(math.floor(total_bytes / 4) / CRE_CACHE_BASE)
+    if factor < CRE_FACTOR_MIN then return CRE_FACTOR_MIN end
+    if factor >= CRE_FACTOR_DEFAULT then return nil end
+    return factor
 end
 
 --- 首次打开 / KFX 转换前的确认阈值（字节）。
@@ -164,6 +203,31 @@ function Mem.promptInsufficient(opts)
         confirm.ok_callback = function() require("utils.restart").noFramework() end
     end
     require("ui.themes.widgets.confirm"):new(confirm):show()
+end
+
+local cre_cache_limited = false
+
+--- 第一次初始化 crengine 缓存前套上按物理内存算出的系数。
+--- 只包 CreDocument.cacheInit：用户设置优先；没设过的，本次调用临时写入再删掉，不落盘。
+function Mem.limitCreCache()
+    if cre_cache_limited then return end
+    cre_cache_limited = true
+    local settings = rawget(_G, "G_reader_settings")
+    if type(settings) ~= "table" or type(settings.has) ~= "function" then return end
+    local factor = Mem.creStorageFactor(Mem.totalBytes())
+    if not factor then return end
+    local CreDocument = require("document/credocument")
+    local orig = CreDocument.cacheInit
+    if type(orig) ~= "function" then return end
+    local Log = require("utils.log")
+    Log.info("book.mem cre cache factor", factor, "total=" .. tostring(Mem.mb(Mem.totalBytes())) .. "MB")
+    CreDocument.cacheInit = function(...)
+        if settings:has("cre_storage_size_factor") then return orig(...) end
+        settings:saveSetting("cre_storage_size_factor", factor)
+        local ok, err = pcall(orig, ...)
+        settings:delSetting("cre_storage_size_factor")
+        if not ok then error(err, 0) end
+    end
 end
 
 return Mem

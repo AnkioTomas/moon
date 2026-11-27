@@ -10,10 +10,10 @@ local Assert = require("support.assert")
 package.loaded["utils.mem"] = nil
 package.loaded["util"] = nil
 
-local free_bytes
+local free_bytes, total_bytes
 package.preload["util"] = function()
     return {
-        calcFreeMem = function() return free_bytes end,
+        calcFreeMem = function() return free_bytes, total_bytes end,
     }
 end
 
@@ -164,4 +164,45 @@ do
     package.loaded["ui.themes.widgets.confirm"] = nil
     package.preload["ui.themes.widgets.confirm"] = nil
     package.loaded["utils.restart"] = nil
+end
+
+-- crengine 缓存系数：上限 = 12.5MB × factor，按物理内存的 1/4 取，不高于 KOReader 默认 40
+local function mib(n) return n * MB end
+Assert.is_nil(Mem.creStorageFactor(nil))
+Assert.is_nil(Mem.creStorageFactor(0))
+Assert.eq(Mem.creStorageFactor(mib(64)), 2, "再小也给 2，避免缓存小到排版出错")
+Assert.eq(Mem.creStorageFactor(mib(256)), 5, "KPW2 256MB → 系数 5，上限约 62MB")
+Assert.eq(Mem.creStorageFactor(mib(512)), 10, "KPW5 512MB → 系数 10，上限约 125MB")
+Assert.is_nil(Mem.creStorageFactor(mib(2048)), "2GB 及以上保持 KOReader 默认 40")
+
+free_bytes = mib(40)
+total_bytes = mib(512)
+Assert.eq(Mem.availableBytes(), mib(40))
+Assert.eq(Mem.totalBytes(), mib(512))
+
+-- 没设过的系数只在 cacheInit 当次生效，调用后从设置里删掉；用户设过的不动
+do
+    local seen = {}
+    local settings = { data = {} }
+    function settings:has(key) return self.data[key] ~= nil end
+    function settings:saveSetting(key, value) self.data[key] = value return self end
+    function settings:delSetting(key) self.data[key] = nil return self end
+    function settings:readSetting(key) return self.data[key] end
+    G_reader_settings = settings
+    package.loaded["document/credocument"] = {
+        cacheInit = function()
+            seen[#seen + 1] = settings:readSetting("cre_storage_size_factor")
+        end,
+    }
+    Mem.limitCreCache()
+    local CreDocument = package.loaded["document/credocument"]
+    CreDocument.cacheInit()
+    Assert.eq(seen[1], 10)
+    Assert.is_nil(settings:readSetting("cre_storage_size_factor"), "不落盘")
+    settings:saveSetting("cre_storage_size_factor", 40)
+    CreDocument.cacheInit()
+    Assert.eq(seen[2], 40, "用户设过的系数优先")
+    Assert.eq(settings:readSetting("cre_storage_size_factor"), 40)
+    G_reader_settings = nil
+    package.loaded["document/credocument"] = nil
 end
