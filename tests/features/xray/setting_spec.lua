@@ -46,6 +46,9 @@ package.preload["features.xray.marks"] = function()
     return { invalidate = function() invalidated = invalidated + 1 end }
 end
 package.preload["apps/reader/readerui"] = function() return {} end
+package.preload["desktop.pages.setting.ai"] = function()
+    return { assistantOn = function() return true end, rows = function() return {} end }
+end
 
 local updates = 0
 local desktop = { updateView = function() updates = updates + 1 end }

@@ -156,10 +156,18 @@ function Setting.entries(desktop)
                     end)) do
                         mark_rows[#mark_rows + 1] = row
                     end
-                    return {
+                    local sections = {
                         { title = _("识别"), rows = rows },
                         { title = _("画线"), rows = mark_rows },
                     }
+                    -- 根上的「智能」跟着 AI 阅读助手走。助手停用后，接口设置留在这里。
+                    if not require("desktop.pages.setting.ai").assistantOn() then
+                        sections[#sections + 1] = {
+                            title = _("AI"),
+                            rows = require("desktop.pages.setting.ai"):rows(desktop),
+                        }
+                    end
+                    return sections
                 end,
             },
         },

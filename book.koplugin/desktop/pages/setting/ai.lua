@@ -15,6 +15,16 @@ local T = require("ffi/util").template
 ---@class BookSettingsAI
 local AI = {}
 
+--- AI 阅读助手的设置约定还在（功能开关里停用并重启后，加载器不再登记它）。
+--- 「智能」是这个助手的入口；助手不在，根页和阅读里的跳转都不出现。
+---@return boolean
+function AI.assistantOn()
+    for _idx, source in ipairs(require("utils.extension").list("setting.entries")) do
+        if source.name == "ai" then return true end
+    end
+    return false
+end
+
 --- 弹输入框编辑一项 AI 配置，保存后写入 ai 分区并重建桌面。
 ---@param desktop table 桌面实例
 ---@param key string ai 配置键名

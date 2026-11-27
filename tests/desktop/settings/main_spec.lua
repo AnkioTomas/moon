@@ -1,6 +1,6 @@
 ---@diagnostic disable: undefined-field, missing-fields, redundant-parameter, missing-parameter, inject-field, assign-type-mismatch, param-type-mismatch, cast-type-mismatch, return-type-mismatch, cast-local-type
 
---[[-- 设置根页：搜索 + 分组目录；点分组进叠层列条目。智能直接挂在根上。 --]]
+--[[-- 设置根页：搜索 + 分组目录；点分组进叠层列条目。智能直接挂在根上，右侧带条目数。 --]]
 
 local Assert = require("support.assert")
 
@@ -165,7 +165,15 @@ package.preload["desktop.pages.setting.language"] = function()
     }
 end
 package.preload["desktop.pages.setting.ai"] = function()
-    return { rows = function() return {} end }
+    return {
+        rows = function() return {} end,
+        assistantOn = function()
+            for _idx, source in ipairs(require("utils.extension").list("setting.entries")) do
+                if source.name == "ai" then return true end
+            end
+            return false
+        end,
+    }
 end
 package.preload["desktop.pages.setting.device"] = function()
     return {
@@ -244,6 +252,8 @@ local root_groups = {}
 for i = 4, #built_rows do root_groups[#root_groups + 1] = built_rows[i].title end
 Assert.eq(table.concat(root_groups, ","), "书库,外观,桌面,阅读,智能,系统,安全,维护")
 Assert.is_nil(built_rows[8].subtitle, "根上的智能不带副标题")
+Assert.eq(built_rows[8].status, "1", "根上的智能右侧显示条目数")
+Assert.is_true(built_rows[8].status_on)
 
 local function sectionTitles(page)
     local titles = {}
@@ -466,6 +476,32 @@ landing = false
 settings:onEvent("source_changed")
 Assert.eq(closed, 1, "换源关掉叠层")
 Assert.eq(settings.page, 1)
+
+-- 停用 AI 阅读助手：根页和阅读跳转都不再叫「智能」；接口设置落到 X-Ray。
+local removed = require("utils.extension").removeWhere("setting.entries", function(item)
+    return type(item) == "table" and item.name == "ai"
+end)
+Assert.is_true(removed >= 1)
+for i = #built_rows, 1, -1 do built_rows[i] = nil end
+for i = #section_titles, 1, -1 do section_titles[i] = nil end
+settings:updateView()
+local root_titles = {}
+for _idx, row in ipairs(built_rows) do root_titles[#root_titles + 1] = row.title end
+Assert.is_nil(table.concat(root_titles, ","):find("智能", 1, true))
+local reader_off = openRoot("阅读")
+local smart_off, xray_row = {}, nil
+for _idx, section in ipairs(reader_off.sections()) do
+    if section.title == "智能" then
+        for _i, build in ipairs(section.rows) do
+            local row = build(600)
+            smart_off[#smart_off + 1] = row.title
+            if row.title == "X-Ray" then xray_row = row end
+        end
+    end
+end
+Assert.eq(table.concat(smart_off, ","), "X-Ray,翻译")
+xray_row.callback()
+Assert.eq(sectionTitles(opened), "识别,画线,AI")
 
 _G.G_reader_settings = previous_settings
 

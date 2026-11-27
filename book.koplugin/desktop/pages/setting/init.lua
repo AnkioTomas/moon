@@ -101,7 +101,7 @@ local function coreEntries(desktop)
     local plugin = desktop.plugin
     local network = HttpSetting.entry(desktop)
     network.group, network.order = "system", 10
-    return {
+    local entries = {
         {
             group = "library", order = 1, id = "moon_sync", icon = "cloud_sync",
             title = _("月读同步（WebDAV）"),
@@ -276,17 +276,20 @@ local function coreEntries(desktop)
                 sections = function() return DeviceSettings.infoSections(desktop) end,
             },
         },
-        {
+        network,
+    }
+    -- 智能是 AI 阅读助手的入口。助手停用后不挂页，阅读里也不留跳转。
+    if AISettings.assistantOn() then
+        entries[#entries + 1] = {
             group = "ai", order = 30, id = "ai", icon = "psychology", title = _("智能"),
             page = {
                 title = _("智能"),
                 docs = "/manual/reader/smart/ai",
                 sections = function() return {{ title = _("AI"), rows = AISettings:rows(desktop) }} end,
             },
-        },
-        network,
-        {
-            -- 智能在根目录。这里只留跳过去的入口，返回仍回到阅读。
+        }
+        entries[#entries + 1] = {
+            -- 阅读分组里只留跳转，返回仍回到阅读。
             group = "reader", order = 55, id = "ai_link",
             row = function(iw)
                 return Row.widget({
@@ -300,10 +303,11 @@ local function coreEntries(desktop)
                     end,
                 })
             end,
-        },
-        { group = "maintenance", order = 80, id = "refresh_diagnostics", row = Maintenance:refreshDiagRow(desktop) },
-        { group = "maintenance", order = 90, id = "close_desktop", row = Maintenance:closeRow(desktop) },
-    }
+        }
+    end
+    entries[#entries + 1] = { group = "maintenance", order = 80, id = "refresh_diagnostics", row = Maintenance:refreshDiagRow(desktop) }
+    entries[#entries + 1] = { group = "maintenance", order = 90, id = "close_desktop", row = Maintenance:closeRow(desktop) }
+    return entries
 end
 
 --- 条目导航行。push=true 时叠在当前叠层上（组内进子页，返回回到组）。
@@ -615,9 +619,16 @@ function Settings:updateView()
                 device_rows[#device_rows + 1] = entry.row or navRow(desktop, entry, false)
             end
         elseif group.id == "ai" then
-            -- 只有智能这一页，直接挂在根上，不再套一层分组目录。
+            -- 只有一页时直接打开，右侧仍显示条目数，和其它分组同一套数量。
             local entry = group.entries[1]
-            if entry then group_rows[#group_rows + 1] = entry.row or navRow(desktop, entry, false) end
+            if #group.entries == 1 and entry and entry.page then
+                entry.status = string.format("%d", #group.entries)
+                entry.status_on = true
+                group_rows[#group_rows + 1] = navRow(desktop, entry, false)
+            else
+                local row = groupRow(desktop, group)
+                if row then group_rows[#group_rows + 1] = row end
+            end
         else
             local row = groupRow(desktop, group)
             if row then group_rows[#group_rows + 1] = row end
