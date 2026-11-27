@@ -47,6 +47,7 @@ Ext.POINTS = {
     ["note.item_actions"] = "书摘/笔记列表条目追加动作 { text, icon?, run(entry, ctx) }；entry 含 text / note / chapter，ctx 含 ui / snapshot",
     ["note.markup_classes"] = "页内插入的译文类元素 class（字符串）；划线端点落在其中时回退到原文",
     ["sync.book_data"] = "月读同步的书籍附属数据 { id, merge?: boolean, books() -> { source_id, stable_id }[], export(source_id, stable_id) -> data|nil, updated_at, import(source_id, stable_id, data) -> boolean }；data 只用数组（编码稳定，按串比对），export 没数据返回 nil；merge 为真时 import 是并集合并（不会丢数据），否则整本替换、两边都改时后写的赢",
+    ["sync.document"] = "月读同步的一份 JSON 文档 { id, export(): table, merge(local, remote): table, import(doc): boolean }；id 只含字母数字、下划线和横线，文件是 .moon-koreader/reading/<id>.json。文档只用数组（编码稳定）。merge 得到两边合并后的文档，import 把它写进本地；和远端字节相同就不上传",
     ["note.derived_dirs"] = "衍生版子目录名（相对书的工作目录的一段路径）；收划线时只读这些目录的 meta.json",
     ["note.chapter_variants"] = "fn(identity, origin) -> string[]  同一章的衍生文件路径（如双语章）；调用方自己判断文件在不在，不扫目录",
 }

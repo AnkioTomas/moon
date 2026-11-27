@@ -5,7 +5,8 @@ WebDAV 连接在 settings/moon_sync.lua（`get("moon_sync")`，首次打开自�
 这一轮用这些字段自己建 http.webdav。阅读数据没有开关：书源自己有接口的走它的云，没有的由这一轮兜底。
 
 书架流水线不改。地址非空时本地源照旧跑静读天下（它会合并本机目录）；
-本模块在那之外传设置、字体、每本书的自定义设置、书籍附属数据（moon_sync.extra），以及书源自己交过来的阅读数据。
+本模块在那之外传设置、字体、每本书的自定义设置、书籍附属数据（moon_sync.extra），
+挂点 sync.document 交来的一份文档（订阅清单走这里），以及书源自己交过来的阅读数据。
 
 @module koplugin.book.moon_sync
 --]]

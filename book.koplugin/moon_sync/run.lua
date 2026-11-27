@@ -970,6 +970,53 @@ function Run.extra(handle, dav, root, cb)
     return job
 end
 
+--- 挂点 sync.document 的一份文档。和远端字节相同就不传。
+---@param handle table
+---@param dav WebdavClient
+---@param root string
+---@param cb fun(ok: boolean|nil, err: string|nil)
+---@return table|nil
+function Run.documents(handle, dav, root, cb)
+    local providers = {}
+    for _idx, provider in ipairs(require("utils.extension").list("sync.document")) do
+        local id = provider.id
+        if type(id) == "string" and id:match("^[%w_%-]+$")
+            and type(provider.export) == "function"
+            and type(provider.merge) == "function"
+            and type(provider.import) == "function" then
+            providers[#providers + 1] = provider
+        end
+    end
+    if #providers == 0 then
+        cb(true)
+        return nil
+    end
+    return series(providers, function(provider, next_item)
+        local remote = root .. "/" .. ROOT_NAME .. "/reading/" .. provider.id .. ".json"
+        return getText(dav, remote, function(body, err, code)
+            if handle.cancelled then return end
+            if body == nil and code ~= 404 then return next_item(err) end
+            if body == "" then return next_item(_("阅读数据损坏")) end
+            local remote_doc
+            if type(body) == "string" then
+                local ok, decoded = pcall(require("json").decode, body)
+                if not ok or type(decoded) ~= "table" then return next_item(_("阅读数据损坏")) end
+                remote_doc = decoded
+            end
+            local merged = provider.merge(provider.export() or {}, remote_doc or {})
+            if type(merged) ~= "table" or provider.import(merged) == false then
+                return next_item(_("阅读数据损坏"))
+            end
+            local payload = require("json").encode(merged)
+            if body == payload then return next_item() end
+            handle.job = putText(dav, remote, payload, function(ok, put_err)
+                if not ok then return next_item(put_err) end
+                next_item()
+            end)
+        end)
+    end, cb)
+end
+
 ---@param handle table
 ---@param dav WebdavClient
 ---@param root string
@@ -1016,8 +1063,16 @@ function Run.reading(handle, dav, root, report, cb)
             end)
         end)
     end
+    local function afterDocuments()
+        if handle.cancelled then return end
+        handle.job = Run.documents(handle, dav, root, function(docs_ok, docs_err)
+            if handle.cancelled then return end
+            if not docs_ok then return cb(nil, docs_err) end
+            startSdr()
+        end)
+    end
     report(_("正在同步阅读数据"), 3, 4)
-    if #jobs == 0 then return startSdr() end
+    if #jobs == 0 then return afterDocuments() end
     handle.job = series(jobs, function(job, next_item)
         local remote = root .. "/" .. ROOT_NAME .. "/" .. job.rel
         return getText(dav, remote, function(body, err, code)
@@ -1042,7 +1097,7 @@ function Run.reading(handle, dav, root, report, cb)
     end, function(ok, err)
         if not ok then return cb(nil, err) end
         if handle.cancelled then return end
-        startSdr()
+        afterDocuments()
     end)
 end
 

@@ -2594,7 +2594,7 @@ return {
     ["「%1」是 WOFF 格式字体，兼容性差且内存占用较高，建议改用 TTF 字体。仍要使用？"] = "“%1” is a WOFF font with poor compatibility and higher memory usage. A TTF font is recommended. Use it anyway?",
     ["仍要使用"] = "Use anyway",
     ["月读同步（WebDAV）"] = "Moon sync (WebDAV)",
-    ["同步本地书、账号、书籍设置，以及书源自己不同步的阅读数据"] = "Sync local books, accounts, per-book settings, and reading data a source does not sync itself",
+    ["同步本地书、账号、书籍设置、订阅，以及书源自己不同步的阅读数据"] = "Sync local books, accounts, per-book settings, subscriptions, and reading data a source does not sync itself",
     ["WebDAV 用户名"] = "WebDAV username",
     ["WebDAV 密码"] = "WebDAV password",
     ["WebDAV 目录"] = "WebDAV folder",

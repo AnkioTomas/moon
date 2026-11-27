@@ -692,5 +692,7 @@ Ext.add("web.routes", {
 })
 -- 隐藏的订阅书源（阅读订阅文章用）：能 resolve，不进源清单。
 require("source.registry").registerHidden("subscribe", function() return require("features.subscribe.source") end)
+-- 订阅清单进月读同步（sync.document）。正文缓存不进。
+require("features.subscribe.sync")
 
 return Subscribe

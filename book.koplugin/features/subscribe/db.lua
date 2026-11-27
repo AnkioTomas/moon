@@ -79,6 +79,34 @@ CREATE TABLE IF NOT EXISTS sub_scopes (
 ]]) ~= nil
 end)
 
+--- 用户改订阅的时间（标题、分组、排序）。刷新游标不碰它，免得一次刷新把别的设备上的改动盖掉。
+DB.schema("sub_feed_changed_at", function()
+    local columns, nrows = DB.query("PRAGMA table_info(sub_feeds);")
+    for i = 1, columns and nrows or 0 do
+        if columns[2][i] == "changed_at" then return true end
+    end
+    return DB.exec("ALTER TABLE sub_feeds ADD COLUMN changed_at INTEGER NOT NULL DEFAULT 0;") ~= nil
+end)
+
+--- 收藏改动时间。已读只增不减，不用它；取消收藏要靠它盖过另一台更早的收藏。
+DB.schema("sub_item_star_at", function()
+    local columns, nrows = DB.query("PRAGMA table_info(sub_items);")
+    for i = 1, columns and nrows or 0 do
+        if columns[2][i] == "star_at" then return true end
+    end
+    return DB.exec("ALTER TABLE sub_items ADD COLUMN star_at INTEGER NOT NULL DEFAULT 0;") ~= nil
+end)
+
+--- 删掉的订阅。没有墓碑的话，另一台还留着的源会在同步时加回来。
+DB.schema("sub_removed", function()
+    return DB.exec([[
+CREATE TABLE IF NOT EXISTS sub_removed (
+  kind TEXT NOT NULL, url TEXT NOT NULL, at INTEGER NOT NULL,
+  PRIMARY KEY (kind, url)
+);
+]]) ~= nil
+end)
+
 --- 同一篇换了 guid 也只留一条：公众号同一篇文章在不同请求下回两种 reviewId（短 id / WR1A… 长 id），
 --- RSS 也可能改 guid / 链接。同源内「标题 + 时间」（时间有效时）唯一。建索引前先清掉历史重复：
 --- 每组留已读的那条（其正文缓存按 guid 存，也就跟着保留），都没读留最早入库的。
@@ -140,11 +168,14 @@ end
 ---@param feed { kind: string, url: string, title: string, grp: string|nil, filter: string|nil }
 ---@return integer|nil id
 function SubDB.add(feed)
-    if not DB.exec("INSERT OR IGNORE INTO sub_feeds (kind, url, title, grp, filter) VALUES (?,?,?,?,?);",
-        feed.kind, feed.url, feed.title, feed.grp or "", feed.filter or "") then
+    if not DB.exec("INSERT OR IGNORE INTO sub_feeds (kind, url, title, grp, filter, changed_at) VALUES (?,?,?,?,?,?);",
+        feed.kind, feed.url, feed.title, feed.grp or "", feed.filter or "", os.time()) then
         return nil
     end
-    if tonumber(DB.rowexec("SELECT changes();")) == 0 then return nil end
+    local inserted = tonumber(DB.rowexec("SELECT changes();")) == 1
+    -- 用户重新订阅：旧的删除记录作废。插入被忽略（本来就有）时同样清掉，免得墓碑盖过现存的源。
+    DB.exec("DELETE FROM sub_removed WHERE kind=? AND url=?;", feed.kind, feed.url)
+    if not inserted then return nil end
     return tonumber(DB.rowexec("SELECT id FROM sub_feeds WHERE kind=? AND url=?;", feed.kind, feed.url))
 end
 
@@ -166,26 +197,32 @@ end
 ---@param id integer
 ---@param fields table
 function SubDB.update(id, fields)
-    for _idx, key in ipairs({ "title", "grp", "cursor", "updated_at", "sort", "error" }) do
+    local touch = false
+    for _idx, key in ipairs({ "title", "grp", "cursor", "updated_at", "sort", "error", "filter" }) do
         if fields[key] ~= nil then
             DB.exec("UPDATE sub_feeds SET " .. key .. "=? WHERE id=?;", fields[key], id)
+            if key == "title" or key == "grp" or key == "sort" or key == "filter" then touch = true end
         end
     end
+    if touch then DB.exec("UPDATE sub_feeds SET changed_at=? WHERE id=?;", os.time(), id) end
 end
 
 --- 整组改名（new_name 为空串即解散到未分组；改成已有组名即并入该组）。
 ---@param old string
 ---@param new_name string
 function SubDB.renameGroup(old, new_name)
-    DB.exec("UPDATE sub_feeds SET grp=? WHERE grp=?;", new_name, old)
+    DB.exec("UPDATE sub_feeds SET grp=?, changed_at=? WHERE grp=?;", new_name, os.time(), old)
 end
 
 --- 按给定顺序把这些订阅放进分组并重排 sort（拖拽排序 / 移组）。
 ---@param grp string
 ---@param ids integer[]
 function SubDB.order(grp, ids)
+    local at = os.time()
     DB.transaction(function()
-        for i, id in ipairs(ids) do DB.exec("UPDATE sub_feeds SET grp=?, sort=? WHERE id=?;", grp, i, id) end
+        for i, id in ipairs(ids) do
+            DB.exec("UPDATE sub_feeds SET grp=?, sort=?, changed_at=? WHERE id=?;", grp, i, at, id)
+        end
         return true
     end)
 end
@@ -197,7 +234,13 @@ function SubDB.remove(id)
     local result, n = DB.query("SELECT id FROM sub_scopes WHERE feed=?;", id)
     local scopes = {}
     for i = 1, n do scopes[i] = result[1][i] end
+    local kind, url = DB.rowexec("SELECT kind, url FROM sub_feeds WHERE id=?;", id)
     DB.transaction(function()
+        if kind and url then
+            DB.exec([[INSERT INTO sub_removed (kind, url, at) VALUES (?,?,?)
+              ON CONFLICT(kind, url) DO UPDATE SET at=MAX(sub_removed.at, excluded.at);]],
+                kind, url, os.time())
+        end
         DB.exec("DELETE FROM sub_items WHERE feed_id=?;", id)
         DB.exec("DELETE FROM sub_scopes WHERE feed=?;", id)
         DB.exec("DELETE FROM sub_feeds WHERE id=?;", id)
@@ -336,7 +379,8 @@ end
 ---@param guid string
 ---@param starred boolean
 function SubDB.setStarred(feed_id, guid, starred)
-    DB.exec("UPDATE sub_items SET starred=? WHERE feed_id=? AND guid=?;", starred and 1 or 0, feed_id, guid)
+    DB.exec("UPDATE sub_items SET starred=?, star_at=? WHERE feed_id=? AND guid=?;",
+        starred and 1 or 0, os.time(), feed_id, guid)
 end
 
 --- 条目自带正文（RSS content / description）。
@@ -361,6 +405,174 @@ function SubDB.markRead(feed_id, guid, read_at)
     else
         DB.exec("UPDATE sub_items SET read=1 WHERE feed_id=? AND guid=?;", feed_id, guid)
     end
+end
+
+--- 按 kind + url 找源。没有返回 nil。
+---@param kind string
+---@param url string
+---@return { id: integer, changed_at: integer, read_at: integer }|nil
+local function feedIdentity(kind, url)
+    local id, changed_at, read_at = DB.rowexec(
+        "SELECT id, changed_at, read_at FROM sub_feeds WHERE kind=? AND url=?;", kind, url)
+    if id == nil then return nil end
+    return { id = tonumber(id), changed_at = tonumber(changed_at) or 0, read_at = tonumber(read_at) or 0 }
+end
+
+--- 月读同步导出的订阅清单（不含正文摘要和文章缓存）。刷新游标、错误信息留在本机。
+---@return { feeds: table[], removed: { kind: string, url: string, at: integer }[] }
+function SubDB.syncSnapshot()
+    local result, n = DB.query(
+        "SELECT id, kind, url, title, grp, filter, sort, read_at, changed_at FROM sub_feeds;")
+    local feeds, by = {}, {}
+    for i = 1, n or 0 do
+        local feed = {
+            id = tonumber(result[1][i]),
+            kind = result[2][i], url = result[3][i], title = result[4][i] or "",
+            grp = result[5][i] or "", filter = result[6][i] or "",
+            sort = tonumber(result[7][i]) or 0, read_at = tonumber(result[8][i]) or 0,
+            changed_at = tonumber(result[9][i]) or 0, items = {},
+        }
+        feeds[#feeds + 1] = feed
+        by[feed.id] = feed
+    end
+    local items, ni = DB.query([[SELECT feed_id, guid, title, link, time, seq, read, read_at, starred, star_at
+        FROM sub_items;]])
+    for i = 1, ni or 0 do
+        local feed = by[tonumber(items[1][i])]
+        if feed then
+            feed.items[#feed.items + 1] = {
+                guid = items[2][i], title = items[3][i] or "", link = items[4][i] or "",
+                time = tonumber(items[5][i]) or 0, seq = tonumber(items[6][i]) or 0,
+                read = tonumber(items[7][i]) == 1, read_at = tonumber(items[8][i]) or 0,
+                starred = tonumber(items[9][i]) == 1, star_at = tonumber(items[10][i]) or 0,
+            }
+        end
+    end
+    local removed, nr = DB.query("SELECT kind, url, at FROM sub_removed;")
+    local tombs = {}
+    for i = 1, nr or 0 do
+        tombs[#tombs + 1] = { kind = removed[1][i], url = removed[2][i], at = tonumber(removed[3][i]) or 0 }
+    end
+    return { feeds = feeds, removed = tombs }
+end
+
+--- 墓碑比本地修订新（或一样新）的源。调用方负责删掉它们。
+---@param removed { kind: string, url: string, at: integer }[]
+---@return table[]
+function SubDB.feedsBeatenBy(removed)
+    local out = {}
+    for _idx, tomb in ipairs(removed or {}) do
+        if type(tomb.kind) == "string" and type(tomb.url) == "string" then
+            local at = tonumber(tomb.at) or 0
+            local row = at > 0 and feedIdentity(tomb.kind, tomb.url)
+            if row and row.changed_at <= at then
+                local feed = SubDB.feed(row.id)
+                if feed then out[#out + 1] = feed end
+            end
+        end
+    end
+    return out
+end
+
+--- 把一条目的已读 / 收藏并进来。不改摘要：正文不进同步文档，本机缓存留着。
+---@param feed_id integer
+---@param item table
+local function applyItem(feed_id, item)
+    if type(item.guid) ~= "string" or item.guid == "" then return end
+    local result, n = DB.query([[SELECT read, read_at, starred, star_at, title, link, time, seq
+        FROM sub_items WHERE feed_id=? AND guid=?;]], feed_id, item.guid)
+    local read = item.read and 1 or 0
+    local read_at = tonumber(item.read_at) or 0
+    local starred = item.starred and 1 or 0
+    local star_at = tonumber(item.star_at) or 0
+    if not n or n < 1 then
+        DB.exec([[INSERT OR IGNORE INTO sub_items
+            (feed_id, guid, title, link, time, seq, summary, read, read_at, starred, star_at)
+            VALUES (?,?,?,?,?,?,NULL,?,?,?,?);]],
+            feed_id, item.guid, item.title or "", item.link or "", tonumber(item.time) or 0, tonumber(item.seq) or 0,
+            read, read_at, starred, star_at)
+        return
+    end
+    read = (tonumber(result[1][1]) == 1 or read == 1) and 1 or 0
+    read_at = math.max(tonumber(result[2][1]) or 0, read_at)
+    local local_star_at = tonumber(result[4][1]) or 0
+    if star_at < local_star_at or (star_at == local_star_at and tonumber(result[3][1]) == 1) then
+        starred, star_at = tonumber(result[3][1]) == 1 and 1 or 0, local_star_at
+    end
+    local title = (item.title and item.title ~= "") and item.title or result[5][1]
+    local link = (item.link and item.link ~= "") and item.link or result[6][1]
+    local time = tonumber(result[7][1]) or 0
+    if time == 0 then time = tonumber(item.time) or 0 end
+    local seq = math.max(tonumber(result[8][1]) or 0, tonumber(item.seq) or 0)
+    DB.exec([[UPDATE sub_items SET title=?, link=?, time=?, seq=?, read=?, read_at=?, starred=?, star_at=?
+        WHERE feed_id=? AND guid=?;]],
+        title or "", link or "", time, seq, read, read_at, starred, star_at, feed_id, item.guid)
+end
+
+--- 写入合并后的订阅清单。墓碑不比现存修订新时不删源；本地更新的标题不被旧文档盖掉。
+---@param doc { feeds: table[], removed: table[] }
+---@return boolean
+function SubDB.applySync(doc)
+    return DB.transaction(function()
+        for _idx, tomb in ipairs(doc.removed or {}) do
+            local at = tonumber(tomb.at) or 0
+            if at > 0 and type(tomb.kind) == "string" and tomb.kind ~= ""
+                and type(tomb.url) == "string" and tomb.url ~= "" then
+                DB.exec([[INSERT INTO sub_removed (kind, url, at) VALUES (?,?,?)
+                  ON CONFLICT(kind, url) DO UPDATE SET at=MAX(sub_removed.at, excluded.at);]],
+                    tomb.kind, tomb.url, at)
+            end
+        end
+        for _idx, feed in ipairs(doc.feeds or {}) do
+            if type(feed.kind) == "string" and feed.kind ~= "" and type(feed.url) == "string" and feed.url ~= "" then
+                local changed = tonumber(feed.changed_at) or 0
+                local tomb_at = tonumber(DB.rowexec(
+                    "SELECT at FROM sub_removed WHERE kind=? AND url=?;", feed.kind, feed.url))
+                local cur = feedIdentity(feed.kind, feed.url)
+                local beaten = tomb_at and tomb_at >= changed and (not cur or cur.changed_at <= tomb_at)
+                if not beaten then
+                    local id = cur and cur.id
+                    local created = false
+                    if not id then
+                        id = SubDB.add({
+                            kind = feed.kind, url = feed.url, title = feed.title or "",
+                            grp = feed.grp or "", filter = feed.filter or "",
+                        })
+                        created = id ~= nil
+                        if not id then
+                            local again = feedIdentity(feed.kind, feed.url)
+                            id = again and again.id
+                        end
+                    end
+                    if id then
+                        local read_at = tonumber(feed.read_at) or 0
+                        if created then
+                            DB.exec([[UPDATE sub_feeds SET title=?, grp=?, filter=?, sort=?, read_at=?, changed_at=?
+                                WHERE id=?;]],
+                                feed.title or "", feed.grp or "", feed.filter or "", tonumber(feed.sort) or 0,
+                                read_at, changed, id)
+                        else
+                            cur = feedIdentity(feed.kind, feed.url)
+                            if cur and changed > cur.changed_at then
+                                DB.exec([[UPDATE sub_feeds SET title=?, grp=?, filter=?, sort=?, changed_at=?
+                                    WHERE id=?;]],
+                                    feed.title or "", feed.grp or "", feed.filter or "", tonumber(feed.sort) or 0,
+                                    changed, id)
+                            end
+                            if cur and read_at > cur.read_at then
+                                DB.exec("UPDATE sub_feeds SET read_at=? WHERE id=?;", read_at, id)
+                            end
+                        end
+                        local kept = feedIdentity(feed.kind, feed.url)
+                        DB.exec("DELETE FROM sub_removed WHERE kind=? AND url=? AND at<=?;",
+                            feed.kind, feed.url, math.max(changed, kept and kept.changed_at or 0))
+                        for _item_idx, item in ipairs(feed.items or {}) do applyItem(id, item) end
+                    end
+                end
+            end
+        end
+        return true
+    end) == true
 end
 
 return SubDB
