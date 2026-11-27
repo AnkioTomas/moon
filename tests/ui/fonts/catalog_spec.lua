@@ -96,6 +96,14 @@ package.preload["http.cache"] = function()
                     cb(row.value)
                     return { cancel = function() end }
                 end
+                if opts.swr and row then
+                    cb(row.value)
+                    return load(function(value, err)
+                        if value ~= nil and err == nil then
+                            cache_store[key] = { value = value, expires = os.time() + ttl }
+                        end
+                    end) or { cancel = function() end }
+                end
             end
             return load(function(value, err)
                 if value ~= nil and err == nil then
@@ -213,6 +221,29 @@ Catalog.listOnlineAsync(function(result, e) online_items, online_err = result, e
 Assert.is_nil(online_items)
 Assert.eq(online_err, "字体列表解析失败")
 Assert.is_nil(cache_store[list_key])
+
+-- stale-while-revalidate：过期旧缓存先显示，后台刷新缓存供下次（慢接口不干等）
+do
+    cache_store[list_key] = {
+        value = { { id = "old", name = "旧字体", kind = "online", url = "https://x/old" } },
+        expires = os.time() - 1,
+    }
+    local before = #gets
+    custom_get = function(_url, _opts, cb)
+        cb('{"data":[{"uid":"new","name":"新字体","filename":"New.ttf","category":"song","download_url":"/api/v1/store/fonts/new/download"}],"count":1}')
+        return { cancel = function() end }
+    end
+    local served, served_err
+    Catalog.listOnlineAsync(function(result, e) served, served_err = result, e end)
+    Assert.eq(served[1].id, "old", "SWR 先回落过期旧缓存")
+    Assert.is_nil(served_err)
+    Assert.is_true(#gets > before, "SWR 后台触发刷新请求")
+    Assert.eq(cache_store[list_key].value[1].id, "new", "后台刷新写回新缓存")
+    custom_get = nil
+    local again
+    Catalog.listOnlineAsync(function(result) again = result end)
+    Assert.eq(again[1].id, "new", "下次打开命中刷新后的新缓存")
+end
 
 -- 3. downloadToUserAsync：直接下载到 $DATA/fonts/<filename>，拦截假 200 HTML，校验 SFNT + ensureSpace 后原子落盘
 do

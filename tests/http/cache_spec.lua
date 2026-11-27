@@ -8,16 +8,26 @@ local Assert = require("support.assert")
 local Stubs = require("support.stubs")
 
 local rows = {}
+local expires_of = {}
 -- http 表的内存替身：http.cache 只用到按 key 读、upsert、按 key 删。
+-- 带 expires 语义：未过期读（SQL 含 "expires > "）会把已到期的行当未命中，供 SWR 测试。
 package.preload["utils.db"] = function()
     return {
         schema = function() end,
-        rowexec = function(_sql, key) return rows[key] end,
-        exec = function(sql, key, value)
+        rowexec = function(sql, key, now)
+            if rows[key] == nil then return nil end
+            if sql:find("expires > ", 1, true) and expires_of[key] ~= nil and expires_of[key] <= now then
+                return nil
+            end
+            return rows[key]
+        end,
+        exec = function(sql, key, value, expires)
             if sql:find("INSERT INTO http", 1, true) then
                 rows[key] = value
+                expires_of[key] = expires
             elseif sql:find("WHERE key=?", 1, true) then
                 rows[key] = nil
+                expires_of[key] = nil
             end
             return true
         end,
@@ -170,4 +180,36 @@ do
     Stubs.flush()
     Assert.eq(loads, 0)
     Assert.is_false(called)
+end
+
+-- SWR：命中过期旧缓存先回落旧值（只回调一次），后台刷新写回新值
+do
+    rows.swr = "stale"
+    expires_of.swr = os.time() - 1
+    local loads, got, got_count = 0, nil, 0
+    Cache.fetch("swr", 60, function(done)
+        loads = loads + 1
+        done("fresh")
+        return { cancel = function() end }
+    end, function(value) got, got_count = value, got_count + 1 end, { swr = true })
+    Stubs.flush()
+    Assert.eq(got, "stale", "SWR 立即回落过期旧缓存")
+    Assert.eq(got_count, 1, "SWR 只回调一次（后台刷新不再回调）")
+    Assert.eq(loads, 1, "SWR 后台触发一次刷新")
+    Assert.eq(rows.swr, "fresh", "后台刷新写回新值")
+    Assert.is_true(expires_of.swr > os.time(), "刷新续了 TTL")
+end
+
+-- SWR 无旧缓存（首次）：退化为普通 load，正常回调新值
+do
+    local loads, got = 0, nil
+    Cache.fetch("swr_cold", 60, function(done)
+        loads = loads + 1
+        done("fresh")
+        return { cancel = function() end }
+    end, function(value) got = value end, { swr = true })
+    Stubs.flush()
+    Assert.eq(got, "fresh")
+    Assert.eq(loads, 1)
+    Assert.eq(rows.swr_cold, "fresh")
 end

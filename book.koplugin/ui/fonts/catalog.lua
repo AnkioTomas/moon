@@ -2,7 +2,7 @@
 字体目录：本地字体扫描（用户 / 本地 / 系统）与在线字体（moon-store.ankio.net）分类浏览下载。
 
 - `listLocalAsync(cb)`：只扫描本地字体（用户 = $DATA/fonts 根目录，本地 = 子目录，系统 = FontList 其余路径），零联网。
-- `listOnlineAsync(cb, opts)`：从 moon-store 拉取在线字体目录（含分类与名称预览图），经 http.Cache 持久化 24 小时，失败回落旧缓存。
+- `listOnlineAsync(cb, opts)`：从 moon-store 拉取在线字体目录（含分类与名称预览图），经 http.Cache 持久化 24 小时；非强制刷新时用 stale-while-revalidate（过期旧缓存先显示、后台刷新），失败回落旧缓存。
 - `downloadToUserAsync(item, on_progress, cb)`：直接把在线 TTF 下载到 `$DATA/fonts/<filename>`（先落 `.dl`，子进程校验 SFNT 魔数并按需补齐空格后原子改名）。
 
 @module koplugin.book.ui.fonts.catalog
@@ -314,8 +314,9 @@ end
 ---@param opts { force?: boolean }|nil
 ---@return { cancel: fun() }
 function Catalog.listOnlineAsync(cb, opts)
+    local force = opts and opts.force == true
     local cache_key = Cache.key("GET", Catalog.LIST_URL)
-    if opts and opts.force then Cache.forget(cache_key) end
+    if force then Cache.forget(cache_key) end
     return Cache.fetch(cache_key, Catalog.LIST_TTL, requestAllPages, function(value, err)
         local items = parseCachedList(value)
         if items then return cb(items, nil) end
@@ -324,7 +325,7 @@ function Catalog.listOnlineAsync(cb, opts)
             return cb(nil, _("字体列表解析失败"))
         end
         cb(nil, err or _("获取字体列表失败"))
-    end, { stale_on_error = true })
+    end, { stale_on_error = true, swr = not force })
 end
 
 --- 校验下载下来的字体文件魔数、按需补齐空格字形，并原子移动到 dest；返回失败原因（nil 为成功）。

@@ -103,11 +103,13 @@ end
 --- 先读缓存，未命中再 load；load 回调 value 非 nil 且无 err 才写入。
 --- key 为 nil 表示不走缓存，直接 load。读缓存推迟一拍，回调永远异步。
 --- opts.stale_on_error：load 失败时若磁盘上还有过期条目，回落该旧值，不把错误传给调用方。
+--- opts.swr：stale-while-revalidate——命中过期旧缓存时立即回落旧值（只回调一次），
+---   同时后台 load 刷新缓存供下次使用；用于慢接口避免过期那次干等（如在线字体列表）。
 ---@param key string|nil
 ---@param ttl number 存活秒数
 ---@param load fun(done: fun(value: any, err: any, ...)): { cancel: fun() }|nil
 ---@param cb fun(value: any, err: any, ...)
----@param opts { stale_on_error: boolean|nil }|nil
+---@param opts { stale_on_error: boolean|nil, swr: boolean|nil }|nil
 ---@return { cancel: fun() }
 function Cache.fetch(key, ttl, load, cb, opts)
     opts = opts or {}
@@ -123,6 +125,18 @@ function Cache.fetch(key, ttl, load, cb, opts)
         if hit ~= nil then
             cb(hit)
             return
+        end
+        if opts.swr then
+            local stale = read(key, true)
+            if stale ~= nil then
+                cb(stale)
+                job = load(function(value, err)
+                    if not cancelled and value ~= nil and err == nil then
+                        write(key, value, ttl)
+                    end
+                end)
+                return
+            end
         end
         job = load(function(value, err, ...)
             if value ~= nil and err == nil then
