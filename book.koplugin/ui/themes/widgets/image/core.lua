@@ -319,16 +319,18 @@ end
 
 --- 服务端生成的占位封面是 SVG（书名放在 foreignObject 里），NanoSVG 不画 foreignObject，
 --- 渲染出来只有底色、边框和作者。这类文件不算封面，交给 fallback 画本地文字封面。
+--- 占位图会嵌字体，体积可以超过 16KB；只卡 16KB 会漏掉，锁屏上就剩一块底色加底部一条。
 ---@param path string
 ---@return boolean
 local function blankSvg(path)
     local size = lfs.attributes(path, "size")
-    if not size or size > 16 * 1024 then return false end
+    if not size or size > 256 * 1024 then return false end
     local f = io.open(path, "rb")
     if not f then return false end
     local head = f:read("*a")
     f:close()
-    return head:find("<svg", 1, true) ~= nil and head:find("<foreignObject", 1, true) ~= nil
+    if not head:find("<svg", 1, true) then return false end
+    return head:lower():find("<foreignobject", 1, true) ~= nil
 end
 
 --- 通用图片框：固定尺寸占位；文件就绪后交给 ImageWidget（和封面浏览器一样）。
