@@ -215,7 +215,12 @@ local function itemInUse(desktop, kind, key)
     end
     if kind == "rare" then return require("features.rare.catalog").enabled(key) end
     local updater = require("features.storage.usage").UPDATE_ARCHIVES[key]
-    if updater then return require(updater):busy() end
+    if updater then
+        -- 更新器在独立插件里。插件没装时模块不存在，这个残留包没有人在下，可以删。
+        local ok, mod = pcall(require, updater)
+        if ok and type(mod) == "table" and type(mod.busy) == "function" then return mod:busy() end
+        return false
+    end
     return require("features.ime.download").downloading() == true
 end
 

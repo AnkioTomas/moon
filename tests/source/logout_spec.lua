@@ -135,15 +135,14 @@ Assert.eq(reloads, 0)
 do
     local configs = {
         moon = { base_url = "https://old.test", token = "old-token" },
-        bookorbit = { server_url = "https://old.test", username = "old", userkey = "key" },
     }
     local saved = 0
     package.loaded["utils.settings"] = {
         getSource = function(id) return configs[id] end,
         saveSource = function(id, cfg) configs[id] = cfg; saved = saved + 1 end,
     }
-    for _idx, id in ipairs({ "moon", "bookorbit" }) do
-        local key = id == "moon" and "base_url" or "server_url"
+    for _idx, id in ipairs({ "moon" }) do
+        local key = "base_url"
         local Setting = require("source." .. id .. ".setting")
         Setting.rows()[1](300).callback()
         Themed.last("input").callback("https://new.test")

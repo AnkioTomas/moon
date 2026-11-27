@@ -17,7 +17,7 @@ package.preload["utils.settings"] = function()
 end
 
 -- 内置源只要 meta / new，别拉真实实现。
-local BUILTIN = { "local", "moon", "copymanga", "legado", "iread", "kavita", "bookorbit", "18ta" }
+local BUILTIN = { "local", "moon" }
 for _idx, id in ipairs(BUILTIN) do
     package.loaded["source." .. id] = {
         meta = function() return { id = id, name = id, type = "book" } end,

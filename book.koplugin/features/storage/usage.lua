@@ -22,7 +22,7 @@ local Usage = {}
 --- 更新包暂存文件名（utils.plugin_update 的 target.archive）→ 负责它的更新器模块。
 Usage.UPDATE_ARCHIVES = {
     ["plugin-update.zip"] = "features.update",
-    ["kamare-update.zip"] = "source.kavita.kamare_update",
+    ["kamare-update.zip"] = "moonsource_kavita.kamare_update",
     ["kindle-plugin-update.zip"] = "source.kindle.plugin_update",
 }
 

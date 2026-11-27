@@ -39,8 +39,6 @@ Assert.is_true(#hashed + #".cover.webp" <= 255)
 local MoonSync = require("moon_sync")
 local kindle_fb = MoonSync.fallbackOf(require("source.kindle").new())
 Assert.is_true(kindle_fb.progress and kindle_fb.notes and kindle_fb.stats, "Kindle 三项都没有自己的接口")
-local t18_fb = MoonSync.fallbackOf(require("source.18ta").new())
-Assert.is_true(t18_fb.progress and t18_fb.notes and t18_fb.stats, "18ta 同样整份兜底")
 local own = MoonSync.fallbackOf({
     putProgressAsync = function() end,
     pushNotesAsync = function() end,

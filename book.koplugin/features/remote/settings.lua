@@ -133,7 +133,7 @@ local BUILTIN = {
 local BUILTIN_IDS = {}
 for _idx, form in ipairs(BUILTIN) do BUILTIN_IDS[form.id] = true end
 
---- 源设置模块里的 `setting.remote`（第三方扩展 + 内置 kavita/bookorbit）。
+--- 源设置模块里的 `setting.remote`（已加载的第三方书源）。
 --- 可选 `setting.replace_on_remote = { "base_url", ... }`：这些键变了就整源清本地书架。
 ---@return RemoteSettingForm[]
 local function externalForms()

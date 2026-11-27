@@ -139,20 +139,6 @@ do -- 下载的宽图缩小、条漫切片后按序成为独立页。
     Assert.is_nil(lfs.attributes(dir .. "/chapter.fit"))
 end
 
-do -- 所有漫画源都走共用打包器。
-    local files = {
-        "book.koplugin/source/copymanga/chapter.lua",
-    }
-    for _idx, rel in ipairs(files) do
-        local file = assert(io.open(rel, "r"))
-        local src = file:read("*a")
-        file:close()
-        Assert.is_true(src:find('require%("source%.cbz"%)', 1) ~= nil, rel)
-        Assert.is_true(src:find("Cbz%.build", 1) ~= nil, rel)
-        Assert.is_nil(src:find("cbz_fit", 1, true), rel)
-    end
-end
-
 do -- 打包进度经 Job 回传，最终文件保存失败不能删源图。
     local src, archive = dir .. "/progress.jpg", dir .. "/progress.cbz"
     writeFile(src, "page")

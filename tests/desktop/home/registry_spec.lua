@@ -19,7 +19,6 @@ for _idx, id in ipairs(BUILTIN) do
     package.preload["desktop.pages.home." .. id] = function() return { id = id, label = id } end
 end
 
-package.preload["source.kavita.on_deck"] = function() return {} end
 local home = {}
 package.loaded["utils.settings"] = {
     get = function() return home end,

@@ -87,7 +87,8 @@ do
         ids[m.id] = true
     end
     Assert.is_true(ids.moon)
-    Assert.is_true(ids.copymanga)
+    Assert.is_nil(ids.copymanga)
+    Assert.is_nil(ids.weread)
     Assert.is_true(ids["local"])
 end
 
@@ -127,17 +128,6 @@ do
 end
 
 do
-    Assert.eq(Registry.meta("copymanga").type, "chapter")
-end
-
-do
-    local src, err = Registry.create("copymanga")
-    Assert.is_true(src ~= nil, err)
-    Assert.is_true(src:configured())
-    Assert.is_false(src:capabilities().stats_pull)
-end
-
-do
     local src, err = Registry.create("nope")
     Assert.is_nil(src)
     Assert.is_true(type(err) == "string")
@@ -146,18 +136,18 @@ end
 -- 启用源：默认全开；禁用/启用非活跃源；活跃源禁止禁用
 do
     -- 无 enabled_sources（旧配置）：全真，listEnabled == list
-    Assert.is_true(Registry.isEnabled("kavita"))
+    Assert.is_true(Registry.isEnabled("local"))
     Assert.is_true(Registry.isEnabled("moon"))
     Assert.eq(#Registry.listEnabled(), #Registry.list())
 
     -- 禁用非活跃源：首次写入以全开初始化集合
-    Assert.is_true(Registry.setEnabled("kavita", false))
-    Assert.is_false(Registry.isEnabled("kavita"))
+    Assert.is_true(Registry.setEnabled("local", false))
+    Assert.is_false(Registry.isEnabled("local"))
     Assert.eq(#Registry.listEnabled(), #Registry.list() - 1)
 
     -- 再启用回来
-    Assert.is_true(Registry.setEnabled("kavita", true))
-    Assert.is_true(Registry.isEnabled("kavita"))
+    Assert.is_true(Registry.setEnabled("local", true))
+    Assert.is_true(Registry.isEnabled("local"))
     Assert.eq(#Registry.listEnabled(), #Registry.list())
 
     -- 活跃源（stub 固定 moon）禁止禁用；isEnabled 兜底恒 true
@@ -185,10 +175,10 @@ do
         }
     end
 
-    local first = Registry.resolve("kavita")
-    local second = Registry.resolve("kavita")
+    local first = Registry.resolve("local")
+    local second = Registry.resolve("local")
     Assert.eq(first, second)
-    Assert.eq(created.kavita, 1)
+    Assert.eq(created["local"], 1)
     Assert.is_nil(created.moon)
 
     -- 活跃源与属主源共用缓存：current() 拿到的就是 resolve(activeId) 那个实例
@@ -197,23 +187,23 @@ do
 
     -- 换源不关旧实例（可能仍是打开中书籍的属主源），只复用缓存
     local common = require("utils.settings").get("source")
-    Assert.eq(Registry.setActive("kavita"), first)
+    Assert.eq(Registry.setActive("local"), first)
     Assert.eq(Registry.current(), first)
     Assert.is_nil(closed.moon)
     common.active_source = "moon"
 
     Registry.invalidate()
-    Assert.eq(closed.kavita, 1)
+    Assert.eq(closed["local"], 1)
     Assert.eq(closed.moon, 1)
-    Assert.is_true(Registry.resolve("kavita") ~= first)
-    Assert.eq(created.kavita, 2)
+    Assert.is_true(Registry.resolve("local") ~= first)
+    Assert.eq(created["local"], 2)
     local moon = Registry.resolve("moon")
-    local kavita = Registry.resolve("kavita")
-    Registry.invalidate("kavita")
-    Assert.eq(closed.kavita, 2)
+    local local_source = Registry.resolve("local")
+    Registry.invalidate("local")
+    Assert.eq(closed["local"], 2)
     Assert.eq(closed.moon, 1, "单源清理不关闭其它书源")
     Assert.eq(Registry.resolve("moon"), moon)
-    Assert.is_true(Registry.resolve("kavita") ~= kavita)
+    Assert.is_true(Registry.resolve("local") ~= local_source)
     Registry.invalidate()
     Registry.create = original_create
 
@@ -226,12 +216,12 @@ end
 
 -- 源模块加载失败是代码缺陷：直接抛出，不从列表里悄悄藏掉。
 do
-    package.loaded["source.bookorbit"] = nil
-    package.preload["source.bookorbit"] = function() error("boom") end
-    Assert.errors(function() Registry.meta("bookorbit") end)
+    package.loaded["source.moon"] = nil
+    package.preload["source.moon"] = function() error("boom") end
+    Assert.errors(function() Registry.meta("moon") end)
     Assert.errors(function() Registry.list() end)
-    package.preload["source.bookorbit"] = nil
-    package.loaded["source.bookorbit"] = nil
+    package.preload["source.moon"] = nil
+    package.loaded["source.moon"] = nil
 end
 
 Assert.is_nil(Registry.meta("nope"))
@@ -254,13 +244,8 @@ for _, k in ipairs({
     "utils.settings",
     "source.moon.client",
     "source.moon.mapper",
-    "source.kavita.auth",
-    "source.kavita.client",
-    "source.kavita.mapper",
-    "source.kavita.chapter",
     "source.registry",
     "source.moon",
-    "source.kavita",
 }) do
     package.preload[k] = nil
     package.loaded[k] = nil

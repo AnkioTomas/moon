@@ -144,33 +144,6 @@ do
     Assert.len(require("book.note.normalize").decode(NoteDB.get(source.id, "keep").payload), 2)
 end
 
--- 旧账号的服务端笔记 id 不是新账号的上传确认，正文、备注与定位仍保留。
-do
-    for _idx, id in ipairs({ "kavita" }) do
-        local real = require("source." .. id).new()
-        local source = fixture("account-note-ids-" .. id, true)
-        source.resetAccountAnnotations = real.resetAccountAnnotations
-        local item = {
-            page = "p1", pos0 = "p1", pos1 = "p2", drawer = "lighten",
-            text = "保留正文", note = "保留备注", datetime = "2026-01-01 01:00:00",
-            wr_bookmark_id = "old", wr_review_id = "old",
-            kavita_id = 99, kavita_note = "保留备注", kavita_xpath = "/p[1]",
-        }
-        Assert.is_true(NoteDB.upsert(source.id, "keep", nil, require("json").encode({
-            item, { wr_deleted = true, wr_bookmark_id = "deleted", kavita_deleted = true, kavita_id = 100 },
-        }), 123, true))
-        Assert.is_true(Logout.clear(source.id, function() end))
-        local annotations = require("book.note.normalize").decode(NoteDB.get(source.id, "keep").payload)
-        Assert.len(annotations, 1, "旧账号删除意图不得送到新账号")
-        Assert.eq(annotations[1].text, item.text)
-        Assert.eq(annotations[1].note, item.note)
-        Assert.eq(annotations[1].pos0, item.pos0)
-        Assert.is_nil(annotations[1].kavita_id)
-        Assert.is_nil(annotations[1].kavita_note)
-        Assert.eq(annotations[1].kavita_xpath, item.kavita_xpath, "源坐标不丢")
-    end
-end
-
 -- 准备失败不取消已发出去的旧账号统计，否则成功回包丢掉会重复计时。
 do
     local source = fixture("account-failed-inflight", true)
