@@ -5,8 +5,10 @@
 弹全屏错误页（版本 + 位置 + 堆栈，可复制）让用户反馈，出错的这次调用视为未处理。
 业务内部不要用它，异常应一路冒到入口。
 
-堆栈里若出现其它 `.koplugin`（排除 guard 自身帧），归到该插件：引导用户找对应作者，
-不要把锅甩给月读。
+堆栈帧里若出现其它 `.koplugin`（排除 guard 自身帧），归到该插件：引导用户找对应作者，
+不要把锅甩给月读。`module not found` 展开的 package.path（`no file`）不是堆栈帧，
+不能拿来甩锅——一次 require 失败会把每个已装插件目录都列进去。
+`http.mirror` / `http.release` 是月读对外的模块，缺了是月读毁约，不归调用方。
 
   BookPlugin.onPageUpdate = Guard.wrap("onPageUpdate", Session.onPageUpdate)
   Guard.call("feature bars.onCreate", fn, plugin)
@@ -27,16 +29,26 @@ local PLUGIN_ROOT = GUARD_SRC:match("^@(.*)/ui/guard%.lua$")
 local OURS = (PLUGIN_ROOT and PLUGIN_ROOT:match("([^/\\]+%.koplugin)$")) or "book.koplugin"
 local PLUGINS_PARENT = PLUGIN_ROOT and PLUGIN_ROOT:match("^(.*)/[^/\\]+$")
 
---- 堆栈里扫到的其它 `.koplugin`：必须在磁盘上真有这个目录，否则当月读自己的错
+--- 月读删过、已发布插件仍在 require 的模块。缺它们是月读的契约破裂。
+local MOON_MODULES = {
+    ["http.mirror"] = true,
+    ["http.release"] = true,
+}
+
+--- 堆栈帧里扫到的其它 `.koplugin`：必须在磁盘上真有这个目录，否则当月读自己的错
 --- （避免路径被污染 / 残留字符串时甩锅给根本不存在的插件名）。
+--- 只认 `路径:行号:`，不认 module-not-found 的 `no file` 搜索路径。
 ---@param trace string
 ---@return string[]|nil
 function Guard.foreignPlugins(trace)
+    trace = tostring(trace)
+    local missing = trace:match("module '([%w_%.]+)' not found")
+    if missing and MOON_MODULES[missing] then return nil end
     local lfs = require("libs/libkoreader-lfs")
     local seen, list = {}, {}
-    for line in tostring(trace):gmatch("[^\r\n]+") do
+    for line in trace:gmatch("[^\r\n]+") do
         if not line:find("[/\\]ui[/\\]guard%.lua", 1) then
-            local name = line:match("([^/\\]+%.koplugin)[/\\]")
+            local name = line:match("([^/\\]+%.koplugin)[/\\].-:%d+:")
             if name and name ~= OURS and not seen[name] then
                 -- 目录不在月读同级 plugins/ 下就不甩锅：堆栈字符串可能被污染，或残留已删插件路径。
                 local dir = PLUGINS_PARENT and (PLUGINS_PARENT .. "/" .. name)

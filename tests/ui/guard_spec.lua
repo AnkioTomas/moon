@@ -190,3 +190,27 @@ Assert.matches(clipboard, "归属：其它插件 maps%.koplugin")
 Assert.is_nil(clipboard:find("反馈给该插件的作者", 1, true))
 foreign_dialog:close()
 os.execute("rmdir '" .. maps_dir .. "'")
+
+-- module not found 的搜索路径会带上每个插件目录，那不是堆栈帧
+local noise_dir = plugins_parent .. "/fulltextunderline.koplugin"
+os.execute("mkdir -p '" .. noise_dir .. "'")
+os.execute("mkdir -p '" .. maps_dir .. "'")
+local searched = Guard.foreignPlugins(table.concat({
+    maps_dir .. "/init.lua:3: in function 'draw'",
+    "no file '" .. noise_dir .. "/http/mirror.lua'",
+    "no file '" .. maps_dir .. "/http/mirror.lua' (checked with asset loader)",
+    "no file 'common/http/mirror.lua'",
+}, "\n"))
+Assert.eq(#searched, 1)
+Assert.eq(searched[1], "maps.koplugin")
+os.execute("rmdir '" .. noise_dir .. "'")
+os.execute("rmdir '" .. maps_dir .. "'")
+
+-- 缺的是月读自己删掉的模块：调用方在别的插件里，锅仍是月读的
+Assert.is_nil(Guard.foreignPlugins(table.concat({
+    maps_dir .. "/papersprite/update.lua:172: module 'http.mirror' not found:",
+    "no field package.preload['http.mirror']",
+    "no file '" .. noise_dir .. "/http/mirror.lua'",
+    "stack traceback:",
+    "\t" .. maps_dir .. "/papersprite/update.lua:172: in function 'pickDownloadUrl'",
+}, "\n")))
