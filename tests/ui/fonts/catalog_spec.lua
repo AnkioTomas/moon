@@ -299,5 +299,29 @@ do
     os.execute("rmdir '" .. user_dir .. "' 2>/dev/null || true")
 end
 
+-- 内存不够时拒绝开下，不碰网络
+do
+    local called = false
+    local saved_mem = package.loaded["utils.mem"]
+    package.loaded["utils.mem"] = {
+        canAfford = function()
+            return false, "memory insufficient need=35MB avail=8MB", {}
+        end,
+    }
+    require("http.request").download = function()
+        called = true
+        return { cancel = function() end }
+    end
+    local ok, detail
+    Catalog.downloadToUserAsync({
+        id = "big", name = "京华老宋体", filename = "Big.ttf", kind = "online",
+        url = "https://moon-store.example/font", size = 35 * 1024 * 1024,
+    }, nil, function(r, d) ok, detail = r, d end)
+    Assert.is_nil(ok)
+    Assert.is_true(type(detail) == "string" and detail:find("memory insufficient", 1, true) ~= nil)
+    Assert.is_false(called, "内存不够不得发起下载")
+    package.loaded["utils.mem"] = saved_mem
+end
+
 GetText.current_lang = saved_lang
 return true

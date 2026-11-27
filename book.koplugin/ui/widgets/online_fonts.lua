@@ -90,10 +90,28 @@ local function rowPreview(it, pw, ph, downloaded)
     }
 end
 
+--- 内存不够就弹预检框并返回 true。下载按文件大小估算：页缓存和安装时的 fork 都按这个量涨。
+---@param item MoonFontItem|table
+---@return boolean
+local function refuseTightMemory(item)
+    local Mem = require("utils.mem")
+    local ok, _err, detail = Mem.canAfford(tonumber(item.size) or 0)
+    if ok then return false end
+    Mem.promptInsufficient({
+        what = _("下载字体"),
+        needed = detail.needed,
+        available = detail.available,
+        id = item.id,
+        dest = item.name or item.id,
+    })
+    return true
+end
+
 ---@param opts { on_done?: fun() }
 ---@param item MoonFontItem|table
 ---@param on_updated fun()
 local function downloadFont(opts, item, on_updated)
+    if refuseTightMemory(item) then return end
     local name = item.name or item.id or ""
     local total_bytes = tonumber(item.size) or 0
     local key_id = FontCatalog.targetFilename(item) or item.id or name
@@ -116,6 +134,13 @@ local function downloadFont(opts, item, on_updated)
         end,
         on_done = function(result)
             if not result.ok then
+                -- 休眠后续跑时内存仍不够：任务里已经拒绝，这里补弹框。
+                if require("utils.mem").isInsufficient(result.err) then
+                    if not refuseTightMemory(item) then
+                        Toast:new{ text = _("字体下载失败") }:show()
+                    end
+                    return
+                end
                 Toast:new{ text = result.err or _("字体下载失败") }:show()
                 return
             end

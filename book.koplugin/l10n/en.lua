@@ -816,6 +816,7 @@ return {
     ["强制重装月读 %1（当前已是此版本）。下载并完整替换插件目录？"] = "Force reinstall 月读 %1 (already on this version). Download and fully replace the plugin directory?",
     ["模型"] = "Model",
     ["正在下载字体 %1"] = "Downloading font %1",
+    ["下载字体"] = "Download font",
     ["正在准备字体 %1"] = "Preparing font %1",
     ["正在下载月读更新…"] = "Downloading the 月读 update…",
     ["正在写入"] = "Writing",

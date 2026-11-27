@@ -371,6 +371,15 @@ function Catalog.downloadToUserAsync(item, on_progress, cb)
         cb(nil, _("无效字体项"))
         return noop
     end
+    -- 流式写盘，但 Kindle 页缓存按文件大小涨，随后安装还要 fork。
+    -- 256MB 上 35MB 字体已经把进程 SIGKILL 过，内存不够就别开下。
+    local affordable, mem_err = require("utils.mem").canAfford(tonumber(item.size) or 0)
+    if not affordable then
+        logger.warn("book.font download refused", item.id, mem_err)
+        logger.flushSync()
+        cb(nil, mem_err)
+        return noop
+    end
     Paths.ensureDir(Fonts.settingsFontsDir())
     local dl_path = dest .. ".dl"
     local cancelled = false
