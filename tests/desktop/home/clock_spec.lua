@@ -6,12 +6,12 @@ local Assert = require("support.assert")
 local Kit = require("support.widget_stubs")
 Kit.install("paper")
 
-local myrl_cb, myrl_ensures = nil, 0
+local myrl_cb
 package.preload["online.myrl"] = function()
     return {
         current = function() return nil end,
         watch = function(_, cb) myrl_cb = cb end,
-        ensure = function() myrl_ensures = myrl_ensures + 1 end,
+        ensure = function() end,
         unwatch = function() end,
     }
 end
