@@ -54,10 +54,11 @@ function Globe.pick(kb)
             kb:onSwitchingKeyboardLayout()
             kb:setKeyboardLayout("zh_CN")
             local Registry = require("features.ime.registry")
-            if not Registry.isAvailable(id) then
-                local T = require("ffi/util").template
+            if not Registry.fileExists(id) then
                 require("ui.themes.widgets.toast"):new{
-                    text = T(_("%1词库未下载"), Registry.current().label),
+                    text = id == "pinyin"
+                        and _("候选用 KOReader 自带词库，下载月读词库后更全")
+                        or require("ffi/util").template(_("%1词库未下载"), Registry.current().label),
                     timeout = 2,
                 }:show()
             end

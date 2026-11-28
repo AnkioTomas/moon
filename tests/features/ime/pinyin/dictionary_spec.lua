@@ -209,23 +209,56 @@ Assert.eq(poem_with_initial[1], "江枫渔火对愁眠", "ch 声母展开简拼�
 Assert.len(Dict:lookup("ni3"), 0)
 Assert.len(Dict:lookup(""), 0)
 
--- ── 降级：库打不开 → 空结果，不报错 ───────────────────
+-- ── 降级：库打不开 → 退 KO 码表；KO 也没有才空 ─────────
+local ko_calls = 0
+package.preload["features.ime.pinyin.ko_lookup"] = function()
+    return {
+        isAvailable = function() return true end,
+        lookup = function(code)
+            ko_calls = ko_calls + 1
+            return code == "nihao" and { "你好" } or {}
+        end,
+    }
+end
 open_ok = false
 package.loaded["features.ime.pinyin.dictionary"] = nil
+package.loaded["features.ime.pinyin.ko_lookup"] = nil
 local Dict2 = require("features.ime.pinyin.dictionary")
-Assert.is_false(Dict2:isAvailable())
+Assert.is_true(Dict2:isAvailable(), "无 sqlite 时 KO 码表仍算可用")
 Assert.eq(Dict2:entries(), nil)
-Assert.len(Dict2:lookup("nihao"), 0)
+Assert.eq(Dict2:lookup("nihao")[1], "你好")
+Assert.eq(ko_calls, 1)
+
+package.preload["features.ime.pinyin.ko_lookup"] = function()
+    return {
+        isAvailable = function() return false end,
+        lookup = function() return {} end,
+    }
+end
+package.loaded["features.ime.pinyin.dictionary"] = nil
+package.loaded["features.ime.pinyin.ko_lookup"] = nil
+local Dict3 = require("features.ime.pinyin.dictionary")
+Assert.is_false(Dict3:isAvailable(), "sqlite 与 KO 皆无才不可用")
+Assert.len(Dict3:lookup("nihao"), 0)
 
 -- ── 手动落盘：失败不负缓存；reset 只负责关闭旧连接 ──
 do
+    package.preload["features.ime.pinyin.ko_lookup"] = function()
+        return {
+            isAvailable = function() return false end,
+            lookup = function() return {} end,
+        }
+    end
+    package.loaded["features.ime.pinyin.dictionary"] = nil
+    package.loaded["features.ime.pinyin.ko_lookup"] = nil
+    local Dict4 = require("features.ime.pinyin.dictionary")
     local before = open_count
     open_ok = true -- 模拟用户手动放入可用词库
-    Assert.is_true(Dict2:isAvailable(), "手动落盘后不得要求重启或显式 reset")
+    Assert.is_true(Dict4:isAvailable(), "手动落盘后不得要求重启或显式 reset")
     Assert.eq(open_count, before + 1)
     -- reset：连接已开，close 后下次访问重开
-    Dict2:reset()
-    Assert.is_true(Dict2:isAvailable())
+    Dict4:reset()
+    Assert.is_true(Dict4:isAvailable())
     Assert.eq(open_count, before + 2)
 end
 

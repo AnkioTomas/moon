@@ -442,7 +442,7 @@ end
 
 --- VirtualKeyboard:init 包装：建键盘树之前定下这次要不要候选行并同步布局数据
 --- （键盘高度按行数算，晚了就来不及）。
---- 文件存在不等于 SQLite 可用；损坏或未完成的文件必须保留原生 IME。
+--- isAvailable：拼音在无月读 sqlite 时仍为真（KO 码表），其它布局必须自有词库。
 --- number 输入框从符号层起步、不打字，候选行直接不装。
 ---@param ... any 透传给原方法
 local function wrappedInit(self, ...)

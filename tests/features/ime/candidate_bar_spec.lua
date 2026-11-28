@@ -8,7 +8,7 @@ kb[1][1][1][1] = VerticalGroup（其 [1] = 首行，行内键/span 交错，奇�
 字母拦截与候选刷新、点候选提交、翻页、退格回退、换层（addKeys 重建）后
 候选条仍活着、光标移走后不误删文本、大写与非字母走原路、
 物理键盘 / SDL 文本输入（直调 inputbox 包装表）回退原生 IME、
-关闭/词库缺失时全透传且不留幽灵行。
+关闭时全透传；月读词库缺失但 KO 码表可用时仍装候选条；两者皆无才透传。
 
 @module tests.features.ime.candidate_bar_spec
 --]]
@@ -77,20 +77,25 @@ end
 
 local dict_available = true
 local dict_file_exists = true
+local ko_available = true
 local lookup_calls = {}
 local WORDS = { "你好", "你好吗", "内耗", "拟合", "泥沼", "尼龙", "匿迹", "逆转", "匿名", "溺爱" }
+local KO_WORDS = { nihao = { "你好", "倪浩" }, ni = { "你", "尼" } }
 package.preload["features.ime.pinyin.dictionary"] = function()
     return {
         isAvailable = function()
-            return dict_available
+            return dict_available or ko_available
         end,
         fileExists = function()
             return dict_file_exists
         end,
         lookup = function(code)
             lookup_calls[#lookup_calls + 1] = code
-            if code == "nihao" then
+            if dict_available and code == "nihao" then
                 return WORDS
+            end
+            if not dict_available and ko_available then
+                return KO_WORDS[code] or {}
             end
             return {}
         end,
@@ -588,40 +593,48 @@ do
     dict.lookup = orig_lookup
 end
 
--- 词库文件存在但 SQLite 不可用：不得接管输入，也不得插入幽灵候选行。
+-- 月读 sqlite 坏了 / 未下载：仍装候选条，查 KO 码表
 do
     dict_available = false
     dict_file_exists = true
-    local before = #native_adds
+    ko_available = true
     local kb = newKeyboard()
-    Assert.is_nil(zh_keys[1]._ime_bar, "损坏词库时候选行必须摘掉")
-    Assert.is_true(kb.layout[1][1].flash_keyboard, "损坏词库时不得改变原生键盘反馈")
-    VK.addChar(kb, "n")
-    Assert.eq(#native_adds, before + 1, "损坏词库时字母必须透传原生 IME")
+    Assert.is_true(zh_keys[1]._ime_bar == true, "无月读词库仍装候选行")
+    typeAndLookup(kb, "nihao")
+    Assert.eq(wordCell(kb, 1).tw.text, "你好", "候选用 KO 码表")
+    Assert.eq(wordCell(kb, 2).tw.text, "倪浩")
+    dict_file_exists = false
+    kb = newKeyboard()
+    typeAndLookup(kb, "ni")
+    Assert.eq(wordCell(kb, 1).tw.text, "你")
     dict_available = true
+    dict_file_exists = true
 end
 
--- 词库不可用：候选行必须摘掉（不留按不动的幽灵行），输入全透传原生 IME
+-- 月读词库与 KO 码表都不可用：候选行摘掉，输入透传原生 IME
 do
     dict_available = false
+    ko_available = false
     local before = #native_adds
     local kb = newKeyboard()
-    Assert.is_nil(zh_keys[1]._ime_bar, "词库缺失时候选行必须摘掉")
-    Assert.is_true(kb.layout[1][1].flash_keyboard, "词库缺失时不得改变原生键盘反馈")
+    Assert.is_nil(zh_keys[1]._ime_bar, "无任何候选源时候选行必须摘掉")
+    Assert.is_true(kb.layout[1][1].flash_keyboard, "无候选源时不得改变原生键盘反馈")
     Assert.eq(#zh_keys, 1)
     Assert.eq(#kb.layout, 1, "键盘少一行")
     typeCode(kb, "ni")
-    Assert.eq(#native_adds, before + 2, "词库缺失时字母透传原生 IME")
+    Assert.eq(#native_adds, before + 2, "无候选源时字母透传原生 IME")
     Assert.eq(text(kb), "", "不透写输入框")
     dict_available = true
+    ko_available = true
 end
 
--- 词库就位后：下次键盘 init 自己把候选行加回来（无需重装 hook）
+-- 月读词库就位后：下次键盘 init 用月读词表（无需重装 hook）
 do
     local kb = newKeyboard()
     Assert.is_true(zh_keys[1]._ime_bar == true, "词库可用后候选行回来")
     typeAndLookup(kb, "nihao")
     Assert.eq(wordCell(kb, 1).tw.text, "你好")
+    Assert.eq(wordCell(kb, 3).tw.text, "内耗", "月读词表优先于 KO")
 end
 
 -- 简繁转换：查词结果按 ime_script 转字形；默认 keep 原样

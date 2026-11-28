@@ -53,7 +53,7 @@ local function confirmDownload(desktop, enable_after)
     }:show()
 end
 
---- 已启用时切到词库未下载的布局，直接提示下载；否则候选栏会静默退回原生键盘。
+--- 切到词库未下载的布局：拼音可继续用 KO 码表画候选条；其余布局必须下词库。
 ---@param desktop BookDesktop
 local function pickInputMethod(desktop)
     local IME = require("features.ime")
@@ -69,7 +69,8 @@ local function pickInputMethod(desktop)
         on_select = function(id)
             IME.setLayout(id)
             desktop:updateView()
-            if IME.isEnabled() and not require("features.ime.registry").isAvailable(id) then
+            local Registry = require("features.ime.registry")
+            if IME.isEnabled() and not Registry.isAvailable(id) then
                 confirmDownload(desktop)
             end
         end,
@@ -151,13 +152,17 @@ local function sections(desktop)
                         status = IME.isEnabled() and _("开") or _("关"),
                         status_on = IME.isEnabled(),
                         callback = function()
-                            if not IME.isEnabled() and not Registry.isAvailable(method) then
-                                confirmDownload(desktop, true)
-                                return
-                            end
                             local on = IME.setEnabled(not IME.isEnabled())
+                            local text
+                            if not on then
+                                text = _("中文键盘已停用")
+                            elseif Registry.fileExists(method) and Registry.isAvailable(method) then
+                                text = _("中文键盘已启用，点 🌐 切换中英文，长按选择键盘布局")
+                            else
+                                text = _("中文键盘已启用（候选用 KOReader 自带词库；下载月读词库后更全，并可切其它布局）")
+                            end
                             require("ui.themes.widgets.toast"):new{
-                                text = on and _("中文键盘已启用，点 🌐 切换中英文，长按选择键盘布局") or _("中文键盘已停用"),
+                                text = text,
                                 timeout = 3,
                             }:show()
                             desktop:updateView()
@@ -215,7 +220,7 @@ local function sections(desktop)
                         icon = "spellcheck",
                         title = _("输入法词库"),
                         status = IME.dictStatus(),
-                        status_on = Registry.isAvailable(method),
+                        status_on = Registry.fileExists(method) and Registry.isAvailable(method),
                         callback = function() confirmDownload(desktop) end,
                     })
                 end,

@@ -123,8 +123,12 @@ Assert.eq(saved.keyboard_layouts[2], "zh_CN", "onCreate 补回 zh_CN 布局")
 saved.keyboard_layouts = nil
 saved.book_pinyin_previous_keyboard_layouts = nil
 
--- ── setEnabled(true)：替代布局 + 装候选栏，不自动下载词库 ──
-Assert.is_false(Pinyin.setEnabled(true), "词库不存在时不允许开启")
+-- ── setEnabled(true)：无词库也可开（退回 KO 自带拼音），不自动下载 ──
+dict_available = false
+Assert.is_true(Pinyin.setEnabled(true), "无词库也应允许开启")
+Assert.is_true(fake_settings.pinyin_enabled)
+Pinyin.setEnabled(false)
+
 dict_available = true
 saved.keyboard_layouts = { "de", "en", "ru" }
 Pinyin.setEnabled(true)
@@ -136,7 +140,7 @@ Assert.eq(saved.book_pinyin_previous_keyboard_layouts[1], "de")
 Assert.eq(saved.book_pinyin_previous_keyboard_layouts[2], "en")
 Assert.eq(saved.book_pinyin_previous_keyboard_layouts[3], "ru")
 Assert.eq(ensure_calls, 0)
-Assert.eq(install_calls, 3)
+Assert.eq(install_calls, 4)
 
 -- 重复开启仍为相同布局。
 local n_layouts = #layouts
@@ -154,7 +158,7 @@ Assert.is_nil(saved.book_pinyin_previous_keyboard_layouts)
 
 -- ── dictStatus：未下载 / 下载中 / 词条数·manifest built_at ──
 dict_available = false
-Assert.eq(Pinyin.dictStatus(), "未下载")
+Assert.eq(Pinyin.dictStatus(), "未下载 · 用自带词库画候选")
 downloading_now = true
 Assert.eq(Pinyin.dictStatus(), "下载中…")
 downloading_now = false

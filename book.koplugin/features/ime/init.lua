@@ -68,13 +68,11 @@ local function restoreLayouts()
     G_reader_settings:delSetting(PREVIOUS_LAYOUTS_KEY)
 end
 
---- 写入开关；词库不可用时拒绝开启，避免留下无效键盘入口。
+--- 写入开关。词库不是前置条件：拼音无月读 sqlite 时仍装候选条，查 KO 自带
+--- zh_pinyin_data；下载月读词库后同一开关自动换更全的候选。
 ---@param value boolean
 ---@return boolean
 function IME.setEnabled(value)
-    if value == true and not Registry.isAvailable(Registry.current()) then
-        return false
-    end
     local settings = Settings.get("features.ime")
     settings.pinyin_enabled = value == true
     Settings.save("features.ime", settings)
@@ -117,7 +115,7 @@ function IME.dictStatus()
         if Registry.fileExists(method) then
             return _("词库文件存在但不可用")
         end
-        return _("未下载")
+        return _("未下载 · 用自带词库画候选")
     end
     local entries = Registry.entries(method) or "?"
     local built_at = Registry.builtAt(method)

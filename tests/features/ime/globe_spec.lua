@@ -36,9 +36,11 @@ package.preload["features.ime"] = function()
 end
 
 local available = { pinyin = true, wubi = false }
+local files = { pinyin = true, wubi = false }
 package.preload["features.ime.registry"] = function()
     return {
         isAvailable = function(id) return available[id] == true end,
+        fileExists = function(id) return files[id] == true end,
         current = function()
             return { label = layout == "wubi" and "五笔" or "拼音" }
         end,

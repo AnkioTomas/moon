@@ -1,8 +1,10 @@
 --[[--
 拼音词库只读查询（rime-ice 转换产物 dictionary.sqlite3）。
 
-库由 ime/download 下载落盘到 $DATA/.moon/dictionary.sqlite3；
-文件缺失 / 打不开 / 查询失败一律降级为空结果，绝不影响原生单字候选。
+库由 ime/download 下载落盘到 $DATA/.moon/dictionary.sqlite3。
+sqlite 可用时走本库；不可用时退到 KOReader 自带 zh_pinyin_data
+（features.ime.pinyin.ko_lookup），候选仍画在月读候选条上——增强条就是为了
+绕开 generic_ime，没词库不等于退回原生抽象输入。
 
 schema（tools/build_pinyin_dict.py 生成）：
   meta(k PRIMARY KEY, v)                    -- schema_version / source_tag / built_at / entries
@@ -15,7 +17,8 @@ schema（tools/build_pinyin_dict.py 生成）：
 `mode + code` 的等值读取。长码命中集合已足够小，才退回 `code GLOB 'nihao*'`
 或 `initials GLOB 'nhg*'`。输入码只允许小写 ASCII；单字母半截不查。
 
-连接、meta 与语句缓存复用 features.ime.table_dictionary，这里只覆写 lookup。
+连接、meta 与语句缓存复用 features.ime.table_dictionary，这里只覆写 lookup /
+isAvailable。
 
 @module koplugin.book.features.ime.pinyin.dictionary
 --]]
@@ -160,8 +163,15 @@ local function lookupKind(code)
     end
     return #code >= 2 and "abbrev" or nil
 end
+--- 月读 sqlite 或 KO 自带码表任一可用，候选条就能画。
+---@return boolean
+function M:isAvailable()
+    if self:open() ~= nil then return true end
+    return require("features.ime.pinyin.ko_lookup").isAvailable()
+end
+
 --- 连写输入码转候选词，按词频降序。
---- 高频短码走构建期排序结果；长码才走原始索引前缀查询。
+--- 有 sqlite 只查 sqlite；没有才退 KO 码表。
 ---@param code string 连写拼音（纯小写）
 ---@return string[]
 function M:lookup(code)
@@ -169,7 +179,7 @@ function M:lookup(code)
         return {}
     end
     if not self:open() then
-        return {}
+        return require("features.ime.pinyin.ko_lookup").lookup(code)
     end
     local kind = lookupKind(code)
     if not kind then
