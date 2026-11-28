@@ -124,7 +124,7 @@ local function coreEntries(desktop)
             end,
         },
         {
-            group = "library", order = 10,
+            group = "library", order = 10, id = "active_source",
             row = function(iw)
                 return Row.widget({
                     width = iw, kind = "nav", icon = "source", title = _("当前书库"),
@@ -360,7 +360,13 @@ end
 local GROUP_FOLDERS = {
     library = {
         {
-            id = "sources", title = _("书库"), default = true,
+            -- 选源、切库、登录。没点名的新条目也归这里。
+            id = "sources", title = _("书源"), default = true,
+            match = { "enabled_sources", "active_source", "source_config" },
+        },
+        {
+            id = "sync", title = _("同步与清理"),
+            match = { "moon_sync", "source_cleanup" },
         },
         {
             id = "store", title = _("书城"),

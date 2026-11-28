@@ -242,6 +242,8 @@ return {
     ["书名不能为空"] = "Book title cannot be empty",
     ["书名或作者"] = "Title or author",
     ["书库"] = "Library",
+    ["书源"] = "Sources",
+    ["同步与清理"] = "Sync & cleanup",
     ["书库暂无书籍"] = "No books in the library",
     ["书摘"] = "Book excerpt",
     ["书架每行数量"] = "Books per row",

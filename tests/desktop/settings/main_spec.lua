@@ -289,14 +289,14 @@ local auto_update_row = opened.sections()[3].rows[1](600)
 Assert.eq(auto_update_row.title, "自动检查更新")
 Assert.is_true(auto_update_row.status_on)
 
--- 书库组：启用的书源（多选）/ 当前书库 / 账号（书架显示已迁到桌面 → 图书馆）
+-- 书库组：书源（启用 / 当前 / 账号）/ 同步与清理 / 书城。同步不跟选源混在一节。
 local library = openRoot("书库")
 Assert.eq(library.id, "group:library")
-Assert.eq(sectionTitles(library), "书库,书城")
+Assert.eq(sectionTitles(library), "书源,同步与清理,书城")
 local library_rows = buildSectionRows(library)
 local library_titles = {}
 for _, row in ipairs(library_rows) do library_titles[#library_titles + 1] = row.title end
-Assert.eq(table.concat(library_titles, ","), "月读同步（WebDAV）,启用的书源,当前书库,账号,数据清理,Z-Library,OPDS")
+Assert.eq(table.concat(library_titles, ","), "启用的书源,当前书库,账号,月读同步（WebDAV）,数据清理,Z-Library,OPDS")
 local cleanup_opened = false
 package.loaded["source.cleanup"] = { pick = function(d)
     Assert.eq(d, desktop)
