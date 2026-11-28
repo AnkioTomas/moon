@@ -1191,6 +1191,7 @@ return {
     ["最近 %1 周 · %2"] = "Last %1 weeks · %2",
     ["连续阅读"] = "Reading streak",
     ["退出"] = "Exit",
+    ["退出 KOReader？"] = "Exit KOReader?",
     ["退出登录"] = "Sign out",
     ["选区"] = "Selection",
     ["选区两端可拖指示器"] = "Draggable markers at both ends of a selection",

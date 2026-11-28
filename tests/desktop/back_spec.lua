@@ -40,11 +40,16 @@ package.preload["desktop.gesture"] = function()
 end
 package.preload["gettext"] = function() return function(text) return text end end
 package.preload["utils.settings"] = function() return { get = function() return {} end } end
+local confirm_shown
+package.preload["ui.themes.widgets.confirm"] = function()
+    return { new = function(_, o) return { show = function() confirm_shown = o end } end }
+end
 package.preload["device"] = function()
     return {
         screen = { getWidth = function() return 600 end, getHeight = function() return 800 end },
         hasKeys = function() return true end,
         hasFewKeys = function() return false end,
+        hasDPad = function() return false end,
         input = { group = { Back = { "Back" } } },
     }
 end
@@ -87,18 +92,25 @@ d.library = { onBack = function() closed[#closed + 1] = "library"; return true e
 Assert.is_true(d:onDesktopBack())
 Assert.eq(table.concat(closed, ","), "library")
 
-d.tab = "home"
-d.home = {}
-broadcasts = {}
-Assert.is_true(d:onDesktopBack())
-Assert.eq(table.concat(broadcasts, ","), "Exit", "根页 Back 广播 Exit")
-
--- 页内 onBack 返回 false 时同样退出（书架根 / 设置根）
+-- 非首页的根页（页内无法后退）：先回首页，不退出
+local switched
+d.switchTab = function(_, id) switched = id end
 broadcasts = {}
 d.tab = "library"
 d.library = { onBack = function() return false end }
 Assert.is_true(d:onDesktopBack())
-Assert.eq(table.concat(broadcasts, ","), "Exit", "页内无法后退也 Exit")
+Assert.eq(switched, "home", "非首页根页 Back 回首页")
+Assert.len(broadcasts, 0)
+d.switchTab = nil
+
+-- 首页根页：弹确认，确认后才广播 Exit
+d.tab = "home"
+d.home = {}
+Assert.is_true(d:onDesktopBack())
+Assert.len(broadcasts, 0, "确认前不退出")
+Assert.not_nil(confirm_shown, "首页 Back 弹确认")
+confirm_shown.ok_callback()
+Assert.eq(table.concat(broadcasts, ","), "Exit", "确认后广播 Exit")
 
 local key = {
     match = function(_, seq)

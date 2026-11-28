@@ -31,7 +31,10 @@ end
 
 local order = {}
 package.preload["device"] = function()
-    return { screen = { refreshWaitForLast = function() order[#order + 1] = "wait" end } }
+    return {
+        screen = { refreshWaitForLast = function() order[#order + 1] = "wait" end },
+        hasDPad = function() return false end,
+    }
 end
 local InputContainer = {}
 function InputContainer:extend(value)

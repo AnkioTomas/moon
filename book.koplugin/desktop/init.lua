@@ -33,6 +33,7 @@ local Sync = require("desktop.sync")
 local TabIcons = require("desktop.tab_icons")
 local Guard = require("ui.guard")
 local Input = require("ui.input")
+local Focus = require("ui.focus")
 local MoonSettings = require("utils.settings")
 local Ext = require("utils.extension")
 local OverlapGroup = require("ui/widget/overlapgroup")
@@ -369,13 +370,21 @@ function Desktop:init()
     }
     -- 物理翻页键（Kindle / Kobo 侧键，安卓开启音量键翻页后也映射到这里）翻当前页签。
     -- 反转翻页键、横屏键位旋转由 KOReader 设备层处理，这里收到的已是最终方向。
-    -- 方向键只给键多的设备，和 ReaderPaging 一致，少键设备不占用。
+    -- 方向键：有 fiveway 的设备留给焦点导航（见下），其余键多设备才拿左右翻页签。
     local fwd, back = { "RPgFwd", "LPgFwd" }, { "RPgBack", "LPgBack" }
-    if Device:hasKeys() and not Device:hasFewKeys() then
+    if Device:hasKeys() and not Device:hasFewKeys() and not Device:hasDPad() then
         fwd[#fwd + 1], back[#back + 1] = "Right", "Left"
     end
     self.key_events.DesktopPageNext = { { fwd }, event = "DesktopTurn", args = 1 }
     self.key_events.DesktopPagePrev = { { back }, event = "DesktopTurn", args = -1 }
+    -- 纯按键设备：方向键在顶栏 / 卡片 / 底栏间走焦点，中心键激活（翻页键仍翻页签）。
+    Focus.registerKeys(self)
+    -- 带实体键的设备（Kindle 键盘等）：Home 回首页，Menu 开顶部下拉菜单（同顶栏下滑）。
+    -- 桌面盖住 FM 且不透传按键，必须自己接；否则这两键在桌面上没反应。
+    if Device:hasKeys() then
+        self.key_events.DesktopHome = { { "Home" } }
+        self.key_events.DesktopMenu = { { "Menu" } }
+    end
     -- 安卓返回键 / Kindle Back：叠层与页内路径在 onDesktopBack；根页广播 Exit 退出 KOReader。
     self.key_events.DesktopBack = { { Device.input.group.Back } }
     -- sendEvent 只打栈顶：手势插件 Dispatcher 动作要落到 FM 的 DeviceListener 等模块。
@@ -521,6 +530,35 @@ end
 function Desktop:paintTo(bb, x, y)
     Screen:refreshWaitForLast()
     Guard.paint("desktop paint " .. self.tab, InputContainer.paintTo, self, bb, x, y)
+    if Focus.enabled() then Guard.paint("desktop focus", Focus.paint, self, bb) end
+end
+
+-- 方向键 / 中心键回调共用；桌面覆盖 onFocusHold 走进编辑。
+Focus.mixin(Desktop)
+
+--- 长按：首页直接进编辑（纯按键机没有「长按空白处」的入口，焦点项的 hold 会把它吃掉，
+--- 所以这里不走合成手势）；其它 tab 触发焦点项自己的长按（书卡菜单）。
+function Desktop:onFocusHold()
+    if self.tab == "home" then
+        local home = self:page("home")
+        if not home.editing then
+            self._focus_idx = nil
+            home:enterEdit()
+        end
+        return true
+    end
+    Focus.hold(self)
+    return true
+end
+
+--- 初始焦点落内容区第一项（跳过顶栏状态条），让人一进来就能选书 / 选功能。
+---@param list table[]
+---@return integer
+function Desktop:focusInitIdx(list)
+    for i = 1, #list do
+        if list[i].dimen.y + list[i].dimen.h / 2 > TopBar.height() then return i end
+    end
+    return 1
 end
 
 --- 顶栏向下滑：打开桌面快捷面板。
@@ -595,7 +633,19 @@ function Desktop:onBookWindowClose()
     return true
 end
 
---- 返回键：先关桌面仍挂着的叠层 / 详情，再问当前页能否后退一层；根页广播 Exit 退出 KOReader。
+--- Home 键：切回首页 tab（已在首页则无变化）。
+function Desktop:onDesktopHome()
+    self:switchTab("home")
+    return true
+end
+
+--- Menu 键：开顶部下拉菜单（同顶栏下滑）。
+function Desktop:onDesktopMenu()
+    Ext.call("quickpanel.show", "desktop")
+    return true
+end
+
+--- 返回键：先关桌面仍挂着的叠层 / 详情，再问当前页能否后退一层；根页回首页，首页确认后广播 Exit 退出 KOReader。
 --- 设置叠层与详情通常是栈顶 Modal（自带 ModalBack）；这里兜住「桌面仍是顶层」或页内路径。
 --- 退出走官方 Exit 广播（桌面 onExit 关窗清栈 → DeviceListener 真正结束进程），不要只 onClose 露 FM。
 ---@return boolean
@@ -617,8 +667,17 @@ function Desktop:onDesktopBack()
         logger.dbg("desktop back page", self.tab)
         return true
     end
+    -- 根页：先退回首页；已在首页才退出，且要确认（纯按键机 Back 是常用键，误触即退出）。
+    if self.tab ~= "home" then
+        self:switchTab("home")
+        return true
+    end
     logger.dbg("desktop back root exit", self.tab)
-    UIManager:broadcastEvent(require("ui/event"):new("Exit"))
+    require("ui.themes.widgets.confirm"):new{
+        text = _("退出 KOReader？"),
+        ok_text = _("退出"),
+        ok_callback = function() UIManager:broadcastEvent(require("ui/event"):new("Exit")) end,
+    }:show()
     return true
 end
 
@@ -651,6 +710,8 @@ function Desktop:switchTab(id)
     if not PAGES[id] and not self:page(id) then return end
     local changed = self.tab ~= id
     if changed then notify(self:page(self.tab), "deactivate") end
+    -- 换页签焦点回内容区第一项（跳过顶栏），不保留上个页签的下标。
+    if changed then self._focus_idx = nil end
     self.tab = id
     notify(self:page(id), "activate", changed)
     self:updateView()
@@ -677,6 +738,7 @@ function Desktop:build()
         backdrop and backdrop.wrap(self.dimen.w, self.dimen.h, self.layers, self.tab) or self.layers,
     }
     if old then old:free() end
+    self._focus_dirty = true
     logger.dbg("book.perf desktop.build", Perf.elapsedMs(started_at), "ms", self.tab)
 end
 
@@ -697,6 +759,7 @@ function Desktop:updateView()
         syncTabs(self)
         setLayer(self, BAR, tabbar(self))
         setLayer(self, CONTENT, content(self))
+        self._focus_dirty = true
         -- 壁纸底座按页签取各界面的壁纸设置；换页后顶栏底下的壁纸也要跟着换
         local backdrop = self[1][1]
         local rescoped = backdrop ~= self.layers and backdrop.scope ~= self.tab
@@ -730,6 +793,7 @@ function Desktop:updateTopbar()
     local top = self.topbar:build(self.dimen.w)
     top.overlap_offset = { 0, 0 }
     setLayer(self, TOP, top)
+    self._focus_dirty = true
     if self.active then
         UIManager:setDirty(self, "ui", Geom:new{ x = 0, y = 0, w = self.dimen.w, h = TopBar.height() })
     end

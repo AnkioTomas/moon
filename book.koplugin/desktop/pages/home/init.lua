@@ -440,6 +440,14 @@ function Home:enterEdit()
     end
 end
 
+--- 返回键：编辑态下退出编辑（而非退回首页 / 退出 KOReader）；浏览态交回上层处理。
+---@return boolean
+function Home:onBack()
+    if not self.editing then return false end
+    self:exitEdit()
+    return true
+end
+
 --- 退出编辑模式；每个编辑动作已各自落盘。
 function Home:exitEdit()
     if not self.editing then return end
