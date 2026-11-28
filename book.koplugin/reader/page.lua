@@ -35,6 +35,12 @@ function Reader.onCreate(plugin, span)
         return
     end
     ui._book_reader_attached = true
+    -- Home 键默认 onClose + 打开原生文件管理器；月读里「主页」是桌面，重定向过去。
+    -- desktop.open 自己下一 tick 安全关书（落盘进度），不能在按键回调里同步关文档。
+    ui.onHome = function()
+        require("desktop").open(plugin)
+        return true
+    end
     applyMarginPopup()
     require("reader.engine_progress").install(ui.rolling)
     require("desktop.reader_exit").attach(ui)

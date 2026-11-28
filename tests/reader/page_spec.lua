@@ -124,6 +124,11 @@ package.preload["features.reviews.link"] = function()
     return { available = function() return false end }
 end
 
+local home_opened
+package.preload["desktop"] = function()
+    return { open = function(p) home_opened = p end }
+end
+
 local bookmarked, toggles = false, 0
 local ui = {
     dialog = {},
@@ -170,6 +175,9 @@ local other = { name = "font_size", hide_on_apply = true }
 package.preload["ui/data/creoptions"] = function() return { { options = { margin, other } } } end
 Reader.onCreate(plugin)
 Assert.is_true(ui._book_back_attached, "阅读页安装原始返回按键入口")
+Assert.is_true(type(ui.onHome) == "function", "Home 键被月读接管")
+Assert.is_true(ui:onHome())
+Assert.eq(home_opened, plugin, "Home 键重定向到月读桌面")
 Assert.is_nil(margin.hide_on_apply, "边距调整不收起面板、不弹信息框")
 Assert.is_true(other.hide_on_apply)
 moon_settings.margin_popup = true
