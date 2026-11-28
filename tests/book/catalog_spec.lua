@@ -26,6 +26,7 @@ local FakeStats = {
     summary = { total_seconds = 0 },
     daily = {},
     daily_books = {},
+    stamp = 1,
 }
 
 package.preload["utils.settings"] = function()
@@ -76,10 +77,15 @@ package.preload["book.progress_db"] = function()
         end,
     }
 end
+local stats_calls = { daily = 0 }
 package.preload["book.stats_db"] = function()
     return {
+        activityStamp = function() return FakeStats.stamp end,
         summaryBySource = function() return FakeStats.summary end,
-        dailyBySource = function() return FakeStats.daily end,
+        dailyBySource = function()
+            stats_calls.daily = stats_calls.daily + 1
+            return FakeStats.daily
+        end,
         dailyBooksBySource = function() return FakeStats.daily_books end,
         hourlyBySource = function() return FakeStats.hourly end,
         sessionRows = function() return {} end,
@@ -173,7 +179,7 @@ do -- recentBooks：进度定顺序和位置，books 只补元数据；已下载
     Assert.is_true(FakeBooks.downloaded_asks[2][3], "wechat 是章节源")
 end
 
-do -- readingInsightAsync
+do -- readingInsightAsync：分拍查库；同 stamp 再读走缓存
     FakeStats.summary = { total_seconds = 120, total_pages = 3 }
     FakeStats.daily = { { ymd = "2026-08-21", seconds = 120, pages = 4 }, { ymd = "2026-08-22", seconds = 60 } }
     FakeStats.daily_books = {
@@ -183,6 +189,7 @@ do -- readingInsightAsync
     for h = 1, 24 do hours[h] = h == 22 and 120 or 0 end
     FakeStats.hourly = { ["2026-08-21"] = hours }
     FakeBooks.meta = { ["local\nc.epub"] = { title = "C", authors = "作者" } }
+    stats_calls.daily = 0
     local got
     Catalog.readingInsightAsync("local", function(res)
         got = res
@@ -195,6 +202,26 @@ do -- readingInsightAsync
     Assert.is_nil(got.data.calendar.days["2026-08-22"].hours, "只有云端时长的日子没有小时分布")
     Assert.eq(got.data.calendar.days["2026-08-21"].books[1].title, "C")
     Assert.eq(got.data.calendar.days["2026-08-21"].books[1].percent, 20)
+    Assert.eq(stats_calls.daily, 1)
+
+    local again
+    Catalog.readingInsightAsync("local", function(res) again = res end)
+    Stubs.flush()
+    Assert.eq(again.data, got.data, "同 stamp 命中缓存")
+    Assert.eq(stats_calls.daily, 1, "缓存命中不再扫日表")
+
+    FakeStats.stamp = 2
+    Catalog.readingInsightAsync("local", function(res) again = res end)
+    Stubs.flush()
+    Assert.eq(stats_calls.daily, 2, "stamp 变了重算")
+end
+
+do -- readingInsightAsync 可取消：中途 cancel 不回调
+    local got = false
+    local job = Catalog.readingInsightAsync("local", function() got = true end)
+    job:cancel()
+    Stubs.flush()
+    Assert.is_false(got)
 end
 
 do -- 非法 source_id

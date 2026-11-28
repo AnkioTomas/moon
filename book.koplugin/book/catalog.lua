@@ -961,23 +961,27 @@ function Catalog.recentBooks(source_id, limit)
     return Catalog.collapseVolumes(Catalog.recentRows(source_id, limit))
 end
 
---- 阅读洞察（reading_stats 聚合）。
----@param source_id string
----@param cb fun(data: BookInsightResult|nil, err: string|nil)
----@return { cancel: fun() }
-function Catalog.readingInsightAsync(source_id, cb)
-    return deferScoped(source_id, cb, function(scope)
-        cb({ data = Catalog.readingInsight(scope) })
-    end)
+--- 洞察结果缓存：按展示范围 + activityStamp；桌面统计页与锁屏共用，避免同内容连算两遍。
+local insight_cache = { key = nil, data = nil }
+
+---@param scope string|string[]
+---@return string
+local function insightCacheKey(scope)
+    local stamp = require("book.stats_db").activityStamp(scope)
+    if type(scope) == "table" then
+        return table.concat(scope, "\0") .. "\31" .. tostring(stamp)
+    end
+    return tostring(scope) .. "\31" .. tostring(stamp)
 end
 
---- 同步读本地洞察（桌面统计页与锁屏统计背景共用）。
----@param scope string|string[] Catalog.libraryScope 的结果
+--- 算一套洞察并写入缓存（key 中途变了就不缓存，免得塞脏数据）。
+---@param scope string|string[]
+---@param key string
 ---@return StatsInsight
-function Catalog.readingInsight(scope)
+local function buildInsight(scope, key)
     local StatsDB = require("book.stats_db")
     local daily = StatsDB.dailyBySource(scope)
-    return Catalog.toInsight(
+    local data = Catalog.toInsight(
         scope,
         StatsDB.summaryBySource(scope, daily),
         daily,
@@ -989,6 +993,72 @@ function Catalog.readingInsight(scope)
             reading = StatsDB.progressBooks(scope, false, 5),
         }
     )
+    if insightCacheKey(scope) == key then
+        insight_cache.key, insight_cache.data = key, data
+    end
+    return data
+end
+
+--- 阅读洞察（reading_stats 聚合）。分三拍查库，中间可取消；命中缓存当拍回调。
+---@param source_id string
+---@param cb fun(data: BookInsightResult|nil, err: string|nil)
+---@return { cancel: fun() }
+function Catalog.readingInsightAsync(source_id, cb)
+    local cancelled = false
+    local UIManager = require("ui/uimanager")
+    local Guard = require("ui.guard")
+    ---@param label string
+    ---@param fn fun()
+    local function tick(label, fn)
+        UIManager:nextTick(Guard.wrap(label, function()
+            if not cancelled then fn() end
+        end))
+    end
+    tick("catalog insight scope", function()
+        local scope = Catalog.libraryScope(source_id)
+        if not validScope(scope) then
+            cb(nil, "invalid source_id")
+            return
+        end
+        ---@cast scope string|string[]
+        local key = insightCacheKey(scope)
+        if insight_cache.key == key and insight_cache.data then
+            cb({ data = insight_cache.data })
+            return
+        end
+        local StatsDB = require("book.stats_db")
+        local daily = StatsDB.dailyBySource(scope)
+        local summary = StatsDB.summaryBySource(scope, daily)
+        tick("catalog insight books", function()
+            local daily_books = StatsDB.dailyBooksBySource(scope)
+            local hourly = StatsDB.hourlyBySource(scope)
+            tick("catalog insight sessions", function()
+                local data = Catalog.toInsight(scope, summary, daily, daily_books, hourly, {
+                    session_rows = StatsDB.sessionRows(scope, os.time() - 400 * 86400),
+                    finished = StatsDB.progressBooks(scope, true),
+                    reading = StatsDB.progressBooks(scope, false, 5),
+                })
+                if insightCacheKey(scope) == key then
+                    insight_cache.key, insight_cache.data = key, data
+                end
+                cb({ data = data })
+            end)
+        end)
+    end)
+    return { cancel = function()
+            cancelled = true
+        end }
+end
+
+--- 同步读本地洞察（锁屏合成等不能分拍的路径）；与 Async 共用缓存。
+---@param scope string|string[] Catalog.libraryScope 的结果
+---@return StatsInsight
+function Catalog.readingInsight(scope)
+    local key = insightCacheKey(scope)
+    if insight_cache.key == key and insight_cache.data then
+        return insight_cache.data
+    end
+    return buildInsight(scope, key)
 end
 
 return Catalog
