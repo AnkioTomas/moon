@@ -21,13 +21,20 @@ local MoonSettings = require("utils.settings")
 
 local M = {}
 
---- 默认放置：全部第 1 页，顺序同注册顺序。
+-- 尚未初始化时的首页：时间天气在上，当前阅读在下。其余组件等用户自己加。
+local DEFAULT_IDS = { "clock_weather", "recent_hero" }
+
+--- 默认放置。注册表里没有的 id 跳过，不硬塞。
 ---@param components { id: string }[]
 ---@return BookHomeWidgetPlacement[]
 local function defaults(components)
+    local known = {}
+    for _idx, comp in ipairs(components) do known[comp.id] = true end
     local out = {}
-    for i, comp in ipairs(components) do
-        out[i] = { id = comp.id, page = 1, order = i, height = "default" }
+    for _idx, id in ipairs(DEFAULT_IDS) do
+        if known[id] then
+            out[#out + 1] = { id = id, page = 1, order = #out + 1, height = "default" }
+        end
     end
     return out
 end
@@ -80,7 +87,7 @@ local function copyPlace(item, page, order)
 end
 
 --- 净化放置表：合法 id、去重、页/序规范化。
---- 非表（含 nil）视为尚未初始化，回到默认放置；空表或没有合法记录表示用户清空，保持空，不回填。
+--- 非表（含 nil）视为尚未初始化，回到默认的时间天气 + 当前阅读；空表或没有合法记录表示用户清空，保持空，不回填。
 ---@param components { id: string }[] 已注册组件，按注册顺序
 ---@return BookHomeWidgetPlacement[]
 function M.sanitize(raw, components)

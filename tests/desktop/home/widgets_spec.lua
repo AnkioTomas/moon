@@ -13,7 +13,10 @@ package.preload["utils.settings"] = function()
 end
 
 local Widgets = require("desktop.pages.home.placements")
-local components = { { id = "clock" }, { id = "stats" }, { id = "weather" } }
+local components = {
+    { id = "clock" }, { id = "clock_weather" }, { id = "stats" },
+    { id = "recent_hero" }, { id = "weather" },
+}
 
 local list = Widgets.sanitize({
     { id = "stats", page = 2, order = 2, height = "fill" },
@@ -27,14 +30,16 @@ Assert.eq(list[1].order, 1)
 Assert.eq(list[2].id, "stats")
 Assert.eq(list[2].page, 2)
 
--- 尚未初始化（非表）才回默认布局。
+-- 尚未初始化（非表）才回默认布局：时间天气 + 当前阅读，不管注册顺序。
 local fallback = Widgets.sanitize("broken", components)
-Assert.len(fallback, 3)
-Assert.eq(fallback[1].id, "clock")
-Assert.eq(fallback[3].id, "weather")
-Assert.eq(fallback[3].page, 1)
-Assert.eq(fallback[3].order, 3)
-Assert.len(Widgets.sanitize(nil, components), 3, "nil 视为未初始化")
+Assert.len(fallback, 2)
+Assert.eq(fallback[1].id, "clock_weather")
+Assert.eq(fallback[1].page, 1)
+Assert.eq(fallback[1].order, 1)
+Assert.eq(fallback[2].id, "recent_hero")
+Assert.eq(fallback[2].order, 2)
+Assert.len(Widgets.sanitize(nil, components), 2, "nil 视为未初始化")
+Assert.len(Widgets.sanitize(nil, { { id = "clock" } }), 0, "默认组件不在注册表里就不硬塞")
 
 -- 空表或没有合法记录：保持空，不回填默认组件。
 Assert.len(Widgets.sanitize({}, components), 0)
@@ -43,7 +48,7 @@ Assert.len(Widgets.sanitize({ { id = "nope" } }, components), 0)
 store.home_widgets = {}
 Assert.len(Widgets.load(components), 0, "空配置读回来仍是空")
 store.home_widgets = nil
-Assert.len(Widgets.load(components), 3, "缺键仍走首次默认")
+Assert.len(Widgets.load(components), 2, "缺键仍走首次默认")
 Widgets.save({})
 Assert.len(store.home_widgets, 0, "空数组能落盘")
 Assert.len(Widgets.load(components), 0, "保存后再读不会回填")

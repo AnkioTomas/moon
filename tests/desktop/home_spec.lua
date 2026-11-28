@@ -49,17 +49,18 @@ desktop.home = home
 local function drain() local out = table.concat(log, ","); log = {}; return out end
 local function placements() return Registry.widgets() end
 
-do -- 首显：默认全部组件按屏高分页并落盘；未 resume 的首页不启动组件
+do -- 首显：默认只有时间天气和当前阅读，按屏高分页并落盘；未 resume 的首页不启动组件
     Assert.is_nil(Kit.sections.home.home_widgets)
     desktop:updateView()
     local list = placements()
-    Assert.len(list, #IDS)
-    Assert.eq(list[1].id, "clock")
+    Assert.len(list, 2)
+    Assert.eq(list[1].id, "clock_weather")
+    Assert.eq(list[2].id, "recent_hero")
+    Assert.eq(list[1].page, 1)
     Assert.eq(list[2].page, 1)
-    Assert.eq(list[3].page, 2, "每页只塞得下两个 300 高")
-    Assert.eq(home.pages, 8)
-    Assert.is_true(home.visible.clock and home.visible.weather)
-    Assert.is_nil(home.visible.clock_weather)
+    Assert.eq(home.pages, 1)
+    Assert.is_true(home.visible.clock_weather and home.visible.recent_hero)
+    Assert.is_nil(home.visible.clock)
     Assert.eq(drain(), "", "首页不在前台不启动组件")
     Assert.eq(desktop.root:getSize().h, 800)
 
@@ -69,8 +70,8 @@ do -- 首显：默认全部组件按屏高分页并落盘；未 resume 的首页
     })
     desktop:updateView()
     Assert.eq(home.pages, 2)
-    Assert.is_nil(home.components.clock, "移出布局的组件退役")
-    Assert.matches(drain(), "clock%.destroy")
+    Assert.is_nil(home.components.clock_weather, "移出布局的组件退役")
+    Assert.matches(drain(), "clock_weather%.destroy")
     desktop.updates = 1
 end
 
