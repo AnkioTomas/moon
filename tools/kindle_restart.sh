@@ -11,7 +11,10 @@
 set -euo pipefail
 HOST="${1:-192.168.100.124}"
 
-ssh -p 2222 "root@$HOST" 'cat > /tmp/ko_restart.sh && { setsid nohup sh /tmp/ko_restart.sh >/tmp/ko_restart.log 2>&1 </dev/null & }' <<'EOF'
+# 设备端脚本必须脱离 ssh 会话（SSH 跑在 KOReader 里，杀 reader.lua 会带走同会话子进程）。
+# 优先 setsid 新建会话；老机型（K3）连 setsid / nohup 都没有，退回纯 POSIX：
+# ( ... & ) 让子 shell 立即退出、任务被 init 收养，trap '' HUP 忽略挂断，父进程 TERM 后仍存活。
+ssh -p 2222 "root@$HOST" 'cat > /tmp/ko_restart.sh && if command -v setsid >/dev/null 2>&1; then setsid sh /tmp/ko_restart.sh >/tmp/ko_restart.log 2>&1 </dev/null & else ( trap "" HUP; sh /tmp/ko_restart.sh >/tmp/ko_restart.log 2>&1 </dev/null & ); fi' <<'EOF'
 cd /
 waitState() {
     i=0
