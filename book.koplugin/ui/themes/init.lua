@@ -190,6 +190,21 @@ function Theme.color(value)
     return Blitbuffer.ColorRGB32(math.floor(value / 0x10000), math.floor(value / 0x100) % 0x100, value % 0x100, 0xFF)
 end
 
+--- 按键设备焦点态：沿控件外沿描一圈 accent 粗边框，内侧再贴一圈页面底色细线。
+--- accent 实心的主按钮上外框与按钮同色会隐形，靠这圈内线显出来。焦点指示与控件配色解耦——
+--- 不管按钮 / 点击区 / 封面什么底色都是同一种边框，统一由容器（Modal / Desktop）在焦点项 dimen 上画。
+---@param bb table Blitbuffer
+---@param x number
+---@param y number
+---@param w number
+---@param h number
+function Theme.focusBorder(bb, x, y, w, h)
+    local t = Theme.current()
+    local outer = Theme.px(t.control.border + 1)
+    bb:paintBorder(x, y, w, h, outer, Theme.color(t.color.accent), 0)
+    bb:paintBorder(x + outer, y + outer, w - outer * 2, h - outer * 2, Theme.px(1), Theme.color(t.color.page), 0)
+end
+
 --- 令牌或 Color 是否走 RGB32 绘图路径。Color 对象不能和数字比较。
 ---@param value any
 ---@return boolean

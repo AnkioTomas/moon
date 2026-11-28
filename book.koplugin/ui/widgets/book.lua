@@ -207,21 +207,27 @@ end
 --- 包一层可点击/长按容器。
 ---@param w number 可用宽度，单位像素
 ---@param h number 可用高度，单位像素
----@param on_tap fun()|nil 点击命中区域时执行的回调
+---@param on_tap fun(dimen: table)|nil 点击命中区域时执行的回调，收到命中区域
 ---@param on_hold fun()|nil 长按命中区域时执行的回调
 ---@return table
 function Book.tappable(w, h, on_tap, on_hold)
     local tap = InputContainer:new{
         dimen = Geom:new{ w = w, h = h },
     }
-    tap.ges_events = {
-        TapBookInfo = {
+    tap.ges_events = {}
+    -- 没有点击回调就不挂标记：纯展示容器不该被焦点框住（见 ui/focus）。
+    if on_tap then
+        tap.ges_events.TapBookInfo = {
             GestureRange:new{
                 ges = "tap",
                 range = function() return tap:getSize() end,
             },
-        },
-    }
+        }
+        tap.onTapBookInfo = function()
+            on_tap(tap.dimen)
+            return true
+        end
+    end
     if on_hold then
         tap.ges_events.HoldBookInfo = {
             GestureRange:new{
@@ -233,10 +239,6 @@ function Book.tappable(w, h, on_tap, on_hold)
             on_hold()
             return true
         end
-    end
-    tap.onTapBookInfo = function()
-        if on_tap then on_tap(tap.dimen) end
-        return true
     end
     return tap
 end

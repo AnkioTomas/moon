@@ -33,6 +33,7 @@ local VerticalGroup = require("ui/widget/verticalgroup")
 local VerticalSpan = require("ui/widget/verticalspan")
 local Guard = require("ui.guard")
 local Ext = require("utils.extension")
+local Focus = require("ui.focus")
 local Theme = require("ui.themes")
 local Box = require("ui.themes.widgets.box")
 local Button = require("ui.themes.widgets.button")
@@ -96,6 +97,10 @@ function Modal:init()
         self._mask = Mask:new{ dimen = self.dimen }
     end
     self.key_events.ModalBack = { { Device.input.group.Back } }
+    -- 纯按键设备：方向键在面板内可点控件间走焦点，中心键激活（焦点机制见 ui/focus）。
+    -- 翻页滚动归翻页键，不占方向键。嵌入窗口（show_parent）的按键被 handleEvent 的 Input.isTop 挡掉，
+    -- 焦点由父窗口统管，这里注册了也不触发。触摸设备不发这些键，无影响。
+    Focus.registerKeys(self)
     self.ges_events.TapModal = {
         GestureRange:new{ ges = "tap", range = self.dimen },
     }
@@ -111,6 +116,7 @@ end
 ---@param panel table Box
 function Modal:setPanel(panel)
     self[1] = panel
+    self._focus_dirty = true
     local size = panel:getSize()
     local a = self.anchor
     if type(a) == "table" then
@@ -185,8 +191,12 @@ local function paint(self, bb, x, y)
     Ext.call("modal.backdrop", self, bb, x, y)
     if self._mask then self._mask:paintTo(bb, x, y) end
     self[1]:paintTo(bb, x + self.panel_x, y + self.panel_y)
+    if Focus.enabled() then Focus.paint(self, bb) end
     return true
 end
+
+-- 方向键 / 中心键回调共用（含默认 onFocusHold = 焦点项长按）。
+Focus.mixin(Modal)
 
 --- 经 guard 隔离。画坏的弹窗不能只停画：它仍在栈顶，会成为吞掉全部点按的隐形窗口，
 --- 所以报告后关掉它；UIManager 正在遍历窗口栈重绘，关窗推到下一 tick。

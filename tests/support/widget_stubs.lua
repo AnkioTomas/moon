@@ -318,6 +318,7 @@ function Kit.install(theme)
     }
     Kit.shown, Kit.closed, Kit.dirty, Kit.scheduled, Kit.unscheduled = {}, {}, {}, {}, {}
     Kit.color_enabled = false
+    Kit.has_dpad = Kit.has_dpad == true
     Kit.sections = {}
     local modules = {
         ["ffi/blitbuffer"] = {
@@ -387,12 +388,20 @@ function Kit.install(theme)
                 scaleByDPI = function(_, n) return n end,
                 isColorEnabled = function() return Kit.color_enabled == true end,
             },
-            hasKeys = function() return false end,
+            hasKeys = function() return Kit.has_dpad == true end,
             hasFewKeys = function() return false end,
+            hasDPad = function() return Kit.has_dpad == true end,
+            isTouchDevice = function() return Kit.touch ~= false end,
             hasGSensor = function() return false end,
             hasEinkScreen = function() return true end,
             isSDL = function() return false end,
             input = { group = { Back = "Back" } },
+        },
+        -- 测试时钟（毫秒当量）：Kit.now 推进即模拟按住时长。
+        ["ui/time"] = {
+            now = function() return Kit.now or 0 end,
+            since = function(t) return (Kit.now or 0) - t end,
+            to_ms = function(d) return d end,
         },
         ["ui/geometry"] = { new = function(_, o) return geom(o) end },
         ["ui/bidi"] = { flipDirectionIfMirroredUILayout = function(d) return d end },
