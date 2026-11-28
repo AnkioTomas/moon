@@ -27,6 +27,8 @@ local M = {
     id = "recent_list",
     label = _("最近阅读列表"),
     icon = "view_list",
+    category = "reading",
+    hint = _("最近在读的封面"),
 }
 setmetatable(M, require("desktop.pages.home.base"))
 M.__index = M

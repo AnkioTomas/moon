@@ -30,6 +30,8 @@ local M = {
     id = "heatmap",
     label = _("阅读热力图"),
     icon = "calendar_view_month",
+    category = "stats",
+    hint = _("最近几周每天读了多久"),
 }
 setmetatable(M, require("desktop.pages.home.base"))
 M.__index = M

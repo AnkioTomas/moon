@@ -65,10 +65,18 @@ function Tabs.row(opts)
     local sm = Theme.px(t.space.sm)
     local faint, accent = t.color.faint, t.color.accent
     local iw = math.max(1, (opts.width or 0) - pad * 2)
+    local tab_list = opts.tabs or {}
+    local budget
+    if opts.fit and #tab_list > 0 then
+        -- 页签之间各留一段 pad，剩下的宽度均分给文字，放不下就截断。
+        budget = math.max(1, math.floor((iw - pad * #tab_list) / #tab_list))
+    end
     local tabs = HorizontalGroup:new{ align = "top" }
-    for _idx, tab in ipairs(opts.tabs or {}) do
+    for _idx, tab in ipairs(tab_list) do
         local active = tab.id == opts.active
-        local label = Text.line("body", tab.text, { bold = active, color = active and accent or faint, optical = true })
+        local label = Text.line("body", tab.text, {
+            bold = active, color = active and accent or faint, optical = true, width = budget,
+        })
         local underline = active and math.max(2, Theme.px(2)) or 0
         local cell = VerticalGroup:new{
             align = "center",

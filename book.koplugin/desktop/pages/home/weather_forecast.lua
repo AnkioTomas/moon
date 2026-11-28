@@ -12,6 +12,8 @@ local M = setmetatable({
     id = "weather_forecast",
     label = _("每小时天气预报"),
     icon = "weather_mix",
+    category = "time",
+    hint = _("当前天气和接下来几档"),
     forecast = true,
 }, require("desktop.pages.home.weather"))
 M.__index = M

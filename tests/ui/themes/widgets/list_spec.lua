@@ -179,6 +179,58 @@ Assert.eq(list.tabs.active, "y")
 Assert.len(list.items, 40)
 Assert.eq(list.page, 3, "翻到第 35 项所在页")
 
+-- 顶部分栏：文字页签在标题下、列表项之上，不占底栏。
+list = List:new{
+    title = "添加",
+    items = items(3),
+    tabs = {
+        place = "top",
+        tabs = { { id = "a", text = "甲" }, { id = "b", text = "乙" } },
+        active = "a",
+        on_tab = function(id) return id == "b" and items(2) or items(3) end,
+    },
+}
+Assert.eq(list[1]:getSize().h, 800, "顶部分栏仍铺满整屏")
+Assert.is_true(list.per_page >= 13, "文字页签比底栏矮，不按底栏 60px 扣行")
+local texts = Kit.texts(list)
+local at_tab, at_row
+for i, text in ipairs(texts) do
+    if text == "甲" then at_tab = i end
+    if text == "项1" then at_row = i end
+end
+Assert.is_true(at_tab and at_row and at_tab < at_row, "分类在组件名上面")
+local top_taps = Kit.taps(list)
+top_taps[1]:onTapThemeArea()
+Assert.eq(list.tabs.active, "a", "点当前页签不切")
+top_taps[2]:onTapThemeArea()
+Assert.eq(list.tabs.active, "b")
+Assert.len(list.items, 2)
+
+-- 九个两字分类（全部 + 七类 + 扩展）不得画出屏幕。
+local wide = {}
+for i = 1, 9 do wide[i] = { id = tostring(i), text = "全部" } end
+list = List:new{
+    title = "添加",
+    items = items(1),
+    tabs = { place = "top", tabs = wide, active = "1", on_tab = function() return items(1) end },
+}
+local too_wide = Kit.find(list, function(w)
+    return w.getSize and w:getSize().w > list.dimen.w
+end)
+Assert.len(too_wide, 0, "顶部分类超出屏幕宽")
+
+local long = {}
+for i = 1, 8 do long[i] = { id = tostring(i), text = "这是一个很长的分类名" } end
+list = List:new{
+    title = "添加",
+    items = items(1),
+    tabs = { place = "top", tabs = long, active = "1", on_tab = function() return items(1) end },
+}
+too_wide = Kit.find(list, function(w)
+    return w.getSize and w:getSize().w > list.dimen.w
+end)
+Assert.len(too_wide, 0, "页签放不下就均分截断")
+
 -- 带副标题的行按双行高度算 per_page，避免底行和翻页条被顶出屏幕。
 local sub_items = {}
 for i = 1, 30 do

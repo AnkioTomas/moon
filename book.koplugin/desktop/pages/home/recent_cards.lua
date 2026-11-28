@@ -50,6 +50,8 @@ local M = {
     id = "recent_cards",
     label = _("最近阅读卡片"),
     icon = "collections_bookmark",
+    category = "reading",
+    hint = _("封面堆叠，左右切换"),
 }
 setmetatable(M, require("desktop.pages.home.base"))
 M.__index = M

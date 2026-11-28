@@ -47,6 +47,8 @@ local M = {
     id = "weather",
     label = _("天气预报"),
     icon = "partly_cloudy_day",
+    category = "time",
+    hint = _("当前温度和天气"),
     forecast = false,
 }
 setmetatable(M, require("desktop.pages.home.base"))

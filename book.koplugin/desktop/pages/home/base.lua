@@ -22,6 +22,8 @@ local WidgetContainer = require("ui/widget/container/widgetcontainer")
 ---@field id string 首页组件注册标识
 ---@field label string 设置页显示的组件名称
 ---@field icon string 设置页使用的图标名称
+---@field category string|nil 添加列表分类：内置 id，或第三方自定的页签文字；不写的第三方进扩展
+---@field hint string|nil 添加列表里名字下面的一行说明
 ---@field heightRange fun(self: BookHomeComponent, ctx: table|nil, opts: table|nil): BookHomeHeightSpec
 ---@field createWidget fun(self: BookHomeComponent): table 按 self.ctx / self.opts 构建内容
 ---@field home BookHome|nil 拥有本组件的首页实例

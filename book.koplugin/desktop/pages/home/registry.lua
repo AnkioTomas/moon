@@ -4,8 +4,10 @@
 
 第三方组件两种写法：
   - 完整组件类：继承 desktop.pages.home.base，自带 id / label / icon / createWidget 等。
-  - 简写表：{ id, title, build = fun(ctx, w, h): widget, icon?, height? | heightRange?, settings? = fun(desktop, id) }，
+  - 简写表：{ id, title, build = fun(ctx, w, h): widget, icon?, category?, hint?, height? | heightRange?, settings? = fun(desktop, id) }，
     这里包成 base 子类；build 用 ui.themes.widgets.* 拼控件，settings 让编辑态出现设置按钮。
+    category 用 time / stats / reading / shelf / daily 就并进那一栏（weather 并进 time，quote / feed 并进 daily）；写别的非空字符串就单独成一栏，页签文字就是这个字符串。不写进「扩展」。
+    hint 是名字下面的一行说明。
 id 按插件划命名空间：必须是 `<插件 id>.` 开头，简写表可只写短名（自动补前缀）；不合规或重名的记日志跳过。
 
 第三方代码全部 pcall 隔离：new / createWidget / heightRange / 生命周期 / showSettings 抛错只记日志，
@@ -87,6 +89,8 @@ local function fromSpec(spec, id)
         id = id,
         label = type(spec.title) == "string" and spec.title or id,
         icon = spec.icon or "widgets",
+        category = type(spec.category) == "string" and spec.category or nil,
+        hint = type(spec.hint) == "string" and spec.hint or nil,
     }, Base)
     C.__index = C
     function C:createWidget()

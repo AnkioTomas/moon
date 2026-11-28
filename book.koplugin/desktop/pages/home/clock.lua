@@ -27,6 +27,8 @@ local M = {
     id = "clock",
     label = _("时钟"),
     icon = "schedule",
+    category = "time",
+    hint = _("大时间、日期与农历"),
 }
 setmetatable(M, require("desktop.pages.home.base"))
 M.__index = M

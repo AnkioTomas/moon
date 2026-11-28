@@ -24,6 +24,8 @@ local M = {
     id = "clock_weather",
     label = _("时间天气"),
     icon = "nest_clock_farsight_analog",
+    category = "time",
+    hint = _("时间与天气并排"),
 }
 setmetatable(M, require("desktop.pages.home.base"))
 M.__index = M

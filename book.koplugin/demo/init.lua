@@ -7,7 +7,7 @@ main.lua 检测到 demo/ 目录存在才转发 addToMainMenu。
     ├─ 控件：文字 / 按钮 / 进度条 / 卡片   全屏展示页，可交互
     ├─ 控件：行 / 翻页条 / 底栏            全屏展示页，可交互
     ├─ 控件：图片 / 锚点弹出 / 多按钮行    全屏展示页，可交互
-    └─ 提示、确认框、动作表、列表×4、图标选择、路径选择×2、进度弹窗、数值×2、输入×2、文本查看、二维码
+    └─ 提示、确认框、动作表、列表×5、图标选择、路径选择×2、进度弹窗、数值×2、输入×2、文本查看、二维码
 
 @module koplugin.book.demo
 --]]
@@ -366,6 +366,44 @@ local function entries()
         { text = "列表：60 项分页（第 3 项禁用）", run = function()
             List:new{ title = "长列表", subtitle = "打开即翻到选中的第 33 项", items = numbered(60, 33),
                 on_select = function(v) say("选择：第 " .. v .. " 项") end }:show()
+        end },
+        { text = "列表：顶部分类", run = function()
+            local catalog = {
+                { text = "时钟", subtitle = "大时间、日期与农历", value = "clock", cat = "time" },
+                { text = "时间天气", subtitle = "时间与天气并排", value = "clock_weather", cat = "time" },
+                { text = "阅读统计", subtitle = "连续阅读、时长和本数", value = "stats", cat = "stats" },
+                { text = "当前阅读", subtitle = "最近在读的大卡片", value = "hero", cat = "reading" },
+                { text = "书架", subtitle = "在架书的封面", value = "shelf", cat = "shelf" },
+                { text = "一言", subtitle = "随机一句", value = "hitokoto", cat = "daily" },
+                { text = "棋盘", subtitle = "第三方自定分类", value = "board", cat = "棋牌" },
+            }
+            local function rows(id)
+                if id == "all" then return catalog end
+                local out = {}
+                for _idx, it in ipairs(catalog) do
+                    if it.cat == id then out[#out + 1] = it end
+                end
+                return out
+            end
+            List:new{
+                title = "添加组件",
+                items = rows("all"),
+                tabs = {
+                    place = "top",
+                    active = "all",
+                    tabs = {
+                        { id = "all", text = "全部" },
+                        { id = "time", text = "时间" },
+                        { id = "stats", text = "统计" },
+                        { id = "reading", text = "在读" },
+                        { id = "shelf", text = "书架" },
+                        { id = "daily", text = "每日" },
+                        { id = "棋牌", text = "棋牌" },
+                    },
+                    on_tab = rows,
+                },
+                on_select = function(v) say("添加：" .. v) end,
+            }:show()
         end },
         { text = "图标选择 IconPicker", run = function()
             IconPicker:new{ current = "menu_book", on_select = function(name) say("图标：" .. name) end }:show()

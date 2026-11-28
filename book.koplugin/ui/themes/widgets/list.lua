@@ -9,7 +9,7 @@
   | (•) 选项二                    |    | [<]   1 / 2    [>]  |
   | …                             |    +---------------------+
   | [<]        1 / 3         [>]  |
-  |  [分栏一]  [分栏二]  [分栏三] |   tabs 给了才有（仅全屏）
+  |  [分栏一]  [分栏二]  [分栏三] |   tabs 缺省钉在底部；place="top" 则改到标题栏下
   +-------------------------------+
 
 subtitle 只在全屏标题栏里显示；居中面板点外面关，全屏点右上角或返回键关；左右滑翻页。
@@ -26,8 +26,8 @@ items：{ text, value, icon, mandatory（右侧状态字）, widget（右侧控�
       给了 current 时不看 checked：value == current 的项选中，每项都画 radio（不改调用方的 items）。
 多选：点按就地翻转 item.checked（会改调用方的 items）并 on_toggle(value, checked, item)，不关窗；
       结果在 close_callback 里读 items。
-分栏：tabs = { tabs = { { id, text, icon } }, active = id, on_tab = fun(id): items }；
-      切栏时 on_tab 返回新项，翻到其 checked 项所在页。
+分栏：tabs = { tabs = { { id, text, icon } }, active = id, on_tab = fun(id): items, place? = "top" }；
+      切栏时 on_tab 返回新项，翻到其 checked 项所在页。place = "top" 画在标题栏下，缺省钉底栏。
 
   List:new{ title = "排序", items = items, on_select = fn }:show()
   list:setItems(items)   -- 异步加载后替换内容，停留在原页（越界则夹到末页）
@@ -45,10 +45,12 @@ local Modal = require("ui.themes.widgets.modal")
 local Pager = require("ui.themes.widgets.pager")
 local Row = require("ui.themes.widgets.row")
 local Tabbar = require("ui.themes.widgets.tabbar")
+local Tabs = require("ui.themes.widgets.tabs")
 local TitleBar = require("ui.themes.widgets.titlebar")
 
 ---@class BookThemeListTabs
 ---@field tabs table[] { id, text, icon }
+---@field place "top"|nil "top" 时页签在标题栏下；缺省钉在底部
 ---@field active any
 ---@field on_tab fun(id: any): table[]
 
@@ -109,6 +111,39 @@ local function hasSubtitle(items)
     return false
 end
 
+--- 分栏占位高度。顶部页签按画出来的高度算，底栏用固定高度。
+---@return number
+function List:tabChrome()
+    if not self.tabs then return 0 end
+    if self.tabs.place == "top" then return self:tabBar():getSize().h end
+    return Tabbar.height()
+end
+
+--- 分栏控件。place = "top" 是标题下的文字页签，否则是底栏图标格。
+---@return table|nil
+function List:tabBar()
+    if not self.tabs then return nil end
+    local function on_tab(id) self:switchTab(id) end
+    if self.tabs.place == "top" then
+        local opts = {
+            width = self.row_w,
+            tabs = self.tabs.tabs,
+            active = self.tabs.active,
+            on_tab = on_tab,
+        }
+        local row = Tabs.row(opts)
+        if row:getSize().w <= self.row_w then return row end
+        opts.fit = true
+        return Tabs.row(opts)
+    end
+    return Tabbar.widget({
+        width = self.row_w,
+        tabs = self.tabs.tabs,
+        active = self.tabs.active,
+        on_tab = on_tab,
+    })
+end
+
 function List:updateView()
     local t = self.theme
     self.row_w = self.centered and self:innerWidth() or self.dimen.w
@@ -116,7 +151,7 @@ function List:updateView()
     self.pitch = self.row_h + Theme.px(t.row.divider)
     self.header_widget = self:buildHeader()
     local header_h = self.header_widget and self.header_widget:getSize().h or 0
-    local chrome = TitleBar.height() + (self.tabs and Tabbar.height() or 0)
+    local chrome = TitleBar.height() + self:tabChrome()
     if self.centered then
         self:setDialog{ title = self.title }
         chrome = self[1]:getSize().h + Theme.px(t.space.sm) * 2
@@ -257,18 +292,14 @@ function List:rebuild()
         self:setDialog{ title = self.title, body = body }
         return
     end
-    -- 全屏：翻页条和分栏钉在底部，行不满一页时中间补空。
+    -- 全屏：翻页条钉在底部；分栏缺省也钉底部，place = "top" 时贴在标题栏下。行不满一页时中间补空。
     local bar = TitleBar.widget({
         width = self.row_w, title = self.title, subtitle = self.subtitle,
         left_icon = self.left_icon, left_callback = self.left_callback,
         right_icon = "close", right_callback = function() self:dismiss() end,
     })
-    local tabbar = self.tabs and Tabbar.widget({
-        width = self.row_w,
-        tabs = self.tabs.tabs,
-        active = self.tabs.active,
-        on_tab = function(id) self:switchTab(id) end,
-    })
+    local tabbar = self:tabBar()
+    local tabs_top = self.tabs and self.tabs.place == "top"
     self.header_widget = self:buildHeader()
     local header_h = self.header_widget and self.header_widget:getSize().h or 0
     local used = bar:getSize().h + header_h + rows:getSize().h
@@ -277,11 +308,12 @@ function List:rebuild()
         align = "left",
         bar,
     }
+    if tabs_top and tabbar then page[#page + 1] = tabbar end
     if self.header_widget then page[#page + 1] = self.header_widget end
     page[#page + 1] = rows
     page[#page + 1] = VerticalSpan:new{ width = math.max(0, self.dimen.h - used) }
     if pager then page[#page + 1] = pager end
-    if tabbar then page[#page + 1] = tabbar end
+    if tabbar and not tabs_top then page[#page + 1] = tabbar end
     self:setPanel(Box:new{ style = { bg = t.color.page }, width = self.dimen.w, height = self.dimen.h, page })
 end
 

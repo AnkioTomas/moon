@@ -15,6 +15,8 @@ local M = setmetatable({
     id = "excerpt",
     label = _("书摘"),
     icon = "format_ink_highlighter",
+    category = "daily",
+    hint = _("随机一条划线"),
     center_key = "home_excerpt_center",
 }, HitokotoView)
 M.__index = M

@@ -22,6 +22,8 @@ local M = {
     id = "hitokoto",
     label = _("一言"),
     icon = "format_quote",
+    category = "daily",
+    hint = _("随机一句"),
     center_key = "home_hitokoto_center",
 }
 setmetatable(M, require("desktop.pages.home.base"))

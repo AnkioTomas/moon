@@ -256,14 +256,20 @@ local function showMargin(self, id, placement)
 end
 
 --- 尚未摆上首页的已注册组件。
----@return table[] candidates { id, label } 列表，按注册顺序
+---@return table[] candidates { id, label, icon, category, hint } 列表，按注册顺序
 local function unplaced()
     local placed = {}
     for _i, item in ipairs(Components.widgets()) do placed[item.id] = true end
     local candidates = {}
     for _i, comp in ipairs(Components.list()) do
         if not placed[comp.id] then
-            candidates[#candidates + 1] = { id = comp.id, label = comp.label }
+            candidates[#candidates + 1] = {
+                id = comp.id,
+                label = comp.label,
+                icon = comp.icon,
+                category = comp.category,
+                hint = comp.hint,
+            }
         end
     end
     return candidates

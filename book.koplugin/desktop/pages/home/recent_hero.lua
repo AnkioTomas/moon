@@ -15,6 +15,8 @@ local M = {
     id = "recent_hero",
     label = _("当前阅读"),
     icon = "auto_stories",
+    category = "reading",
+    hint = _("最近在读的大卡片"),
 }
 setmetatable(M, require("desktop.pages.home.base"))
 M.__index = M

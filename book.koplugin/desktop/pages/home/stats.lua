@@ -19,6 +19,8 @@ local M = {
     id = "stats",
     label = _("阅读统计"),
     icon = "insights",
+    category = "stats",
+    hint = _("连续阅读、时长和本数"),
 }
 setmetatable(M, require("desktop.pages.home.base"))
 M.__index = M

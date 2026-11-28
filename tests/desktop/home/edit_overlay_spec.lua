@@ -86,16 +86,51 @@ do -- 高度：当前项打勾；自定义走 Spin，按 10 步进、上限夹�
     Assert.eq(Themed.last("spin").fields[1].value, 150)
 end
 
-do -- 添加：候选走居中分页列表（组件多时翻页，不溢出）
+do -- 添加：没分类时仍是居中列表
     local picked
     Edit.showAddDialog({ { id = "news", label = "热点新闻" }, { id = "stats", label = "阅读统计" } },
         function(id) picked = id end)
     local list = Themed.last("list")
     Assert.eq(list.title, "添加组件")
     Assert.is_true(list.centered)
+    Assert.is_nil(list.tabs)
     Assert.len(list.items, 2)
     Themed.choose(list, 2)
     Assert.eq(picked, "stats")
+end
+
+do -- 添加：内置分类按固定顺序，自定分类单独成栏，没写分类的第三方进扩展
+    Edit.showAddDialog({
+        { id = "clock", label = "时钟", icon = "schedule", category = "time", hint = "大时间" },
+        { id = "stats", label = "阅读统计", icon = "insights", category = "stats", hint = "时长" },
+        { id = "forecast", label = "预报", category = "weather", hint = "接下来几档" },
+        { id = "news", label = "热点", category = "feed", hint = "今日标题" },
+        { id = "ext.games.board", label = "棋盘", category = "棋牌", hint = "第三方" },
+        { id = "ext.misc.loose", label = "散件" },
+    }, function() end)
+    local list = Themed.last("list")
+    Assert.is_nil(list.centered)
+    Assert.eq(list.tabs.place, "top")
+    Assert.eq(list.tabs.active, "all")
+    local ids = {}
+    for _idx, tab in ipairs(list.tabs.tabs) do ids[#ids + 1] = tab.id end
+    Assert.eq(table.concat(ids, ","), "all,time,stats,daily,棋牌,ext", "空分类不占页签，自定分类在扩展前")
+    Assert.eq(list.tabs.tabs[5].text, "棋牌")
+    Assert.len(list.items, 6)
+    Assert.eq(list.items[1].text, "时钟")
+    Assert.eq(list.items[1].subtitle, "大时间")
+    Assert.eq(list.items[1].icon, "schedule")
+    local time_rows = list.tabs.on_tab("time")
+    Assert.len(time_rows, 2, "天气并进时间")
+    Assert.eq(time_rows[1].value, "clock")
+    Assert.eq(time_rows[2].value, "forecast")
+    local daily_rows = list.tabs.on_tab("daily")
+    Assert.eq(daily_rows[1].value, "news", "资讯并进每日")
+    local board = list.tabs.on_tab("棋牌")
+    Assert.eq(board[1].value, "ext.games.board")
+    Assert.eq(board[1].subtitle, "第三方")
+    local ext_rows = list.tabs.on_tab("ext")
+    Assert.eq(ext_rows[1].value, "ext.misc.loose", "没写分类的第三方进扩展")
 end
 
 do -- 边距：四列 Spin，全 0 回调 nil

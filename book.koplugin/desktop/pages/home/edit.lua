@@ -186,15 +186,103 @@ function Edit.showMarginDialog(opts)
     }:show()
 end
 
---- 添加组件列表：居中分页列表，组件多时翻页而不是溢出屏幕。
----@param candidates { id: string, label: string }[]
----@param on_pick fun(id: string)
-function Edit.showAddDialog(candidates, on_pick)
+-- 添加列表顶部分类。内置按这个顺序；第三方自定的分类接在后面，「扩展」放最后。
+-- 天气并进时间，句子和资讯并进每日。旧 id 仍认，已经按细分类写的第三方不用改。
+local CATEGORIES = {
+    { id = "time", text = _("时间") },
+    { id = "stats", text = _("统计") },
+    { id = "reading", text = _("在读") },
+    { id = "shelf", text = _("书架") },
+    { id = "daily", text = _("每日") },
+    { id = "ext", text = _("扩展") },
+}
+local MERGE = { weather = "time", quote = "daily", feed = "daily" }
+local KNOWN = {}
+for _i, cat in ipairs(CATEGORIES) do KNOWN[cat.id] = true end
+
+--- 组件归类。已知 id 用内置页签；其它非空字符串是第三方自定的页签文字。
+--- 与「全部」撞名时页签 id 加前缀，避免切页把这一栏当成全部。
+---@param comp { id: string, category: string|nil }
+---@return string|nil
+local function categoryOf(comp)
+    local cat = comp.category
+    if type(cat) == "string" and cat ~= "" then
+        cat = MERGE[cat] or cat
+        if cat == "all" then return "all\0" end
+        return cat
+    end
+    if type(comp.id) == "string" and comp.id:find(".", 1, true) then return "ext" end
+end
+
+--- 某一分类下的列表行。all 是全部，顺序跟候选一致。
+---@param candidates { id: string, label: string, icon: string|nil, hint: string|nil, category: string|nil }[]
+---@param cat string
+---@return table[]
+local function rowsFor(candidates, cat)
     local items = {}
     for _i, comp in ipairs(candidates) do
-        items[#items + 1] = { text = comp.label, value = comp.id }
+        if cat == "all" or categoryOf(comp) == cat then
+            items[#items + 1] = {
+                text = comp.label,
+                subtitle = comp.hint,
+                icon = comp.icon,
+                value = comp.id,
+            }
+        end
     end
-    require("ui.themes.widgets.list"):new{ title = _("添加组件"), centered = true, items = items, on_select = on_pick }:show()
+    return items
+end
+
+--- 内置分类按固定顺序，自定分类按候选里第一次出现的顺序，没写分类的第三方归到扩展。
+---@param candidates table[]
+---@return table[]
+local function categoryTabs(candidates)
+    local present = {}
+    local custom = {}
+    for _i, comp in ipairs(candidates) do
+        local cat = categoryOf(comp)
+        if cat and not present[cat] then
+            present[cat] = true
+            if not KNOWN[cat] then
+                custom[#custom + 1] = { id = cat, text = comp.category }
+            end
+        end
+    end
+    local tabs = {}
+    for _i, cat in ipairs(CATEGORIES) do
+        if cat.id ~= "ext" and present[cat.id] then
+            tabs[#tabs + 1] = { id = cat.id, text = cat.text }
+        end
+    end
+    for _i, cat in ipairs(custom) do tabs[#tabs + 1] = cat end
+    if present.ext then tabs[#tabs + 1] = { id = "ext", text = _("扩展") } end
+    return tabs
+end
+
+--- 添加组件。不止一个分类时，全屏列表顶上是分类页签，下面是名字和一行说明；
+--- 只有一类（或都没分类）时仍是居中列表。
+---@param candidates { id: string, label: string, icon: string|nil, hint: string|nil, category: string|nil }[]
+---@param on_pick fun(id: string)
+function Edit.showAddDialog(candidates, on_pick)
+    local tabs = categoryTabs(candidates)
+    local items = rowsFor(candidates, "all")
+    local List = require("ui.themes.widgets.list")
+    if #tabs < 2 then
+        List:new{ title = _("添加组件"), centered = true, items = items, on_select = on_pick }:show()
+        return
+    end
+    table.insert(tabs, 1, { id = "all", text = _("全部") })
+    List:new{
+        title = _("添加组件"),
+        items = items,
+        tabs = {
+            place = "top",
+            tabs = tabs,
+            active = "all",
+            on_tab = function(id) return rowsFor(candidates, id) end,
+        },
+        on_select = on_pick,
+    }:show()
 end
 
 return Edit

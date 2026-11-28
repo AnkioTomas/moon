@@ -29,6 +29,8 @@ local M = {
     id = "shelf",
     label = _("书架"),
     icon = "shelves",
+    category = "shelf",
+    hint = _("在架书的封面"),
 }
 setmetatable(M, require("desktop.pages.home.base"))
 M.__index = M

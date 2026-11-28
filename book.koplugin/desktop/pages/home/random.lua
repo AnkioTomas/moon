@@ -18,6 +18,8 @@ local M = {
     id = "random",
     label = _("随机一本"),
     icon = "casino",
+    category = "shelf",
+    hint = _("抽一本还没读完的"),
 }
 setmetatable(M, require("desktop.pages.home.base"))
 M.__index = M

@@ -32,6 +32,8 @@ local M = {
     id = "tiles",
     label = _("阅读小卡"),
     icon = "dashboard",
+    category = "stats",
+    hint = _("连续、本周、本月和今年"),
 }
 setmetatable(M, require("desktop.pages.home.base"))
 M.__index = M

@@ -38,7 +38,7 @@ function boom:onActivate() error("activate boom") end
 
 local built, settings_opened
 local hello = {
-    id = "hello", title = "Hello", height = 40,
+    id = "hello", title = "Hello", height = 40, category = "quote", hint = "一句问候",
     build = function(ctx, w, h) built = { ctx, w, h } return { kind = "hello" } end,
     settings = function(desktop, id) settings_opened = { desktop, id } end,
 }
@@ -86,6 +86,8 @@ Assert.is_true(b.active)
 local Hello = Registry.find("ext.greeting.hello")
 Assert.eq(components[#BUILTIN + 3], Hello)
 Assert.eq(Hello.label, "Hello")
+Assert.eq(Hello.category, "quote")
+Assert.eq(Hello.hint, "一句问候")
 local h = Hello:new{}
 local ctx = { desktop = {} }
 h:build(ctx, { width = 100, height = 50 })
