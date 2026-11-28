@@ -396,6 +396,24 @@ Assert.eq(image_widgets[#image_widgets].file, svg_path)
 svg:free()
 os.remove(svg_path)
 
+-- 超过 16KB 的 foreignObject 占位 SVG 仍要回退文字封面。NanoSVG 不画 foreignObject，
+-- 漏判就只剩底色和作者一条。
+local fat_svg = Config.dir() .. "/image-foreign-object.svg"
+local fat = assert(io.open(fat_svg, "wb"))
+fat:write("<svg xmlns='http://www.w3.org/2000/svg'><foreignObject>")
+fat:write(string.rep("x", 20 * 1024))
+fat:write("</foreignObject></svg>")
+fat:close()
+local marker = { id = "plain-cover" }
+local before_fat = #image_widgets
+local fat_box = Image.widget{
+    src = fat_svg, width = 44, height = 66, fallback = marker,
+}
+Assert.eq(#image_widgets, before_fat, "foreignObject SVG 不得交给 NanoSVG")
+Assert.eq(fat_box[1][1], marker)
+fat_box:free()
+os.remove(fat_svg)
+
 local delays = {}
 local schedule_in = UIManager.scheduleIn
 function UIManager:scheduleIn(delay, fn)

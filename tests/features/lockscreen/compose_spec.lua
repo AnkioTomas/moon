@@ -218,3 +218,29 @@ end)
 Assert.is_false(failed)
 Assert.eq(failure, "asset failed")
 Assert.eq(render_calls, 0)
+
+-- 统计页是背景块：封面在 bg.blocks 里，写 PNG 前必须等它落定。
+reset()
+local awaited, await_cb
+package.preload["ui.themes.widgets.image"] = function()
+    return {
+        await = function(root, cb)
+            awaited, await_cb = root, cb
+            return { cancel = function() end }
+        end,
+    }
+end
+package.loaded["ui.themes.widgets.image"] = nil
+local cover = {}
+job = Compose.build(plan({
+    blocks = function()
+        return { { kind = "widget", widget = cover } }
+    end,
+}), function() end)
+asset_cb(nil)
+flush()
+Assert.eq(render_calls, 0, "背景封面未落定不得写 PNG")
+Assert.eq(awaited[1], cover)
+await_cb()
+flush()
+Assert.eq(render_calls, 1)
