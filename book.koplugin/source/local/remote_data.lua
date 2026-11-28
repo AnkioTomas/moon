@@ -1,11 +1,12 @@
---[[--
-本地源：WebDAV 下的进度、统计、笔记文件读写。
-非 webdav:// 身份（纯本地书）没有远端，推送直接成功、拉取为空。
-函数首参即 LocalClient，由 source.local.client 装配为方法。
-进度的路径和编码在 source.local.layout。笔记和统计仍在 .Moon+/，布局不认它们。
 
-@module koplugin.book.source.local.remote_data
---]]
+
+
+
+
+
+
+
+
 
 local _ = require("l10n").get("source.local")
 local Common = require("source.local.common")
@@ -15,79 +16,151 @@ local defer, readFile, writeFile, field = Common.defer, Common.readFile, Common.
 local eachAsync, fetchText, putText = Common.eachAsync, Common.fetchText, Common.putText
 local md5 = require("ffi/sha2").md5
 local remoteStableId, remoteRelativePath = Common.remoteStableId, Common.remoteRelativePath
-local moonPath, notesRemotePath = Common.moonPath, Common.notesRemotePath
+local relFor, localRoot = Common.relFor, Common.localRoot
+local encodeProgress, decodeProgress = Common.encodeProgress, Common.decodeProgress
+local moonPath, progressRemotePath, notesRemotePath = Common.moonPath, Common.progressRemotePath, Common.notesRemotePath
 
 local RemoteData = {}
 
---- 拉取单本进度（开书时由 book.progress 调用，冲突弹窗在那边）。
----@param stable_id string
----@param cb fun(pos: ProgressPosition|nil, err: string|nil, meta: table|nil)
----@return { cancel: fun() }|nil
----@param self LocalClient
-function RemoteData.getProgressAsync(self, stable_id, cb)
-    local rel = remoteRelativePath(stable_id)
+function RemoteData.progressUploadGuardEnabled()
+    return require("utils.settings").getSource(SOURCE_ID).webdav_check_progress_before_upload == true
+end
+
+function RemoteData.progressFractionTolerance()
+    return require("utils.settings").getSource(SOURCE_ID).webdav_ignore_small_progress_diff ~= false and 0.01 or 0
+end
+
+
+function RemoteData.isProgressAhead(remote, local_pos)
+    return remote and not (remote.locator and remote.locator == local_pos.locator)
+        and (tonumber(remote.fraction) or 0) > (tonumber(local_pos.fraction) or 0)
+end
+
+
+
+
+
+
+
+function RemoteData.getProgressAsync(self, stable_id, cb, opts)
+    local rel = relFor(self, stable_id)
     if not rel then return defer(cb, nil, nil, { empty = true }) end
     local cancelled, active = false, nil
-    local layout = self:layout()
-    active = fetchText(self, layout:progress_path(self, rel), self:webdavCacheRoot() .. "/.progress.get",
+    local remote = progressRemotePath(self, rel)
+    local first = fetchText(self, remote, self:webdavCacheRoot() .. "/.progress.get",
         function(raw, err, missing)
             if cancelled then return end
             if missing then return cb(nil, nil, { empty = true }) end
             if not raw then return cb(nil, err) end
-            local row = require("book.books_db").get(SOURCE_ID, stable_id)
-            local pos = layout:decode(raw, row and row.path)
+            local pos = decodeProgress(raw)
             if not pos then return cb(nil, _("进度为空")) end
-            cb(pos)
+            local meta = { webdav_progress_marker = raw }
+            if opts and opts.metadata_present == false then return cb(pos, nil, meta) end
+            active = fetchText(self, remote .. ".json", self:webdavCacheRoot() .. "/.position.get",
+                function(metadata, meta_err, absent)
+                    if cancelled then return end
+                    if absent then return cb(pos, nil, meta) end
+                    if not metadata then return cb(nil, meta_err) end
+                    local ok, data = pcall(require("json").decode, metadata)
+                    if not ok or type(data) ~= "table" or type(data.position) ~= "table"
+                        or type(data.position.fraction) ~= "number" then
+                        return cb(nil, _("进度文件损坏"))
+                    end
+                    if data.file ~= rel or data.marker ~= raw then return cb(pos, nil, meta) end
+                    cb(data.position, nil, meta)
+                end)
         end)
+    active = active or first
     return { cancel = function()
         cancelled = true
         if active and active.cancel then active:cancel() end
     end }
 end
 
---- 推送单本进度（关书 / 网络恢复时由 book.progress 推脏行）。非 webdav:// 身份没有远端，直接成功。
----@param stable_id string
----@param pos ProgressPosition
----@param cb fun(ok: boolean|nil, err: string|nil)
----@return { cancel: fun() }|nil
----@param self LocalClient
+
+
+
+
+
+
+
+
 function RemoteData.putProgressAsync(self, stable_id, pos, cb)
-    local rel = remoteRelativePath(stable_id)
-    if not rel then return defer(cb, true) end
+    if not self:isWebdav() then return defer(cb, true) end
+    local rel = relFor(self, stable_id)
+    if not rel then
+        return defer(cb, nil, _("这本书不在 WebDAV 书库目录内，进度只保存在本机"))
+    end
     local cancelled, active = false, nil
-    local layout = self:layout()
-    active = putText(self, layout:progress_path(self, rel), self:webdavCacheRoot() .. "/.progress.upload",
-        layout:encode(self, rel, pos), function(ok, err)
+    local remote, raw = progressRemotePath(self, rel), encodeProgress(pos)
+    local confirmed = type(pos.extra) == "table" and pos.extra.webdav_overwrite_marker
+    local function upload()
+        if pos.locator or pos.page then
+            -- .po 是发布标记，精确坐标先到位；任一步失败都不能确认本地脏行。
+            local wire = {}
+            for k, v in pairs(pos) do wire[k] = v end
+            if confirmed then
+                wire.extra = {}
+                for k, v in pairs(pos.extra) do
+                    if k ~= "webdav_overwrite_marker" then wire.extra[k] = v end
+                end
+                if not next(wire.extra) then wire.extra = nil end
+            end
+            local first = putText(self, remote .. ".json", self:webdavCacheRoot() .. "/.position.upload",
+                require("json").encode({ file = rel, marker = raw, position = wire }), function(ok, err)
+                    if cancelled then return end
+                    if not ok then return cb(nil, err) end
+                    active = putText(self, remote, self:webdavCacheRoot() .. "/.progress.upload", raw, cb)
+                end)
+            active = active or first
+        else
+            active = putText(self, remote, self:webdavCacheRoot() .. "/.progress.upload", raw, cb)
+        end
+    end
+    if RemoteData.progressUploadGuardEnabled() then
+        local first = self:getProgressAsync(stable_id, function(cloud, err, meta)
             if cancelled then return end
-            if ok then cb(true) else cb(nil, err) end
+            active = nil
+            if not cloud and (not meta or not meta.empty) then
+                return cb(nil, err or _("无法检查云端进度，已保留本地进度"))
+            end
+            if RemoteData.isProgressAhead(cloud, pos) and
+                (not confirmed or not meta or confirmed ~= meta.webdav_progress_marker) then
+                return cb(nil, _("云端进度领先，请打开本书选择阅读位置"))
+            end
+            upload()
         end)
+        active = active or first
+    else
+        upload()
+    end
     return { cancel = function()
         cancelled = true
         if active and active.cancel then active:cancel() end
     end }
 end
 
---- 与本地 compactSynced 同一口径：超过 30 天的逐页行按小时汇总。
+
 local COMPACT_AGE = 30 * 86400
 
---- 统计行在 stats.json 里的身份：同一设备同一本书同一开始时间只算一条；汇总行（带 event_count）另算。
+
 local function statKey(row)
     return tostring(row.device_id) .. "\31" .. tostring(row.filename) .. "\31" .. tostring(row.start_time)
         .. (row.event_count ~= nil and "\31r" or "")
 end
 
----@param ts number
----@return integer 所在本地整点
+
+
 local function hourOf(ts)
     local clock = os.date("*t", ts)
-    ---@cast clock osdate
+
     clock.min, clock.sec = 0, 0
     return os.time(clock)
 end
 
---- 把一行（逐页行即 event_count=1 的汇总）并进汇总行。
----@param into table
----@param row table
+
+
+
 local function fold(into, row)
     into.page = math.max(tonumber(into.page) or 0, tonumber(row.page) or 0)
     into.total_pages = math.max(tonumber(into.total_pages) or 0, tonumber(row.total_pages) or 0)
@@ -96,11 +169,11 @@ local function fold(into, row)
     into.last_time = math.max(tonumber(into.last_time) or 0, tonumber(row.last_time) or tonumber(row.start_time) or 0)
 end
 
---- 远端压缩：早于 before_ts 的逐页行按 设备+文件+小时 并成汇总行（event_count 为原页事件数）。
---- 返回新数组，汇总行都是新表，不改入参（入参可能是缓存）。
----@param rows table[]
----@param before_ts number
----@return table[] rows, integer compacted 本次并掉的逐页行数
+
+
+
+
+
 local function compactStats(rows, before_ts)
     local out, groups, compacted = {}, {}, 0
     for _idx, row in ipairs(rows) do
@@ -135,30 +208,30 @@ end
 local STATS_INDEX = "Stats/index.json"
 local LEGACY_STATS = "Stats/stats.json"
 
----@param self LocalClient
----@param device_id string
+
+
 local function deviceStatsRoot(self, device_id)
     return moonPath(self, "Stats/devices/" .. md5(device_id))
 end
 
----@param self LocalClient
----@param device_id string|nil nil 表示旧版共享索引
+
+
 local function statsIndexPath(self, device_id)
     return device_id and (deviceStatsRoot(self, device_id) .. "/index.json")
         or moonPath(self, STATS_INDEX)
 end
 
----@param self LocalClient
----@param filename string
----@param device_id string|nil nil 表示旧版共享文件
+
+
+
 local function bookStatsPath(self, filename, device_id)
     local root = device_id and (deviceStatsRoot(self, device_id) .. "/books")
         or moonPath(self, "Stats/books")
     return root .. "/" .. md5(filename) .. ".json"
 end
 
----@param entry table|nil 总表条目
----@return string|nil
+
+
 local function rev(entry)
     return entry and entry.hash
 end
@@ -167,11 +240,11 @@ local function seenKey(filename, device_id)
     return device_id and ("device:" .. device_id .. "\31" .. filename) or filename
 end
 
---- 读远端统计 JSON；不存在时 cb(nil, nil, true)。
----@param self LocalClient
----@param remote string
----@param cb fun(value: table|nil, err: string|nil, missing: boolean|nil)
----@return { cancel: fun() }
+
+
+
+
+
 local function readJson(self, remote, cb)
     return fetchText(self, remote, self:webdavCacheRoot() .. "/.stats.get", function(raw, err, missing)
         if missing then return cb(nil, nil, true) end
@@ -182,10 +255,10 @@ local function readJson(self, remote, cb)
     end)
 end
 
---- 读总表；不存在为空表。
----@param self LocalClient
----@param cb fun(index: { version: integer|nil, books: table<string, table>, device_id?: string }|nil, err: string|nil)
----@return { cancel: fun() }
+
+
+
+
 local function readIndexAt(self, path, cb)
     return readJson(self, path, function(index, err, missing)
         if missing then return cb({ books = {} }) end
@@ -198,14 +271,14 @@ local function readIndex(self, cb)
     return readIndexAt(self, statsIndexPath(self), cb)
 end
 
----@param self LocalClient
+
 local function seenPath(self)
     return self:webdavCacheRoot() .. "/stats_index.json"
 end
 
---- 本地已入库版本表；文件缺失或损坏当作什么都没入过（下一轮全量拉一次）。
----@param self LocalClient
----@return table<string, string>
+
+
+
 local function loadSeen(self)
     if not self._stats_seen then
         local ok, seen = pcall(require("json").decode, readFile(seenPath(self)) or "")
@@ -214,20 +287,20 @@ local function loadSeen(self)
     return self._stats_seen
 end
 
----@param self LocalClient
----@param updates table<string, string>
+
+
 local function saveSeen(self, updates)
     local seen = loadSeen(self)
     for filename, value in pairs(updates) do seen[filename] = value end
     writeFile(seenPath(self), require("json").encode(seen))
 end
 
---- 把一本书的新行并进它的统计文件（去重、压缩），有变化才写回。
----@param self LocalClient
----@param filename string
----@param rows table[] wire 行
----@param cb fun(hash: string|false|nil, err: string|nil) 写回时为新内容 md5，无变化 false，失败 nil
----@return { cancel: fun() }
+
+
+
+
+
+
 local function mergeBook(self, filename, rows, cb, device_id)
     local path, cancelled, active = bookStatsPath(self, filename, device_id), false, nil
     active = readJson(self, path, function(remote, err, missing)
@@ -261,14 +334,14 @@ local function mergeBook(self, filename, rows, cb, device_id)
     end }
 end
 
---- 写回总表里写过的书。own=写入的全是本机行（本地都有）：写之前本地已入库到该书最新版本、
---- 期间也没被别人改过，就直接把本地版本推进到新版本，免得下次拉取重下自己刚写的文件。
----@param self LocalClient
----@param before table 写书之前读到的总表
----@param written table<string, table> 文件名 → 新条目
----@param own boolean
----@param cb fun(ok: boolean|nil, err: string|nil)
----@return { cancel: fun() }
+
+
+
+
+
+
+
+
 local function commitIndex(self, before, written, own, cb, device_id)
     local cancelled, active = false, nil
     active = readIndexAt(self, statsIndexPath(self, device_id), function(index, err)
@@ -297,13 +370,13 @@ local function commitIndex(self, before, written, own, cb, device_id)
     end }
 end
 
---- 按书并入统计行并更新总表。总表写成功后，done_files 里的书可以确认；
---- 没写上的书留在 done_files 外面，调用方只确认写上的那些，不要整批重来。
----@param self LocalClient
----@param by_file table<string, table[]> 文件名 → wire 行
----@param own boolean 见 commitIndex
----@param cb fun(ok: boolean|nil, err: string|nil, done_files: table<string, boolean>|nil)
----@return { cancel: fun() }|nil
+
+
+
+
+
+
+
 local function writeBooks(self, by_file, own, cb, device_id)
     local writer_device_id = require("utils.device_id").ensure()
     local files = {}
@@ -345,18 +418,19 @@ local function writeBooks(self, by_file, own, cb, device_id)
     end }
 end
 
---- 上报统计：每台设备写自己的统计分区，避免跨设备读改写互相覆盖。
---- 早于 30 天的本机行按小时汇总；同一行重推按设备、书籍和开始时间去重。
---- WebDAV 书写相对路径（和 book 服务端同构）；其它本地书写绝对路径，拉取时只认本设备的。
----@param rows BookStatsRow[]
----@param cb fun(result: BookStatsPushResult|nil, err: string|nil)
----@return { cancel: fun() }|nil
----@param self LocalClient
+
+
+
+
+
+
+
 function RemoteData.pushStatsAsync(self, rows, cb)
     local device_id = require("utils.device_id").ensure()
     local by_file, ids_by_file = {}, {}
     for _idx, row in ipairs(rows) do
-        local filename = remoteRelativePath(row.stable_id) or row.stable_id
+        -- 书库目录里的本地书也按相对路径上报，别的设备才能把这本书记成同一本书、时长才并得起来。
+        local filename = relFor(self, row.stable_id) or row.stable_id
         by_file[filename] = by_file[filename] or {}
         table.insert(by_file[filename], {
             filename = filename, device_id = device_id,
@@ -379,19 +453,19 @@ function RemoteData.pushStatsAsync(self, rows, cb)
     end, device_id)
 end
 
----@param entries WebdavEntry[]|nil
----@return WebdavEntry|nil
+
+
 local function legacyEntry(entries)
     for _idx, entry in ipairs(entries or {}) do
         if entry.name == "stats.json" and not entry.is_dir then return entry end
     end
 end
 
---- 旧版单文件 stats.json（含旧版插件之后又写进去的）：行按书并进按书文件，
---- 并完确认文件没被改过再删，改过就留到下次再并（按 statKey 去重，不会重复）。
----@param self LocalClient
----@param cb fun(ok: boolean|nil, err: string|nil, entries: WebdavEntry[]|nil)
----@return { cancel: fun() }
+
+
+
+
+
 local function foldLegacy(self, cb)
     local cancelled, active = false, nil
     active = self.dav:listAsync(moonPath(self, "Stats"), function(entries)
@@ -432,15 +506,12 @@ local function foldLegacy(self, cb)
     end }
 end
 
---- stats.json 一行转领域记录；别的设备的非 WebDAV 书（绝对路径）不认。
----@param item any
----@param device_id string
----@return BookStatsRow|nil
-local function pulledRow(item, device_id)
-    local filename = type(item) == "table" and field(item.filename)
-    local stable_id = filename and (filename:sub(1, 1) ~= "/" and remoteStableId(filename)
-        or item.device_id == device_id and filename or nil)
-    if not stable_id then return nil end
+
+
+
+
+local function pulledRow(item, stable_id)
+    if not stable_id or type(item) ~= "table" or not field(item.filename) then return nil end
     local row = {
         source_id = SOURCE_ID, stable_id = stable_id, record_type = "page",
         page = tonumber(item.page) or 0, start_time = tonumber(item.start_time),
@@ -454,14 +525,14 @@ local function pulledRow(item, device_id)
     return row
 end
 
---- 把一本书的统计文件转成领域记录追加进 out；本地汇总行按 书+小时 唯一，
---- 别的设备同一小时的汇总在这里先并成一条。
----@param remote table[]
----@param device_id string
----@param out { rows: BookStatsRow[], rollups: table<string, BookStatsRow>, ids: string[], seen_ids: table<string, boolean> }
-local function collectBook(remote, device_id, out)
+
+
+
+
+
+local function collectBook(remote, stable_id, out)
     for _idx, item in ipairs(remote) do
-        local row = pulledRow(item, device_id)
+        local row = pulledRow(item, stable_id)
         local hour = row and row.record_type == "page_rollup" and row.stable_id .. "\31" .. tostring(row.start_time)
         local same = hour and out.rollups[hour]
         if same then
@@ -477,11 +548,11 @@ local function collectBook(remote, device_id, out)
     end
 end
 
---- 拉取统计：先并旧版 stats.json，再按总表只下载版本变了的书，入库时只覆盖这些书的已同步行。
---- 入库成功（commit）后才记下版本，失败下一轮重拉。书文件缺失或损坏跳过，不抹本地。
----@param cb fun(result: BookStatsRow[]|BookStatsPullResult|nil, err: string|nil)
----@return { cancel: fun() }
----@param self LocalClient
+
+
+
+
+
 function RemoteData.pullStatsAsync(self, cb)
     local device_id = require("utils.device_id").ensure()
     local cancelled, active = false, nil
@@ -494,51 +565,82 @@ function RemoteData.pullStatsAsync(self, cb)
             local sources = { { index = index } }
             local function pullBooks()
                 if cancelled then return end
-                local seen, changed = loadSeen(self), {}
+                local seen = loadSeen(self)
                 local function eligible(source, filename, entry)
                     local owner = source.device_id or entry.device_id
                     return filename:sub(1, 1) ~= "/" or owner == device_id
                 end
+
+
+                local BookDB, root = require("book.books_db"), localRoot(self)
+                local resolved = {}
+                local function targetId(filename)
+                    if resolved[filename] ~= nil then return resolved[filename] or nil end
+                    local id
+                    if filename:sub(1, 1) == "/" then
+                        id = filename
+                    else
+                        local path = root and (root .. "/" .. filename)
+                        id = path and BookDB.get(SOURCE_ID, path) and path or remoteStableId(filename)
+                    end
+                    resolved[filename] = id or false
+                    return id
+                end
+
+
+                local groups, dirty = {}, {}
                 for _idx, source in ipairs(sources) do
                     for filename, entry in pairs(source.index.books) do
-                        local key = seenKey(filename, source.device_id)
-                        if eligible(source, filename, entry) and seen[key] ~= rev(entry) then
-                            changed[filename] = true
+                        if eligible(source, filename, entry) then
+                            local id = targetId(filename)
+                            if id then
+                                groups[id] = groups[id] or {}
+                                groups[id][filename] = true
+                                if seen[seenKey(filename, source.device_id)] ~= rev(entry) then
+                                    dirty[id] = true
+                                end
+                            end
                         end
                     end
                 end
-                local filenames = {}
-                for filename in pairs(changed) do filenames[#filenames + 1] = filename end
-                table.sort(filenames)
-                if #filenames == 0 then return cb({}) end
+                -- 整本替换要求拿到这本书的全部云端文件：只看变了的文件会把它其余的历史行删掉。
+                local ids = {}
+                for id in pairs(dirty) do ids[#ids + 1] = id end
+                table.sort(ids)
+                if #ids == 0 then return cb({}) end
 
                 local out, updates, fetched = { rows = {}, ids = {}, seen_ids = {} }, {}, 0
-                eachAsync(filenames, function(filename, next_file)
-                    local targets = {}
-                    for _idx, source in ipairs(sources) do
-                        local entry = source.index.books[filename]
-                        if entry and eligible(source, filename, entry) then
-                            targets[#targets + 1] = {
-                                source = source,
-                                entry = entry,
-                                path = bookStatsPath(self, filename, source.device_id),
-                            }
-                        end
-                    end
+                eachAsync(ids, function(stable_id, next_group)
+                    local filenames = {}
+                    for filename in pairs(groups[stable_id]) do filenames[#filenames + 1] = filename end
+                    table.sort(filenames)
                     local book_out = { rows = {}, rollups = {}, ids = {}, seen_ids = {} }
                     local book_updates, failed = {}, false
-                    eachAsync(targets, function(target, next_target)
-                        active = readJson(self, target.path, function(remote, book_err)
-                            if cancelled then return end
-                            if not remote then
-                                require("utils.log").warn("book webdav stats book skipped", filename, book_err)
-                                failed = true
-                                return next_target()
+                    eachAsync(filenames, function(filename, next_file)
+                        local targets = {}
+                        for _idx, source in ipairs(sources) do
+                            local entry = source.index.books[filename]
+                            if entry and eligible(source, filename, entry) then
+                                targets[#targets + 1] = {
+                                    source = source,
+                                    entry = entry,
+                                    path = bookStatsPath(self, filename, source.device_id),
+                                }
                             end
-                            collectBook(remote, target.source.device_id or device_id, book_out)
-                            book_updates[seenKey(filename, target.source.device_id)] = rev(target.entry)
-                            next_target()
-                        end)
+                        end
+                        eachAsync(targets, function(target, next_target)
+                            active = readJson(self, target.path, function(remote, book_err)
+                                if cancelled then return end
+                                if not remote then
+                                    require("utils.log").warn("book webdav stats book skipped", filename, book_err)
+                                    failed = true
+                                    return next_target()
+                                end
+                                collectBook(remote, stable_id, book_out)
+                                book_updates[seenKey(filename, target.source.device_id)] = rev(target.entry)
+                                next_target()
+                            end)
+                        end, next_file)
                     end, function()
                         if cancelled then return end
                         if not failed then
@@ -546,16 +648,13 @@ function RemoteData.pullStatsAsync(self, cb)
                             for _idx, row in ipairs(book_out.rows) do
                                 out.rows[#out.rows + 1] = row
                             end
-                            if filename:sub(1, 1) ~= "/" then
-                                local stable_id = remoteStableId(filename)
-                                if not out.seen_ids[stable_id] then
-                                    out.seen_ids[stable_id] = true
-                                    out.ids[#out.ids + 1] = stable_id
-                                end
+                            if not out.seen_ids[stable_id] then
+                                out.seen_ids[stable_id] = true
+                                out.ids[#out.ids + 1] = stable_id
                             end
                             for key, value in pairs(book_updates) do updates[key] = value end
                         end
-                        next_file()
+                        next_group()
                     end)
                 end, function()
                     if cancelled then return end
@@ -609,11 +708,11 @@ function RemoteData.pullStatsAsync(self, cb)
     end }
 end
 
---- 读一本书的笔记文件；远端没有时 missing。
----@param self LocalClient
----@param rel string
----@param cb fun(devices: table|nil, err: string|nil, missing: boolean|nil)
----@return { cancel: fun() }
+
+
+
+
+
 local function readNotes(self, rel, cb)
     return fetchText(self, notesRemotePath(self, rel), self:webdavCacheRoot() .. "/.notes.get",
         function(raw, err, missing)
@@ -625,7 +724,7 @@ local function readNotes(self, rel, cb)
         end)
 end
 
---- 注解坐标：分页文档的 pos 是 {x,y,page} 表，不能直接 tostring。
+
 local function posKey(pos)
     if type(pos) == "table" then
         return table.concat({ tostring(pos.x), tostring(pos.y), tostring(pos.page) }, ",")
@@ -633,16 +732,19 @@ local function posKey(pos)
     return tostring(pos or "")
 end
 
---- 上传本设备这本书的完整注解快照；别的设备的快照原样保留（语义同 book 服务端 annotations 接口）。
---- 非 webdav:// 身份没有远端，直接成功。
----@param stable_id string
----@param annotations table[]
----@param cb fun(value: table|nil, err: string|nil)
----@return { cancel: fun() }|nil
----@param self LocalClient
+
+
+
+
+
+
+
 function RemoteData.pushNotesAsync(self, stable_id, annotations, cb)
-    local rel = remoteRelativePath(stable_id)
-    if not rel then return defer(cb, {}) end
+    if not self:isWebdav() then return defer(cb, {}) end
+    local rel = relFor(self, stable_id)
+    if not rel then
+        return defer(cb, nil, _("这本书不在 WebDAV 书库目录内，笔记只保存在本机"))
+    end
     local JSON = require("json")
     local device_id = require("utils.device_id").ensure()
     local cancelled, active = false, nil
@@ -662,15 +764,15 @@ function RemoteData.pushNotesAsync(self, stable_id, annotations, cb)
     end }
 end
 
---- 拉取所有设备快照的并集，同一位置（页 + 起止坐标）只留最后修改的一条。
---- 删除只在删过它的设备快照里消失：另一台设备的快照还带着它时会被并回来（与 book 服务端一致）。
---- 远端还没有笔记文件时不报权威快照，免得把本地已同步的笔记当成“云端已删”清掉。
----@param stable_id string
----@param cb fun(annotations: table[]|nil, err: string|nil, meta: table|nil)
----@return { cancel: fun() }|nil
----@param self LocalClient
+
+
+
+
+
+
+
 function RemoteData.pullNotesAsync(self, stable_id, cb)
-    local rel = remoteRelativePath(stable_id)
+    local rel = relFor(self, stable_id)
     if not rel then return defer(cb, {}) end
     return readNotes(self, rel, function(devices, err, missing)
         if not devices then return cb(nil, err) end
