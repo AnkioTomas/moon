@@ -1,12 +1,14 @@
 --[[--
-拆出去的书源：用过的才提示从插件市场安装。
+拆出去的书源：用过的直接丢进后台下载任务，从插件市场的最新 Release 安装。
 
 认用过只看三处：书库里有这个 source_id（含墓碑）、settings/<id>.lua 里有键、
 活跃源就是它。不看 enabled_sources（nil 表示全开，不能当作用过）。
 微信读书的旧 id `wechat` 装同一个 weread 插件。
 
-市场目录里还没有的不装、也不记成已处理，目录更新后再问。
-关掉弹窗或安装失败记进 source_install_skip，不再问。离线不弹。
+市场目录里还没有的不装、也不记成已处理，目录更新后再装。
+入队后记进 source_install_skip，不再重复排队。已经装过、但目录版本比
+本机记录新的，忽略 skip 再装一次（第一次入库的 0.0.1 不能挡住后面的 release）。
+离线什么都不做。
 
 @module koplugin.book.features.marketplace.migrate
 --]]
@@ -90,20 +92,39 @@ local function pluginPresent(root, dir)
     return lfs.attributes(parent .. "/" .. dir, "mode") == "directory"
 end
 
---- 还没装、也没被用户跳过的旧书源。同一插件只出一行。
+--- 本机这份比市场目录旧。没有目录条目、或本机读不出版本号时不算旧，避免每次激活都重装。
+---@param root string
+---@param plugin_dir string
+---@param locals table<string, table>|nil
+---@return boolean
+local function catalogNewer(root, plugin_dir, locals)
+    local entry = Catalog.byPluginDir(plugin_dir)
+    if not entry then return false end
+    local loc = Installed.findLocal(entry, root, locals)
+    local have = loc and loc.version
+    if type(have) ~= "string" or have == "" then return false end
+    return Catalog.isNewer(Catalog.catalogVersion(entry), have)
+end
+
+--- 还没装、或装的比市场旧的书源。同一插件只出一行。
+--- 没装过的尊重 source_install_skip；已经装过且目录更新了，skip 挡不住。
 ---@param root string|nil 月读插件根目录
 ---@return { ids: string[], plugin: string, name: string }[]
 function Migrate.pending(root)
     local Registry = require("source.registry")
     local active = Settings.get("source").active_source
+    local locals = Installed.index(root)
     local out = {}
     for _idx, spec in ipairs(SOURCES) do
-        if Registry.meta(spec.id) == nil and not pluginPresent(root, spec.plugin) then
+        local loaded = Registry.meta(spec.id) ~= nil
+        local present = pluginPresent(root, spec.plugin)
+        local upgrade = catalogNewer(root, spec.plugin, locals)
+        if ((not loaded and not present) or upgrade) then
             local ids = { spec.id }
             for _j, extra in ipairs(spec.also or {}) do ids[#ids + 1] = extra end
             local used = {}
             for _k, id in ipairs(ids) do
-                if not skipped(id) and (active == id or booksUsed(id) or settingsUsed(id)) then
+                if (active == id or booksUsed(id) or settingsUsed(id)) and (upgrade or not skipped(id)) then
                     used[#used + 1] = id
                 end
             end
@@ -169,30 +190,47 @@ local function askRestart()
     }:show()
 end
 
+--- 串行安装。市场安装器同一时刻只允许一个包在写目录，所以不能并行入队。
+--- 进度文案带「第几个」，字节数只描述当前这个 zip，download 任务的 count 是字节。
 ---@param root string
 ---@param ready table[]
-local function installAll(root, ready)
+---@param report fun(text: string|nil, count: integer|nil, total: integer|nil)
+---@param done fun(result: table)
+---@return { cancel: fun() }
+local function installAll(root, ready, report, done)
     local failed = {}
     local installed = 0
+    local total = #ready
+    local cancelled = false
+    local current = { cancel = function() end }
+    local handle = {
+        cancel = function()
+            if cancelled then return end
+            cancelled = true
+            current.cancel()
+        end,
+    }
     local function step(index)
+        if cancelled then return end
         local item = ready[index]
         if not item then
-            if #failed > 0 then
-                require("ui.themes.widgets.toast"):new{
-                    text = T(_("安装失败：%1"), table.concat(failed, _("、"))),
-                    timeout = 4,
-                }:show()
-            end
-            if installed > 0 then askRestart() end
+            done({ ok = #failed == 0, installed = installed, failed = failed })
             return
         end
-        local plan, err = MarketInstall.plan(item.entry, item.asset, root)
+        local text = T(_("正在安装%1（%2/%3）"), item.name, index, total)
+        report(text, nil, nil)
+        local plan = MarketInstall.plan(item.entry, item.asset, root)
         if not plan then
             failed[#failed + 1] = item.name
             step(index + 1)
             return
         end
-        MarketInstall.perform(plan, {}, function(ok, detail)
+        current = MarketInstall.perform(plan, {
+            on_progress = function(bytes, bytes_total)
+                report(text, bytes, bytes_total)
+            end,
+        }, function(ok, detail)
+            if cancelled then return end
             if ok then
                 installed = installed + 1
                 local dir = type(detail) == "string" and detail or item.plugin
@@ -204,34 +242,48 @@ local function installAll(root, ready)
         end)
     end
     step(1)
+    return handle
 end
 
+--- 入队一个下载任务，不弹确认框。顶栏能看见；点进去是任务列表。
 ---@param desk table
----@param pending table[]
-local function show(desk, pending)
-    local ready, waiting = Migrate.split(pending)
-    if #ready == 0 then return end
-    local text = T(_("这些书源已经拆成独立插件。从插件市场安装后，重启 KOReader 才能继续用：\n%1"), namesOf(ready))
-    if #waiting > 0 then
-        text = text .. "\n\n" .. T(_("插件市场里还没有：%1。目录更新后会再提示。"), namesOf(waiting))
-    end
+---@param ready table[]
+---@return boolean
+local function startInstall(desk, ready)
     local root = desk.plugin.path
-    require("ui.themes.widgets.confirm"):new{
+    local Tasks = require("workers.tasks")
+    local spec = {
+        key = "plugin\0source-migrate",
+        kind = "download",
         title = _("安装书源插件"),
-        text = text,
-        ok_text = _("安装"),
-        cancel_text = _("以后再说"),
-        ok_callback = function()
-            Migrate.remember(ready)
-            installAll(root, ready)
+        cancellable = true,
+        run = function(report, done)
+            return installAll(root, ready, report, done)
         end,
-        cancel_callback = function()
-            Migrate.remember(ready)
+        on_done = function(result)
+            local failed = result.failed or {}
+            if #failed > 0 then
+                require("ui.themes.widgets.toast"):new{
+                    text = T(_("安装失败：%1"), table.concat(failed, _("、"))),
+                    timeout = 4,
+                }:show()
+            end
+            if (result.installed or 0) > 0 then askRestart() end
         end,
+    }
+    local task, reason = Tasks.enqueue(spec)
+    if not task then
+        require("workers.ui.task_dialog").rejected(reason, spec)
+        return false
+    end
+    require("ui.themes.widgets.toast"):new{
+        text = T(_("正在从插件市场安装：%1"), namesOf(ready)),
+        timeout = 4,
     }:show()
+    return true
 end
 
---- 桌面回到前台时问一次。离线什么都不记，下次联网再看。
+--- 桌面回到前台时装一次。离线什么都不记，下次联网再看。
 ---@param desk table|nil
 function Migrate.offer(desk)
     if offered or type(desk) ~= "table" or type(desk.plugin) ~= "table" then return end
@@ -244,13 +296,14 @@ function Migrate.offer(desk)
     local function present()
         if offered then return end
         local ready = Migrate.split(pending)
-        -- 目录刚拉过仍没有可装的包：这次进程不再问。刷新被取消时不会走到这里，下次激活再试。
+        -- 目录刚拉过仍没有可装的包：这次进程不再试。刷新被取消时不会走到这里，下次激活再试。
         if #ready == 0 then
             offered = true
             return
         end
+        if not startInstall(desk, ready) then return end
+        Migrate.remember(ready)
         offered = true
-        show(desk, pending)
     end
     local _ready, waiting = Migrate.split(pending)
     if #waiting > 0 and (Catalog.count() == 0 or Catalog.isStale()) then

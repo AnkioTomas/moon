@@ -2427,6 +2427,8 @@ return {
     ["此 Release 没有 SHA-256 校验值。安装时只会直连官方下载地址并核对文件名，不能校验文件内容。这不是数字签名，也无法证明包没被篡改。"] = "This release has no SHA-256 digest. Installation will download directly from the official URL and check the filename, but cannot verify the file contents. This is not a digital signature and does not prove the package is untampered.",
     ["安装完成"] = "Installation complete",
     ["安装书源插件"] = "Install book sources",
+    ["正在安装%1（%2/%3）"] = "Installing %1 (%2/%3)",
+    ["正在从插件市场安装：%1"] = "Installing from the plugin store: %1",
     ["这些书源已经拆成独立插件。从插件市场安装后，重启 KOReader 才能继续用：\n%1"] = "These book sources are now separate plugins. Install them from the plugin store, then restart KOReader to keep using them:\n%1",
     ["插件市场里还没有：%1。目录更新后会再提示。"] = "Not in the plugin store yet: %1. You will be asked again after the catalog updates.",
     ["安装失败：%1"] = "Installation failed: %1",

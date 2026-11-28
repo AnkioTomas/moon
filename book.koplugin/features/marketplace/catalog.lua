@@ -163,14 +163,19 @@ end
 ---@return string|nil
 function Catalog.catalogVersion(item)
     if type(item) ~= "table" then return nil end
-    if type(item.version) == "string" and item.version ~= "" then return item.version end
-    if type(item.meta) == "table" and type(item.meta.version) == "string" and item.meta.version ~= "" then
-        return item.meta.version
+    local version
+    if type(item.version) == "string" and item.version ~= "" then
+        version = item.version
+    elseif type(item.meta) == "table" and type(item.meta.version) == "string" and item.meta.version ~= "" then
+        version = item.meta.version
     end
+    local tag
     if type(item.release_tag) == "string" and item.release_tag ~= "" then
-        return Catalog.stripV(item.release_tag)
+        tag = Catalog.stripV(item.release_tag)
     end
-    return nil
+    -- 目录 version 常停在第一次入库的 0.0.1，真正要装的是更新的 release。
+    if version and tag and Catalog.isNewer(tag, version) then return tag end
+    return version or tag
 end
 
 local function buildKinds(item)

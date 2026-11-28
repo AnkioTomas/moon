@@ -1,7 +1,7 @@
 --[[--
 拆出的书源：书库（含墓碑）、非空源配置、活跃源才算用过。
 enabled_sources 不算。空配置文件不算。插件已在或源已加载不算。
-市场里有 zip 的可以装；没有的不记跳过。关掉之后不再问。离线不弹窗。
+市场里有 zip 的入后台任务；没有的不记跳过。装过且目录更新了会再装。离线不入队。
 --]]
 
 local Assert = require("support.assert")
@@ -19,6 +19,7 @@ local Settings = require("utils.settings")
 local lfs = require("libs/libkoreader-lfs")
 require("book.books_db")
 local Catalog = require("features.marketplace.catalog")
+local Installed = require("features.marketplace.installed")
 local Migrate = require("features.marketplace.migrate")
 local Registry = require("source.registry")
 
@@ -120,6 +121,8 @@ DB.exec([[INSERT INTO books (source_id, stable_id, title, deleted, sync_status)
 source_cfg.active_source = "local"
 
 local dialogs = {}
+local toasts = {}
+local enqueued = {}
 local connected = false
 package.loaded["ui/network/manager"] = { isConnected = function() return connected end }
 package.loaded["ui.themes.widgets.confirm"] = {
@@ -128,17 +131,53 @@ package.loaded["ui.themes.widgets.confirm"] = {
         return { show = function() end }
     end,
 }
+package.loaded["ui.themes.widgets.toast"] = {
+    new = function(_self, opts)
+        toasts[#toasts + 1] = opts
+        return { show = function() end }
+    end,
+}
+package.loaded["workers.tasks"] = {
+    enqueue = function(spec)
+        enqueued[#enqueued + 1] = spec
+        return spec
+    end,
+}
 
 Migrate.offer({ plugin = { path = root } })
 Assert.eq(#dialogs, 0, "离线不弹")
+Assert.eq(#enqueued, 0, "离线不入队")
 Assert.is_nil(Settings.get("features.marketplace").source_install_skip)
 
 connected = true
 Migrate.offer({ plugin = { path = root } })
-Assert.eq(#dialogs, 1)
-Assert.eq(dialogs[1].title, "安装书源插件")
-dialogs[1].cancel_callback()
+Assert.eq(#dialogs, 0, "不再用确认框挡住安装")
+Assert.eq(#enqueued, 1)
+Assert.eq(enqueued[1].kind, "download")
+Assert.eq(enqueued[1].key, "plugin\0source-migrate")
+Assert.eq(enqueued[1].title, "安装书源插件")
+Assert.is_true(enqueued[1].cancellable)
+Assert.eq(toasts[1].text, "正在从插件市场安装：微信读书")
 Assert.is_true(Settings.get("features.marketplace").source_install_skip.weread)
+
+-- 本机记着 0.0.1，市场 release 已是 0.3.0：skip 不再挡住，还要再装。
+assert(lfs.mkdir(base .. "/moonsource-weread.koplugin"))
+Installed.remember({
+    uid = "gitea:git.garfieldho.me:moon-source/moonsource-weread",
+    type = "gitea", host = "https://git.garfieldho.me", owner = "moon-source", repo = "moonsource-weread",
+    title = "月读书源：微信读书",
+}, "moonsource-weread.koplugin", "0.0.1")
+Catalog.saveCache({ plugins = {
+    {
+        uid = "gitea:git.garfieldho.me:moon-source/moonsource-weread",
+        type = "gitea", host = "https://git.garfieldho.me", owner = "moon-source", repo = "moonsource-weread",
+        title = "月读书源：微信读书", version = "0.0.1", release_tag = "v0.3.0",
+        release_asset = "moonsource-weread.koplugin-0.3.0.zip",
+        release_url = "https://git.garfieldho.me/moon-source/moonsource-weread/releases/download/v0.3.0/moonsource-weread.koplugin-0.3.0.zip",
+    },
+} })
+pending = Migrate.pending(root)
+Assert.not_nil(find(pending, "moonsource-weread.koplugin"), "目录更新后已装的旧版本还要再装")
 
 source_cfg.active_source = previous_active
 source_cfg.enabled_sources = previous_enabled

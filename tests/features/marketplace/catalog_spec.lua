@@ -168,6 +168,10 @@ Assert.eq(Catalog.count(), 0)
 Assert.is_nil(Catalog.catalogVersion({ meta = function() end }))
 Assert.eq(Catalog.catalogVersion({ meta = function() end, release_tag = "v2.0.0" }), "2.0.0")
 Assert.eq(Catalog.catalogVersion({ meta = { version = "3.1" } }), "3.1")
+Assert.eq(Catalog.catalogVersion({ version = "0.0.1", release_tag = "v0.3.0" }), "0.3.0",
+    "release 比目录 version 新时以 release 为准")
+Assert.eq(Catalog.catalogVersion({ version = "3.1", release_tag = "v1.0.0" }), "3.1",
+    "更旧的 release tag 不把版本号拉回去")
 
 resetAll()
 return true
