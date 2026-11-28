@@ -200,7 +200,7 @@ end
 ---@param doc_settings table
 ---@param document table
 function Bars.injectStatusLine(doc_settings, document)
-    if not Device:isTouchDevice() or type(document.setStatusLineProp) ~= "function" then
+    if type(document.setStatusLineProp) ~= "function" then
         return
     end
     doc_settings:saveSetting("copt_status_line", Bars.topBarPreference() and not Layout.transparent("top") and 0 or 1)
@@ -222,12 +222,12 @@ function Bars.hookTopMargin(document)
     end
 end
 
---- 顶栏边距要预留的像素：只有月读接管顶栏时才占。
+--- 顶栏边距要预留的像素：只有月读接管顶栏时才占，等于 topRect 的整个高度（含额外高度），否则正文第一行压在栏下。
 ---@return number
 function Bars.topReserve()
     if Bars.topBarPreference() and Layout.replace("top") then
-        local native = Layout.transparent("top") and Layout.TRANSPARENT_TOP_HEIGHT or 0
-        return Screen:scaleBySize(Layout.topMargin() + native)
+        return Screen:scaleBySize(Layout.TRANSPARENT_TOP_HEIGHT)
+            + Screen:scaleBySize(Layout.topHeight() + Layout.topMargin())
     end
     return 0
 end
@@ -517,14 +517,10 @@ end
 --- 安装底栏模式保护；偏好等 ReaderReady 收尾后再应用，此时 ReaderRolling 才会响应重排。
 ---@param ui table
 function Bars.install(ui)
-    if ui._book_bars_installed or not Device:isTouchDevice() then
+    if ui._book_bars_installed then
         return
     end
     ui._book_bars_installed = true
-    hijackFooter(ui)
-    -- 首次排版前就用对高度：等 ReaderReady 后再改，页边距变化会让整本重排第二遍（第二根载入进度条）。
-    local footer = ui.view and ui.view.footer
-    if footer and footer.height then footer.height = bottomNeed(footer) end
     ui:registerPostReaderReadyCallback(Guard.wrap("bars preferences", function()
         Bars.applyPreferences(ui)
     end))
@@ -687,6 +683,12 @@ Bars.events = {
     NotCharging = onDeviceStateChanged,
     NetworkConnected = onDeviceStateChanged,
     NetworkDisconnected = onDeviceStateChanged,
+    --- 读设置、首次排版之前换上月读要的底栏高度：ReaderTypeset 按 footer:getHeight() 算正文底边距，
+    --- ReaderReady 时排版已完成，那时再改高度正文不会让位，底栏压在最后几行上。
+    DocSettingsLoad = function(plugin)
+        hijackFooter(plugin.ui)
+        plugin.ui.view.footer:updateFooterContainer()
+    end,
     --- 用户经原生入口（Aa 菜单）开关顶栏时回写偏好；0 = 显示。
     -- 替代系统顶栏时原生页眉恒关（status_line=1 是月读自己设的），不能当成用户关了顶栏。
     SetStatusLine = function(_plugin, status_line)

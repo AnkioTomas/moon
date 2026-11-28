@@ -240,6 +240,12 @@ local registered_touch_zone = false
 local post_ready = {}
 ui_top.registerTouchZones = function() registered_touch_zone = true end
 ui_top.registerPostReaderReadyCallback = function(_, cb) post_ready[#post_ready + 1] = cb end
+-- DocSettingsLoad 在 ReadSettings / 首次排版之前：ReaderTypeset 按 getHeight 算底边距，此时容器就得是双栏高度。
+bottom_content_h = 40
+Bars.events.DocSettingsLoad({ ui = ui_top })
+Assert.eq(footer.container_height, 40, "排版前容器已是双栏高度")
+bottom_content_h = 14
+footer:updateFooterContainer()
 Bars.install(ui_top)
 Assert.is_false(footer:TapFooter())
 -- 长按落在正文区（底栏矩形上方、仍在原生底部 1/13 hold 区）必须透传给选字；
@@ -471,3 +477,10 @@ do
     Assert.eq(got[2], 12)
     Assert.eq(got[4], 4)
 end
+
+-- 顶栏预留量 = 栏的整个绘制高度（页眉带 20 + 额外高度 12 + 边距 0），少一截正文第一行就压在栏下。
+Bars.setTopBarPreference(true)
+Assert.eq(Bars.topReserve(), 32)
+replace.top = false
+Assert.eq(Bars.topReserve(), 0, "不接管顶栏不占正文")
+replace.top = true
