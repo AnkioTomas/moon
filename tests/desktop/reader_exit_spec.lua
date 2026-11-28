@@ -24,11 +24,18 @@ package.preload["patch.manager"] = function()
     error("阅读菜单接管不应加载核心文件补丁管理器")
 end
 
-local next_tick
+local tick_queue = {}
+local function next_tick()
+    local fn = table.remove(tick_queue, 1)
+    if fn then fn() end
+end
+local function flush_ticks()
+    while #tick_queue > 0 do next_tick() end
+end
 package.preload["ui/uimanager"] = function()
     return {
         show = function() end,
-        nextTick = function(_, callback) next_tick = callback end,
+        nextTick = function(_, callback) tick_queue[#tick_queue + 1] = callback end,
     }
 end
 
@@ -108,15 +115,18 @@ Assert.eq(menu.closed, 1)
 Assert.eq(native_calls, 0, "开关开时不得走原生文件浏览器")
 Assert.eq(reader_closed, 0, "菜单关闭后不得在点击调用栈里同步关闭文档")
 Assert.eq(opened_desktop, 0)
-Assert.not_nil(next_tick)
+Assert.eq(#tick_queue, 1, "只安排关书这一拍")
 next_tick()
 Assert.eq(reader_closed, 1)
+Assert.eq(opened_desktop, 0, "关书同拍只保证 FM，不开桌面")
+Assert.eq(#tick_queue, 1, "再安排开桌面")
+next_tick()
 Assert.eq(opened_desktop, 1)
 
 -- 正式版形状下重复重建菜单：正式版不会重建已固化的 Tab，这里只断言同一张 Tab 不叠包。
 tab.callback()
 Assert.eq(menu.closed, 2)
-next_tick()
+flush_ticks()
 Assert.eq(reader_closed, 2)
 Assert.eq(opened_desktop, 2)
 
@@ -128,7 +138,7 @@ nightly:setUpdateItemTable()
 nightly:setUpdateItemTable()
 drawerTab(nightly).callback()
 Assert.eq(native_calls, 0)
-next_tick()
+flush_ticks()
 Assert.eq(nightly_closed, 1)
 Assert.eq(opened_desktop, 3)
 
@@ -153,10 +163,13 @@ Assert.eq(result, "native press")
 Assert.eq(returned_key, key, "原生多返回值透传")
 Assert.eq(ui:onKeyRepeat(key), "native repeat")
 back_on = true
+tick_queue = {}
 Assert.is_true(ui:onKeyPress(key))
-local scheduled = next_tick
+Assert.eq(#tick_queue, 1)
+local scheduled = tick_queue[1]
 Assert.is_true(ui:onKeyRepeat(key))
-Assert.eq(next_tick, scheduled, "按键重复不再次安排关书")
+Assert.eq(#tick_queue, 1, "按键重复不再次安排关书")
+Assert.eq(tick_queue[1], scheduled)
 link_selected = true
 Assert.eq(ui:onKeyPress(key), "native press", "链接选择仍交给原生处理")
 reader_on_top = false
@@ -164,6 +177,7 @@ Assert.is_false(ui:onKeyPress(key), "阅读器被弹窗盖住时不响应返回�
 
 settings_error = "injected reader setting failure"
 drawer_on = true
+tick_queue = {}
 for _idx, handler in ipairs({ "onKeyPress", "onKeyRepeat" }) do
     Assert.is_nil(ui[handler](ui, key), "注入回调错误不得外抛")
     Assert.eq(logged[#logged][2], "reader exit " .. handler)
@@ -176,5 +190,5 @@ Assert.is_nil(tab.callback(), "抽屉同步回调的错误也被隔离")
 Assert.eq(logged[#logged][2], "reader exit drawer")
 Assert.matches(Themed.last("text_viewer").text, settings_error)
 Assert.eq(menu.closed, closed_before)
-Assert.eq(next_tick, scheduled, "出错不安排关书")
+Assert.eq(#tick_queue, 0, "出错不安排关书")
 Themed.last("text_viewer"):close()

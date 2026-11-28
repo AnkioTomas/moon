@@ -37,7 +37,8 @@ function ReaderExit.attach(ui)
     end
 end
 
---- 下一 tick 关闭文档并回到月读桌面（点击调用栈里不能同步关文档）。
+--- 下一 tick 关文档并保证 FM 在栈上；再下一 tick 开桌面。
+--- 关书与 Desktop.open（整树 updateView）不能抢同一拍预算；FM 必须同拍就绪，否则空栈会退出。
 ---@param ui table|nil ReaderUI
 ---@param plugin table|nil 月读插件实例；关书后到 FM 上按同名取宿主
 function ReaderExit.closeToDesktop(ui, plugin)
@@ -57,8 +58,14 @@ function ReaderExit.closeToDesktop(ui, plugin)
         local fm = Desktop.ensureFileManager()
         Perf.slow("exit ensureFileManager", started_at)
         local host = Desktop.hostPlugin(fm, reader_plugin)
-        if host then Desktop.open(host) end
-        Perf.slow("exit total", started_at)
+        if not host then
+            Perf.slow("exit total", started_at)
+            return
+        end
+        UIManager:nextTick(Guard.wrap("desktop after reader exit", function()
+            Desktop.open(host)
+            Perf.slow("exit total", started_at)
+        end))
     end))
 end
 
