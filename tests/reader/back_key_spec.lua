@@ -72,16 +72,22 @@ reader:handleEvent(back)
 Assert.eq(closed, 0, "正文内部选区模块优先处理按键")
 reader[1] = nil
 
-local pending
-UIManager.nextTick = function(_self, callback) pending = callback end
+local tick_queue = {}
+UIManager.nextTick = function(_self, callback) tick_queue[#tick_queue + 1] = callback end
 Assert.is_true(reader:handleEvent(Event:new("KeyRepeat", key("Back"))))
-Assert.is_nil(pending, "长按重复不触发关书")
+Assert.eq(#tick_queue, 0, "长按重复不触发关书")
 Assert.is_true(reader:handleEvent(back))
 Assert.eq(closed, 0, "不能在按键分发调用栈内关文档")
-Assert.not_nil(pending)
+Assert.eq(#tick_queue, 1)
 reader:handleEvent(Event:new("KeyRepeat", key("Back")))
-pending()
+Assert.eq(#tick_queue, 1, "按键重复不再次安排关书")
+tick_queue[1]()
+table.remove(tick_queue, 1)
 Assert.eq(closed, 1)
+Assert.eq(opened, 0, "关书同拍只保证 FM，不开桌面")
+Assert.eq(#tick_queue, 1, "再安排开桌面")
+tick_queue[1]()
+table.remove(tick_queue, 1)
 Assert.eq(opened, 1)
 conf.back_to_desktop = false
 reader:handleEvent(back)

@@ -25,6 +25,7 @@ return {
     ["书籍 %1 条"] = "%1 book records",
     ["阅读 %1 条"] = "%1 reading records",
     ["约 %1 条，%2。%3"] = "About %1 records, %2. %3",
+    ["%1 B"] = "%1 B",
     ["没有可清理的数据"] = "Nothing to clean up",
     ["选择书源，清理本机书籍或阅读记录"] = "Choose a source and clear local book or reading records",
     ["书籍本地记录"] = "Local book records",
